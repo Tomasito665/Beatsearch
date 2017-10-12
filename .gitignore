@@ -1,0 +1,9 @@
+# Jetbrains IDEs
+.idea/
+*.iws
+.idea_modules/
+
+# Python generated stuff
+__pycache__/
+*.py[cod]
+*$py.class
