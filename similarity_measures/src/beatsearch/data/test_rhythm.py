@@ -27,7 +27,8 @@ class TestRhythm(unittest.TestCase):
             data=copy.deepcopy(TestRhythm.onset_data),
             data_ppq=TestRhythm.ppq,
             duration=TestRhythm.duration,
-            midi_file_path=TestRhythm.midi_file_path
+            midi_file_path=TestRhythm.midi_file_path,
+            ceil_duration_to_measure=False
         )
         self.to_midi_result = self.rhythm.to_midi(TestRhythm.to_midi_note_duration)
 
@@ -152,15 +153,29 @@ class TestRhythm(unittest.TestCase):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_binary = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary = rhythm.get_track(60).get_binary()
+        actual_binary = rhythm.get_track(60).get_binary('ticks')
         self.assertEqual(actual_binary, expected_binary)
 
     def test_track_binary_with_down_scale_resolution_and_not_quantized_input_data(self):
         onset_data = {60: ((7, 127), (176, 127), (421, 127), (611, 127), (713, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 240, 960)
         expected_binary = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary = rhythm.get_track(60).get_binary(4)  # quantized to sixteenths
+        actual_binary = rhythm.get_track(60).get_binary('sixteenths')
         self.assertEqual(actual_binary, expected_binary)
+
+    def test_binary_schillinger_chain_is_correct(self):
+        onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        expected_schillinger_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
+        actual_schillinger_chain = rhythm.get_track(60).get_binary_schillinger_chain('ticks')
+        self.assertEqual(actual_schillinger_chain, expected_schillinger_chain)
+
+    def test_chronotonic_chain_is_correct(self):
+        onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        expected_chronotonic_chain = [3, 3, 3, 4, 4, 4, 4, 3, 3, 3, 2, 2, 4, 4, 4, 4]
+        actual_chronotonic_chain = rhythm.get_track(60).get_chronotonic_chain()
+        self.assertEqual(actual_chronotonic_chain, expected_chronotonic_chain)
 
 if __name__ == '__main__':
     unittest.main()
