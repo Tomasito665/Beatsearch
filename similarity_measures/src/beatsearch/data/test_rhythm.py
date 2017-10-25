@@ -45,10 +45,10 @@ class TestRhythm(unittest.TestCase):
         self.assertEqual(self.rhythm.time_signature, TestRhythm.time_signature)
 
     def test_ppq_property_equals_ppq_given_to_constructor(self):
-        self.assertEqual(self.rhythm.ppq, TestRhythm.ppq)
+        self.assertEqual(self.rhythm.get_resolution(), TestRhythm.ppq)
 
     def test_duration_property_equals_duration_given_to_constructor(self):
-        self.assertEqual(self.rhythm.duration, TestRhythm.duration)
+        self.assertEqual(self.rhythm.get_duration(), TestRhythm.duration)
 
     def test_one_track_is_created_per_onset_pitch(self):
         data = {
@@ -76,19 +76,19 @@ class TestRhythm(unittest.TestCase):
         assert self.ppq == 240
         assert self.duration == 2160
 
-        self.rhythm.ppq = 960
-        self.assertEqual(self.rhythm.duration, 8640)
+        self.rhythm.set_resolution(960)
+        self.assertEqual(self.rhythm.get_duration(), 8640)
 
     def test_duration_rescales_correctly_when_resolution_downscale(self):
         assert self.ppq == 240
         assert self.duration == 2160
 
-        self.rhythm.ppq = 22
-        self.assertEqual(self.rhythm.duration, 198)
+        self.rhythm.set_resolution(22)
+        self.assertEqual(self.rhythm.get_duration(), 198)
 
     def test_track_onsets_rescale_correctly_when_resolution_upscale(self):
         assert self.ppq == 240  # expected onsets computed assuming an original resolution of 240 ppq
-        self.rhythm.ppq = 960  # rescale time resolution to 960 ppq
+        self.rhythm.set_resolution(960)  # rescale time resolution to 960 ppq
 
         # expected onset data when rescaling from 240 ppq to 960 ppq
         expected_onset_data = {
@@ -107,7 +107,7 @@ class TestRhythm(unittest.TestCase):
 
     def test_track_onsets_rescale_correctly_when_resolution_downscale(self):
         assert self.ppq == 240  # expected onsets computed assuming an original resolution of 240 ppq
-        self.rhythm.ppq = 22  # rescale time resolution to 22 ppq
+        self.rhythm.set_resolution(22)  # rescale time resolution to 22 ppq
 
         # expected onset data when rescaling from 240 ppq to 22 ppq
         expected_onset_data = {

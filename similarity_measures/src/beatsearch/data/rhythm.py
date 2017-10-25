@@ -1,5 +1,7 @@
+import inspect
 import os
 import itertools
+from functools import wraps
 import midi
 import math
 
@@ -66,6 +68,64 @@ def convert_time(time, unit_from, unit_to, quantize=False):
     return int(round(converted_time)) if quantize else converted_time
 
 
+def concretize_unit(f_get_res=lambda *args, **kwargs: args[0].get_resolution()):
+    """
+    This function returns a decorator which converts the "unit" argument of a function to a resolution in PPQ.
+
+    :param f_get_res: callable that should return the resolution. The result of this function will be replaced for
+                      "unit" arguments with a value of 'ticks'. This callable is passed the *args and **kwargs of the
+                      function being decorated.
+    :return: a decorator function
+    """
+
+    def concretize_unit_decorator(func):
+        arg_spec = inspect.getargspec(func)
+
+        try:
+            unit_arg_index = arg_spec.args.index("unit")
+            n_args_before_default_args = len(arg_spec.args) - len(arg_spec.defaults)
+            default_unit = arg_spec.defaults[unit_arg_index - n_args_before_default_args]
+        except ValueError:
+            unit_arg_index = -1
+            if not arg_spec.keywords:
+                raise ValueError("Function %s doesn't have a 'unit' argument, "
+                                 "neither does it accept **kwargs" % func.__name__)
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Retrieve the unit or get the default unit if not given
+            try:
+                unit = kwargs["unit"]
+                unit_in_kwargs = True
+            except KeyError:
+                try:
+                    unit = args[unit_arg_index]
+                except IndexError:
+                    try:
+                        unit = default_unit
+                    except NameError:
+                        raise ValueError("Required named 'unit' argument not found")
+                unit_in_kwargs = False
+
+            # Concretize the unit to the rhythm's resolution for tick unit
+            if unit == 'ticks':
+                unit = f_get_res(*args, **kwargs)
+
+            # Replace unit by concretized unit
+            if unit_in_kwargs:
+                kwargs["unit"] = unit
+            else:
+                try:
+                    args = list(args)
+                    args[unit_arg_index] = unit
+                except IndexError:
+                    kwargs["unit"] = unit
+
+            return func(*args, **kwargs)
+        return wrapper
+    return concretize_unit_decorator
+
+
 class TimeSignature(object):
     """
     This class represents a musical time signature, consisting of a numerator and a denominator.
@@ -75,6 +135,13 @@ class TimeSignature(object):
         self._numerator = numerator
         self._denominator = denominator
 
+        if denominator == 4:
+            self._beat_unit = Unit.QUARTER
+        elif denominator == 8:
+            self._beat_unit = Unit.EIGHTH
+        else:
+            raise ValueError("Unknown denominator: %s" % str(denominator))
+
     @property
     def numerator(self):
         return self._numerator
@@ -82,6 +149,9 @@ class TimeSignature(object):
     @property
     def denominator(self):
         return self._denominator
+
+    def get_beat_unit(self):
+        return self._beat_unit
 
     def to_midi_event(self):
         return midi.TimeSignatureEvent(
@@ -120,12 +190,12 @@ class Rhythm(object):
         :param bpm:                Beats per minute; tempo of the rhythm
         :param time_signature:     Time signature of the rhythm
         :param data:               The onset data; dictionary holding onsets by MIDI key where each onset is an
-                                    (absolute tick, velocity) tuple
+                                   (absolute tick, velocity) tuple
         :param data_ppq:           Resolution of the onset data and the length in PPQ (pulses per quarter note)
         :param duration:           The duration of the rhythm in ticks. When given None, the duration will be set to
                                    first downbeat after the last note in the rhythm.
-        :param rescale_to_ppq:     Resolution to rescale the onset data (and the length) to in pulses per quarter note or None
-                                    for no rescaling
+        :param rescale_to_ppq:     Resolution to rescale the onset data (and the length) to in pulses per quarter note or
+                                   None for no rescaling
         :param midi_file_path:     The path to the midi file or an empty string if this rhythm is not
                                     attached to a MIDI file
         """
@@ -145,18 +215,20 @@ class Rhythm(object):
         for pitch, onsets in data.iteritems():
             self._tracks[pitch] = Rhythm.Track(onsets, self)
 
+        # default the duration to the timestamp of the last note
         if duration is None:
             duration = self._get_last_onset_tick()
 
         if ceil_duration_to_measure:
-            n_measures = int(math.ceil(convert_time(duration, self.ppq, 'fulls')))
-            duration = n_measures * 4.0 * self.ppq
+            measure_duration = self.get_measure_duration('ticks')
+            n_measures = duration / measure_duration
+            # round up the duration to the nearest musical measure
+            duration = int(math.ceil(n_measures * measure_duration))
 
-        # set duration by property setter to raise exception on invalid duration
-        self.duration = duration
+        self.set_duration(duration)
 
         if rescale_to_ppq is not None:
-            self.ppq = rescale_to_ppq
+            self.set_resolution(rescale_to_ppq)
 
     class Track(object):
         """
@@ -177,7 +249,7 @@ class Rhythm(object):
         @property
         def rhythm(self):
             """
-            The rhythm object whch this track belongs to.
+            The rhythm object which this track belongs to.
             """
 
             return self._rhythm
@@ -195,6 +267,7 @@ class Rhythm(object):
 
             return self._data
 
+        @concretize_unit()
         def get_binary(self, unit='eighths'):
             """
             Returns the binary representation of the note onsets of this track where each step where a note onset
@@ -205,14 +278,13 @@ class Rhythm(object):
             :return: the binary representation of the note onsets of the given pitch
             """
 
-            res = self.rhythm.ppq
-            unit = res if unit == 'ticks' else unit
-            duration_in_units = convert_time(self.rhythm.duration, res, unit)
-            binary_string = [0] * int(math.ceil(duration_in_units))
+            resolution = self.get_resolution()
+            duration = self.rhythm.get_duration(unit)
+            binary_string = [0] * int(math.ceil(duration))
 
             for onset in self._data:
                 tick = onset[0]
-                pulse = convert_time(tick, res, unit, quantize=True)
+                pulse = convert_time(tick, resolution, unit, quantize=True)
                 try:
                     binary_string[pulse] = 1
                 except IndexError:
@@ -220,6 +292,7 @@ class Rhythm(object):
 
             return binary_string
 
+        @concretize_unit()
         def get_pre_note_inter_onset_intervals(self, unit='ticks'):
             """
             Returns the time difference between the current note and the previous note for all notes of this track in
@@ -232,18 +305,19 @@ class Rhythm(object):
             :return: pre note inter-onset interval vector
             """
 
-            unit = self.rhythm.ppq if unit == 'ticks' else unit
+            resolution = self.get_resolution()
             current_tick = 0
             intervals = []
 
             for onset in self._data:
                 onset_tick = onset[0]
                 delta_tick = onset_tick - current_tick
-                intervals.append(convert_time(delta_tick, self.rhythm.ppq, unit))
+                intervals.append(convert_time(delta_tick, resolution, unit))
                 current_tick = onset_tick
 
             return intervals
 
+        @concretize_unit()
         def get_post_note_inter_onset_intervals(self, unit='ticks', quantize=False):
             """
             Returns the time difference between the current note and the next note for all notes in this rhythm track
@@ -256,9 +330,8 @@ class Rhythm(object):
             :return: post note inter-onset interval vector
             """
 
-            unit = self.rhythm.ppq if unit == 'ticks' else unit
             intervals = []
-            onset_ticks = [onset[0] for onset in self._data] + [self.rhythm.duration]
+            onset_ticks = [onset[0] for onset in self._data] + [self.rhythm.get_duration()]
             last_onset_tick = -1
 
             for onset_tick in onset_ticks:
@@ -267,7 +340,7 @@ class Rhythm(object):
                     continue
 
                 delta_in_ticks = onset_tick - last_onset_tick
-                delta_in_units = convert_time(delta_in_ticks, self.rhythm.ppq, unit, quantize=quantize)
+                delta_in_units = convert_time(delta_in_ticks, self.get_resolution(), unit, quantize=quantize)
 
                 intervals.append(delta_in_units)
                 last_onset_tick = onset_tick
@@ -275,6 +348,19 @@ class Rhythm(object):
             return intervals
 
         def get_binary_schillinger_chain(self, unit='ticks', values=(0, 1)):
+            """
+            Returns the Schillinger notation of this rhythm track where each onset is a change of a "binary note".
+
+            For example, given the Rumba Clave rhythm and with values (0, 1):
+              X--X---X--X-X---
+              0001111000110000
+
+            :param unit: the unit to quantize on ('ticks' is no quantization)
+            :param values: binary vector to be used in the schillinger chain. E.g. when given ('a', 'b'), the returned
+                           schillinger chain will consist of 'a' and 'b'.
+            :return: Schillinger rhythm vector as a list
+            """
+
             chain, i = self.get_binary(unit), 0
             value_i = 0
             while i < len(chain):
@@ -285,6 +371,17 @@ class Rhythm(object):
             return chain
 
         def get_chronotonic_chain(self, unit='ticks'):
+            """
+            Returns the chronotonic chain representation of this rhythm track.
+
+            For example, given the Rumba Clave rhythm:
+              X--X---X--X-X---
+              3334444333224444
+
+            :param unit: unit
+            :return: the chronotonic chain as a list
+            """
+
             chain, i, delta = self.get_binary(unit), 0, 0
             while i < len(chain):
                 if chain[i] == 1:
@@ -297,13 +394,31 @@ class Rhythm(object):
                 pass
             return chain
 
+        @concretize_unit()
         def get_onset_times(self, unit='ticks', quantize=False):
-            if unit == 'ticks':
-                unit = self.rhythm.ppq
-            return map(lambda onset: convert_time(onset[0], self.rhythm.ppq, unit, quantize), self.onsets)
+            """
+            Returns the onset times in the given unit.
 
-        def __set_resolution__(self, new_resolution):  # used by Rhythm.ppq setter
-            old_resolution = self.rhythm.ppq
+            :param unit: the unit of the onset times
+            :param quantize: whether or not the onset times must be quantized to the given unit
+            :return: a list with the onset times of this rhythm track
+            """
+
+            return map(lambda onset: convert_time(onset[0], self.get_resolution(), unit, quantize), self.onsets)
+
+        def get_resolution(self):
+            """
+            Returns the resolution of this rhythm in PPQ (pulses per quarter note).
+
+            :return: the resolution in PPQ
+            """
+
+            return self.rhythm.get_resolution()
+
+        # used internally by rhythm.set_resolution to rescale
+        # the onsets to a new resolution
+        def __set_resolution__(self, new_resolution):
+            old_resolution = self.get_resolution()
 
             def scale_onset(onset):
                 tick, velocity = onset
@@ -341,47 +456,90 @@ class Rhythm(object):
 
         return self._time_signature
 
-    @property
-    def ppq(self):
+    def get_resolution(self):
         """
-        The time resolution in pulses per quarter note.
+        Returns the resolution of this rhythm in PPQ (pulses per quarter note).
+
+        :return: resolution in PPQ
         """
 
         return self._ppq
 
-    @ppq.setter
-    def ppq(self, new_ppq):
-        if new_ppq <= 0:
-            raise ValueError("Expected a number greater than zero but got %s" % str(new_ppq))
+    def set_resolution(self, ppq):
+        """
+        Rescales this rhythm to the given resolution in PPQ (pulses per quarter note).
 
-        new_ppq = int(new_ppq)
+        :param ppq: resolution to rescale this rhythm to in PPQ
+        """
+
+        if ppq <= 0:
+            raise ValueError("Expected a number greater than zero but got %s" % str(ppq))
+
+        ppq = int(ppq)
         old_ppq = self._ppq
 
-        if old_ppq == new_ppq:
+        if old_ppq == ppq:
             return
 
         for track in self._tracks.values():
-            track.__set_resolution__(new_ppq)
+            track.__set_resolution__(ppq)
 
-        self._duration = convert_time(self._duration, old_ppq, new_ppq, quantize=True)
-        self._ppq = new_ppq
+        self._duration = convert_time(self._duration, old_ppq, ppq, quantize=True)
+        self._ppq = ppq
 
-    @property
-    def duration(self):
+    @concretize_unit()
+    def get_duration(self, unit='ticks'):
         """
-        The duration of the rhythm in ticks (see ppq).
+        Returns the duration of the rhythm in the given time unit.
+
+        :param unit: the unit of the returned duration
+        :return: the duration in the given time unit
         """
 
-        return self._duration
+        return convert_time(self._duration, self._ppq, unit)
 
-    @duration.setter
-    def duration(self, duration):
-        last_onset = self._get_last_onset_tick()
+    @concretize_unit()
+    def set_duration(self, duration, unit='ticks'):
+        """
+        Sets the duration of the rhythm in the given time unit.
 
-        if duration < last_onset:
-            raise ValueError("Expected a duration of at least %i but got %i" % (last_onset, duration))
+        :param duration: new duration of the rhythm
+        :param unit: unit of the given duration
+        """
 
-        self._duration = duration
+        duration_in_ticks = convert_time(duration, unit, self._ppq)
+        last_onset_tick = self._get_last_onset_tick()
+
+        if duration_in_ticks < last_onset_tick:
+            last_onset_in_given_unit = self._get_last_onset_tick(unit)
+            raise ValueError("Expected a duration of at least %s but got %s" % (last_onset_in_given_unit, duration))
+
+        self._duration = duration_in_ticks
+
+    @concretize_unit()
+    def get_beat_duration(self, unit='ticks'):
+        """
+        Returns the duration of one musical beat, based on the time signature.
+
+        :param unit: unit of the returned duration
+        :return: the duration of one beat in the given unit
+        """
+
+        beat_unit = self.time_signature.get_beat_unit()
+        return convert_time(1.0, beat_unit, unit)
+
+    @concretize_unit()
+    def get_measure_duration(self, unit='ticks'):
+        """
+        Returns the duration of one musical measure, based on the time signature.
+
+        :param unit: unit of the returned duration
+        :return: the duration of one measure in the given unit
+        """
+
+        numerator = self.time_signature.numerator
+        beat_unit = self.time_signature.get_beat_unit()
+        return convert_time(numerator, beat_unit, unit)
 
     def get_track(self, pitch):
         """
@@ -448,13 +606,15 @@ class Rhythm(object):
         return midi.Pattern([midi_track])
 
     @staticmethod
-    def create_from_midi(pattern, path=None, resolution=240):
+    def create_from_midi(pattern, path=None, resolution=240, end_on_eot_event=False):
         """
         Constructs a new rhythm from a MIDI file.
 
         :param pattern: midi pattern
         :param path: midi source file or None
         :param resolution: resolution to the rescale the rhythm to in pulses per quarter note
+        :param end_on_eot_event: when true, the duration of the rhythms is set according to the last EOT (End Of Track)
+                                 MIDI event, otherwise it is set based on the last note.
         :return: Rhythm object
         """
 
@@ -506,13 +666,17 @@ class Rhythm(object):
         except ValueError:
             raise ValueError("No time signature MIDI event")
 
+        if not end_on_eot_event:
+            args.pop('duration', 0)
+
         return Rhythm(**args)
 
-    def _get_last_onset_tick(self):
+    @concretize_unit()
+    def _get_last_onset_tick(self, unit='ticks'):
         last_onset_tick = 0
         for onsets in map(lambda track: track.onsets, self._tracks.values()):
             last_onset_tick = max(onsets[-1][0], last_onset_tick)
-        return last_onset_tick
+        return convert_time(last_onset_tick, self._ppq, unit)
 
     def __getstate__(self):
         state = self.__dict__.copy()
