@@ -2,152 +2,184 @@ import math
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import numpy as np
-from beatsearch.data.rhythm import concretize_unit
-from beatsearch.data.rhythm import Unit
+from beatsearch.data.rhythm import concretize_unit, Unit, Rhythm
+from beatsearch.utils import merge_dicts
 from itertools import cycle
 
 # make room for the labels
 from matplotlib import rcParams
-
-from beatsearch.utils import merge_dicts
-
 rcParams.update({'figure.autolayout': True})
 
 
-# plot method decorator
-def plot(plot_type, subplot_layout='combined', share_axis=None, **decorator_kwargs):
-    plot_colors = ['#b71c1c', '#4A148C', '#1A237E', '#01579B', '#004D40', '#33691E', '#F57F17', '#E65100', '#3E2723']
+# noinspection PyPep8Naming
+class plot(object):
+    """
+    Decorator for RhythmPlotter plotting methods.
+    """
 
-    share_axis_arg_options = {
-        None: (False, False),
-        'both': (True, True),
-        'x': (True, False),
-        'y': (False, True)
-    }
+    colors = ['#b71c1c', '#4A148C', '#1A237E', '#01579B', '#004D40', '#33691E', '#F57F17', '#E65100', '#3E2723']
 
-    try:
-        share_x, share_y = share_axis_arg_options[share_axis]  # parse share_axis argument
-    except KeyError:
-        raise ValueError("Unknown axis '%s', choose between %s" % (share_axis, share_axis_arg_options.keys()))
+    def __init__(self, title, subplot_layout='combined', share_axis=None, *args, **kwargs):
+        self._title = title
+        self._subplot_layout = subplot_layout
+        self._share_x, self._share_y = plot.parse_axis_arg_str(share_axis)
+        self._named_decorator_args = kwargs
+        self._f_fill_subplot = None
+        self._f_setup_subplot = None
+        self._rhythm_plotter = None
 
-    # helper function to add a subplot and setup the
-    # axes with the given setup function
-    def add_axes(figure, f_setup, f_setup_kwargs=None, *args, **kwargs):
+    class Descriptor(object):
+        """
+        This class provides the 'plot' decorator of a handle to the RhythmPlotter instance and it enables sets the
+        function pointer to the subplot setup function for methods decorated with @foo.setup. This enables the following
+        synax:
+
+            @plot()
+            def polygon(axes):
+                ...
+
+            @polygon.setup(axes):
+                ...
+        """
+
+        def __init__(self, obj_decorator):
+            self.obj_decorator = obj_decorator
+
+        def setup(self, f_setup_subplot):
+            self.obj_decorator._f_setup_subplot = f_setup_subplot
+            return self
+
+        def __get__(self, obj, obj_type):
+            if obj_type != RhythmPlotter:
+                raise ValueError("Expected a RhythmPlotter object but got a '%s'" % str(obj))
+            self.obj_decorator._rhythm_plotter = obj
+            return self.obj_decorator.create_plot_figure
+
+    def __call__(self, f_fill_subplot, *args, **kwargs):
+        self._f_fill_subplot = f_fill_subplot
+        return plot.Descriptor(obj_decorator=self)
+
+    def create_plot_figure(self, rhythm, *args, **kwargs):
+        if not isinstance(rhythm, Rhythm):
+            raise ValueError("Expected a Rhythm instance but got '%s' instead" % rhythm)
+
+        # the figure to add the subplot(s) to
+        figure = plt.figure("%s - %s" % (self._title, rhythm.name))
+
+        rhythm_plotter = self._rhythm_plotter
+        concrete_unit = to_concrete_unit(rhythm_plotter.unit, rhythm)
+
+        # the setup method will also receive the args given to the decorator
+        setup_args = merge_dicts(self._named_decorator_args, {
+            'self': rhythm_plotter,
+            'concrete_unit': concrete_unit,
+            'n_pulses': int(math.ceil(rhythm.get_duration(concrete_unit))),
+            'n_tracks': rhythm.track_count()
+        })
+
+        # this iterator will return both an axes object and a setup result object at each iteration
+        subplots = self._get_subplot_iterator(figure, setup_args)
+
+        # this iterator will cycle through the plot colors
+        color_pool = cycle(plot.colors)
+
+        # decorated function
+        fill_subplot = self._f_fill_subplot
+
+        # keep track of track names and plot handles for legend
+        track_names = []
+        plot_handles = []
+
+        track_i = 0
+        for track_name, track in rhythm.track_iter():
+            axes, axes_setup_result = subplots.next()
+
+            handle = fill_subplot(
+                track=track,
+                axes=axes,
+                track_i=track_i,
+                color=color_pool.next(),
+                setup_result=axes_setup_result,
+                *args, **merge_dicts(kwargs, setup_args)
+            )[0]
+
+            axes.set_xlabel(rhythm_plotter.unit)
+            track_names.append(track_name)
+            plot_handles.append(handle)
+            track_i += 1
+
+        figure.legend(plot_handles, track_names, loc="center right")
+        plt.draw()
+        return figure
+
+    def _get_subplot_iterator(self, figure, setup_args):
+        layout = self._subplot_layout
+
+        if layout == 'combined':
+            subplot_iterator_creator = self._combined_subplot_iterator
+        elif layout == 'v_stack':
+            subplot_iterator_creator = self._create_stacked_subplot_iterator(direction='vertical')
+        elif layout == 'h_stack':
+            subplot_iterator_creator = self._create_stacked_subplot_iterator(direction='horizontal')
+        else:
+            raise ValueError("Unknown subplot layout: '%s'" % layout)
+
+        return subplot_iterator_creator(figure, setup_args)
+
+    def _add_and_setup_subplot(self, figure, setup_args, *args, **kwargs):
         axes = figure.add_subplot(*args, **kwargs)
-        if f_setup_kwargs is None:
-            f_setup_kwargs = {}
+        f_setup = self._f_setup_subplot
         if callable(f_setup):
-            setup_result = f_setup(axes=axes, **f_setup_kwargs)
+            setup_result = f_setup(axes=axes, **setup_args)
         else:
             setup_result = None
         return axes, setup_result
 
-    def get_axes_combined_iterator(figure, f_setup, f_setup_kwargs=None, *_, **__):
-        axes, setup_result = add_axes(figure, f_setup, f_setup_kwargs, 111)
+    def _combined_subplot_iterator(self, figure, setup_args):
+        res = self._add_and_setup_subplot(figure, setup_args, 111)
         while True:
-            yield (axes, setup_result)
+            yield res
 
-    def create_get_stacked_axes_iterator(direction='horizontal'):
-        def get_stacked_axes_iterator(figure, f_setup, f_setup_kwargs=None, *_, **kwargs):
-            n_tracks = kwargs['n_tracks']
+    def _create_stacked_subplot_iterator(self, direction='horizontal'):
+        subplot_args_by_direction = {
+            'horizontal': lambda n_tracks, track_i: [1, n_tracks, track_i + 1],
+            'vertical': lambda n_tracks, track_i: [n_tracks, 1, track_i + 1]
+        }
+
+        if direction not in subplot_args_by_direction:
+            raise ValueError("Unknown direction: '%s'" % direction)
+
+        def get_stacked_axes_iterator(figure, setup_args):
+            n_tracks = setup_args['n_tracks']
             track_i = 0
             prev_subplot = None
 
             while track_i < n_tracks:
-
-                # NOTE: This will break as soon as the argument list (or order) of add_axes changes
-                add_axes_args = [figure, f_setup, f_setup_kwargs]
-
-                if direction == 'horizontal':
-                    add_axes_args.extend([1, n_tracks, track_i + 1])
-                elif direction == 'vertical':
-                    add_axes_args.extend([n_tracks, 1, track_i + 1])
-                else:
-                    raise ValueError("Unknown direction: %s" % direction)
-
-                add_axes_kwargs = {
-                    'sharex': prev_subplot if share_x else None,
-                    'sharey': prev_subplot if share_y else None
+                args = [figure, setup_args] + subplot_args_by_direction[direction](n_tracks, track_i)
+                kwargs = {
+                    'sharex': prev_subplot if self._share_x else None,
+                    'sharey': prev_subplot if self._share_y else None
                 }
-
-                add_axes_result = add_axes(*add_axes_args, **add_axes_kwargs)
-                yield add_axes_result
-
-                prev_subplot = add_axes_result[0]
+                res = self._add_and_setup_subplot(*args, **kwargs)
+                yield res
+                prev_subplot = res[0]
                 track_i += 1
 
         return get_stacked_axes_iterator
 
-    get_axes = {
-        'combined': get_axes_combined_iterator,
-        'v_stack': create_get_stacked_axes_iterator(direction='vertical'),
-        'h_stack': create_get_stacked_axes_iterator(direction='horizontal')
-    }
+    @staticmethod
+    def parse_axis_arg_str(axis_arg_str):
+        axis_arg_options = {
+            None: (False, False),
+            'both': (False, False),
+            'x': (True, False),
+            'y': (False, True)
+        }
 
-    class PlotDescriptor(object):
-
-        def __init__(self, f_plot=None, f_setup=None):
-            self.f_plot = f_plot
-            self.f_setup = f_setup
-
-        def __get__(self, plotter, _=None):
-
-            def wrapper(rhythm, *args, **kwargs):
-                title = "%s - %s" % (plot_type, rhythm.name)
-                figure = plt.figure(title)
-                concrete_unit = to_concrete_unit(plotter.unit, rhythm)
-
-                color_pool = cycle(plot_colors)
-                n_tracks = rhythm.track_count()
-                track_i = 0
-
-                setup_kwargs = merge_dicts(decorator_kwargs, {
-                    'self': plotter,
-                    'concrete_unit': concrete_unit,
-                    'n_pulses': int(math.ceil(rhythm.get_duration(concrete_unit)))
-                })
-
-                try:
-                    axes_it = get_axes[subplot_layout](figure, self.f_setup,
-                                                       f_setup_kwargs=setup_kwargs, n_tracks=n_tracks)
-                except KeyError:
-                    raise ValueError("Unknown subplot layout: %s" % subplot_layout)
-
-                # keep track of track names and plot handles for legend
-                track_names = []
-                plot_handles = []
-
-                for track_name, track in rhythm.track_iter():
-                    axes, setup_result = axes_it.next()  # get axes for next subplot
-
-                    handle = self.f_plot(
-                        track=track,
-                        axes=axes,
-                        track_i=track_i,
-                        color=color_pool.next(),
-                        setup_result=setup_result,
-                        *args, **merge_dicts(kwargs, setup_kwargs)
-                    )[0]
-
-                    axes.set_xlabel(plotter.unit)
-                    track_names.append(track_name)
-                    plot_handles.append(handle)
-                    track_i += 1
-
-                figure.legend(plot_handles, track_names, loc="center right")
-                plt.draw()
-                return figure
-
-            wrapper.__name__ = self.f_plot.__name__
-            return wrapper
-
-        def plot(self, f_plot):
-            return type(self)(f_plot, self.f_setup)
-
-        def setup(self, f_setup):
-            return type(self)(self.f_plot, f_setup)
-
-    return PlotDescriptor
+        try:
+            return axis_arg_options[axis_arg_str]
+        except KeyError:
+            raise ValueError("Unknown axis '%s', choose between %s" % (axis_arg_str, axis_arg_options.keys()))
 
 
 class RhythmPlotter(object):
@@ -194,7 +226,7 @@ class RhythmPlotter(object):
         self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'])
         return axes.plot(chronotonic_chain, '--.', color=kwargs['color'])
 
-    @plot("Polygon notation", subplot_layout='combined', pulse_circle_ratio=0.05, pulse_circle_color='black', max_pulse_circle_count=16)
+    @plot("Polygon notation", subplot_layout='combined', max_pulse_circle_count=16)
     def polygon(self, track, quantize=False, **kwargs):
         axes = kwargs['axes']
         n_pulses = kwargs['n_pulses']
@@ -230,8 +262,9 @@ class RhythmPlotter(object):
         return axes.plot(coordinates_x, coordinates_y, '-o', color=kwargs['color'])
 
     @polygon.setup
-    def polygon(self, axes, **kwargs):
+    def polygon(self, **kwargs):
         # avoid stretching the aspect ratio
+        axes = kwargs['axes']
         axes.axis('equal')
         axes.axis([0, 1, 0, 1])
 
@@ -301,6 +334,12 @@ class RhythmPlotter(object):
 
         self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'], )
         return axes.bar(onset_times, inter_onsets, width=inter_onsets, align='edge', **styles)
+
+    @plot("Inter-onset interval histogram")
+    def inter_onset_interval_histogram(self, track, **kwargs):
+        axes = kwargs['axes']
+        occurrences, interval_durations = track.get_interval_histogram(kwargs['concrete_unit'])
+        return axes.bar(interval_durations, occurrences, color=kwargs['color'])
 
     @staticmethod
     @concretize_unit(lambda ax, rhythm, *args, **kw: rhythm)

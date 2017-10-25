@@ -11,7 +11,7 @@ class TestRhythm(unittest.TestCase):
         64: ((375, 95), (924, 120)),  # e
         67: ((624, 100), )            # g
     }
-    time_signature = TimeSignature(3, 4)
+    time_signature = TimeSignature(6, 8)
     rhythm_name = "The_Star-Spangled_Banner_beat"
     ppq = 240
     bpm = 180
@@ -38,16 +38,32 @@ class TestRhythm(unittest.TestCase):
     def test_name_property_equals_name_given_to_constructor(self):
         self.assertEqual(self.rhythm.name, TestRhythm.rhythm_name)
 
+    def test_name_property_is_writeable(self):
+        self.rhythm.name = "new_name"
+        self.assertEqual(self.rhythm.name, "new_name")
+
     def test_bpm_property_equals_bpm_given_to_constructor(self):
         self.assertEqual(self.rhythm.bpm, TestRhythm.bpm)
+
+    def test_bpm_property_is_writeable(self):
+        expected_bpm = 150
+        assert expected_bpm != self.bpm
+        self.rhythm.bpm = expected_bpm
+        self.assertEqual(self.rhythm.bpm, expected_bpm)
 
     def test_time_signature_property_equals_ts_given_to_constructor(self):
         self.assertEqual(self.rhythm.time_signature, TestRhythm.time_signature)
 
-    def test_ppq_property_equals_ppq_given_to_constructor(self):
+    def test_measure_duration_is_correct(self):
+        self.assertEqual(self.rhythm.get_measure_duration(), 720)
+
+    def test_beat_duration_is_correct(self):
+        self.assertEqual(self.rhythm.get_beat_duration(), 120)
+
+    def test_get_resolution_returns_resolution_given_to_constructor(self):
         self.assertEqual(self.rhythm.get_resolution(), TestRhythm.ppq)
 
-    def test_duration_property_equals_duration_given_to_constructor(self):
+    def test_get_duration_returns_duration_given_to_constructor(self):
         self.assertEqual(self.rhythm.get_duration(), TestRhythm.duration)
 
     def test_one_track_is_created_per_onset_pitch(self):
@@ -163,19 +179,45 @@ class TestRhythm(unittest.TestCase):
         actual_binary = rhythm.get_track(60).get_binary('sixteenths')
         self.assertEqual(actual_binary, expected_binary)
 
-    def test_binary_schillinger_chain_is_correct(self):
+    def test_track_binary_schillinger_chain_is_correct(self):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_schillinger_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
         actual_schillinger_chain = rhythm.get_track(60).get_binary_schillinger_chain('ticks')
         self.assertEqual(actual_schillinger_chain, expected_schillinger_chain)
 
-    def test_chronotonic_chain_is_correct(self):
+    def test_track_binary_schillinger_chain_only_consists_of_given_binary_values(self):
+        values = ('real_madrid', 'fc_barcelona')
+        schillinger_chain = self.rhythm.get_track(60).get_binary_schillinger_chain(values=values)
+        self.assertTrue(all(val == values[0] or val == values[1] for val in schillinger_chain))
+
+    def test_track_chronotonic_chain_is_correct(self):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_chronotonic_chain = [3, 3, 3, 4, 4, 4, 4, 3, 3, 3, 2, 2, 4, 4, 4, 4]
         actual_chronotonic_chain = rhythm.get_track(60).get_chronotonic_chain()
         self.assertEqual(actual_chronotonic_chain, expected_chronotonic_chain)
+
+    def test_track_onset_times_are_correct(self):
+        onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        expected_onset_times = [0, 3, 7, 10, 12]
+        actual_onset_times = rhythm.get_track(60).get_onset_times('ticks')
+        self.assertEqual(actual_onset_times, expected_onset_times)
+
+    def test_track_interval_histogram_is_correct(self):
+        onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        expected_histogram = (
+            [1, 2, 2],
+            [2, 3, 4]
+        )
+        actual_histogram = rhythm.get_track(60).get_interval_histogram('ticks')
+        self.assertEqual(actual_histogram[0], expected_histogram[0])
+        self.assertEqual(actual_histogram[1], expected_histogram[1])
+
+    def test_track_get_resolution_returns_same_as_rhythm_get_resolution(self):
+        self.assertEqual(self.rhythm.get_track(60).get_resolution(), self.rhythm.get_resolution())
 
 if __name__ == '__main__':
     unittest.main()

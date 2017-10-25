@@ -30,7 +30,8 @@ if __name__ == '__main__':
     unit_names = {
         Unit.QUARTER: '04',
         Unit.EIGHTH: '08',
-        Unit.SIXTEENTH: '16'
+        Unit.SIXTEENTH: '16',
+        Unit.THIRTYSECOND: '32'
     }
 
     i = 0
@@ -42,13 +43,13 @@ if __name__ == '__main__':
 
         log_replace("Rendering notations %ith of %i rhythms... %s" % (i + 1, len(corpus), spinner.next()))
 
-        plot.unit = Unit.SIXTEENTH
+        plot.unit = Unit.THIRTYSECOND
 
         plot_and_save(plot.tedas(rh, quantize=False), 'tedas_without_quantize', d)
         plot_and_save(plot.polygon(rh, quantize=False), 'polygon_without_quantize', d)
         plot_and_save(plot.spectral(rh, quantize=False), 'spectral_without_quantize', d)
 
-        for unit in [Unit.QUARTER, Unit.EIGHTH, Unit.SIXTEENTH]:
+        for unit in [Unit.QUARTER, Unit.EIGHTH, Unit.SIXTEENTH, Unit.THIRTYSECOND]:
             plot.unit = unit
             unit_name = unit_names[unit]
             plot_and_save(plot.tedas(rh, quantize=True), 'tedas_quantized_%s' % unit_name, d)
@@ -56,5 +57,6 @@ if __name__ == '__main__':
             plot_and_save(plot.spectral(rh, quantize=True), 'spectral_quantized_%s' % unit_name, d)
             plot_and_save(plot.chronotonic(rh), 'chronotonic_%s' % unit_name, d)
             plot_and_save(plot.schillinger(rh), 'schillinger_%s' % unit_name, d)
+            plot_and_save(plot.inter_onset_interval_histogram(rh), 'inter-onset_interval_histo_%s' % unit_name, d)
 
         i += 1

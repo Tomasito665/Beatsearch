@@ -2,6 +2,7 @@ import inspect
 import os
 import itertools
 from functools import wraps
+import numpy as np
 import midi
 import math
 
@@ -24,7 +25,8 @@ Unit = musical_unit_enum(
     HALF=('halves', 0.5),
     QUARTER=('quarters', 1.0),
     EIGHTH=('eighths', 2.0),
-    SIXTEENTH=('sixteenths', 4.0)
+    SIXTEENTH=('sixteenths', 4.0),
+    THIRTYSECOND=('thirty-seconds', 8.0)
 )
 
 
@@ -347,6 +349,27 @@ class Rhythm(object):
 
             return intervals
 
+        def get_interval_histogram(self, unit='eighths'):
+            """
+            Returns the number of occurrences of all the inter-onset intervals from the smallest to the biggest
+            interval. The inter onset intervals are retrieved with get_post_note_inter_onset_intervals().
+
+            For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]:
+                (
+                    [1, 2, 2],  # occurrences
+                    [2, 3, 4]   # bins (interval durations)
+                )
+
+
+            :return: an (occurrences, bins) tuple
+            """
+
+            intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
+            histogram = np.histogram(intervals, range(min(intervals), max(intervals) + 2))
+            occurrences = histogram[0].tolist()
+            bins = histogram[1].tolist()[:-1]
+            return occurrences, bins
+
         def get_binary_schillinger_chain(self, unit='ticks', values=(0, 1)):
             """
             Returns the Schillinger notation of this rhythm track where each onset is a change of a "binary note".
@@ -443,10 +466,17 @@ class Rhythm(object):
     @property
     def bpm(self):
         """
-        The tempo of this rhythm in beats per minute. This is a read-only property.
+        The tempo of this rhythm in beats per minute.
         """
 
         return self._bpm
+
+    @bpm.setter
+    def bpm(self, bpm):
+        bpm = float(bpm)
+        if bpm <= 0:
+            raise ValueError("Expected a BPM greater than zero but got %s" % bpm)
+        self._bpm = bpm
 
     @property
     def time_signature(self):
@@ -508,10 +538,10 @@ class Rhythm(object):
         """
 
         duration_in_ticks = convert_time(duration, unit, self._ppq)
-        last_onset_tick = self._get_last_onset_tick()
+        last_onset_tick = self.get_last_onset_tick()
 
         if duration_in_ticks < last_onset_tick:
-            last_onset_in_given_unit = self._get_last_onset_tick(unit)
+            last_onset_in_given_unit = self.get_last_onset_tick(unit)
             raise ValueError("Expected a duration of at least %s but got %s" % (last_onset_in_given_unit, duration))
 
         self._duration = duration_in_ticks
@@ -540,6 +570,25 @@ class Rhythm(object):
         numerator = self.time_signature.numerator
         beat_unit = self.time_signature.get_beat_unit()
         return convert_time(numerator, beat_unit, unit)
+
+    def get_interval_histogram(self, unit='ticks'):
+        """
+        Returns the interval histogram of all the tracks combined.
+
+        :return: combined interval histogram of all the tracks in this rhythm
+        """
+
+        intervals = []
+
+        for _, track in self.track_iter():
+            track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=unit)
+            intervals.extend(track_intervals)
+
+        histogram = np.histogram(intervals, range(min(intervals), max(intervals) + 2))
+        occurrences = histogram[0].tolist()
+        bins = histogram[1].tolist()[:-1]
+        return occurrences, bins
+
 
     def get_track(self, pitch):
         """
@@ -672,7 +721,7 @@ class Rhythm(object):
         return Rhythm(**args)
 
     @concretize_unit()
-    def _get_last_onset_tick(self, unit='ticks'):
+    def get_last_onset_tick(self, unit='ticks'):
         last_onset_tick = 0
         for onsets in map(lambda track: track.onsets, self._tracks.values()):
             last_onset_tick = max(onsets[-1][0], last_onset_tick)
