@@ -219,13 +219,12 @@ class Rhythm(object):
 
         # default the duration to the timestamp of the last note
         if duration is None:
-            duration = self._get_last_onset_tick()
+            duration = self.get_last_onset_time('ticks')
 
         if ceil_duration_to_measure:
             measure_duration = self.get_measure_duration('ticks')
-            n_measures = duration / measure_duration
-            # round up the duration to the nearest musical measure
-            duration = int(math.ceil(n_measures * measure_duration))
+            n_measures = int(math.ceil(duration / measure_duration))
+            duration = n_measures * measure_duration
 
         self.set_duration(duration)
 
@@ -538,10 +537,10 @@ class Rhythm(object):
         """
 
         duration_in_ticks = convert_time(duration, unit, self._ppq)
-        last_onset_tick = self.get_last_onset_tick()
+        last_onset_tick = self.get_last_onset_time()
 
         if duration_in_ticks < last_onset_tick:
-            last_onset_in_given_unit = self.get_last_onset_tick(unit)
+            last_onset_in_given_unit = self.get_last_onset_time(unit)
             raise ValueError("Expected a duration of at least %s but got %s" % (last_onset_in_given_unit, duration))
 
         self._duration = duration_in_ticks
@@ -721,7 +720,7 @@ class Rhythm(object):
         return Rhythm(**args)
 
     @concretize_unit()
-    def get_last_onset_tick(self, unit='ticks'):
+    def get_last_onset_time(self, unit='ticks'):
         last_onset_tick = 0
         for onsets in map(lambda track: track.onsets, self._tracks.values()):
             last_onset_tick = max(onsets[-1][0], last_onset_tick)

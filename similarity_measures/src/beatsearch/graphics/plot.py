@@ -17,7 +17,8 @@ class plot(object):
     Decorator for RhythmPlotter plotting methods.
     """
 
-    colors = ['#b71c1c', '#4A148C', '#1A237E', '#01579B', '#004D40', '#33691E', '#F57F17', '#E65100', '#3E2723']
+    # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
+    colors = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
 
     def __init__(self, title, subplot_layout='combined', share_axis=None, *args, **kwargs):
         self._title = title
@@ -32,7 +33,7 @@ class plot(object):
         """
         This class provides the 'plot' decorator of a handle to the RhythmPlotter instance and it enables sets the
         function pointer to the subplot setup function for methods decorated with @foo.setup. This enables the following
-        synax:
+        syntax:
 
             @plot()
             def polygon(axes):
@@ -59,9 +60,16 @@ class plot(object):
         self._f_fill_subplot = f_fill_subplot
         return plot.Descriptor(obj_decorator=self)
 
-    def create_plot_figure(self, rhythm, *args, **kwargs):
-        if not isinstance(rhythm, Rhythm):
-            raise ValueError("Expected a Rhythm instance but got '%s' instead" % rhythm)
+    def create_plot_figure(self, obj, *args, **kwargs):
+        if isinstance(obj, Rhythm):
+            rhythm = obj
+            track_iter = rhythm.track_iter()
+        elif isinstance(obj, Rhythm.Track):
+            rhythm = obj.rhythm
+            track_iter = {'Track': obj}.iteritems()
+        else:
+            raise ValueError("Expected either a Rhythm or a Rhythm.Track "
+                             "object but got a '%s' instead" % obj)
 
         # the figure to add the subplot(s) to
         figure = plt.figure("%s - %s" % (self._title, rhythm.name))
@@ -72,6 +80,7 @@ class plot(object):
         # the setup method will also receive the args given to the decorator
         setup_args = merge_dicts(self._named_decorator_args, {
             'self': rhythm_plotter,
+            'rhythm': rhythm,
             'concrete_unit': concrete_unit,
             'n_pulses': int(math.ceil(rhythm.get_duration(concrete_unit))),
             'n_tracks': rhythm.track_count()
@@ -91,7 +100,7 @@ class plot(object):
         plot_handles = []
 
         track_i = 0
-        for track_name, track in rhythm.track_iter():
+        for track_name, track in track_iter:
             axes, axes_setup_result = subplots.next()
 
             handle = fill_subplot(
@@ -280,7 +289,9 @@ class RhythmPlotter(object):
             return circle
 
         max_pulse_circle_count = kwargs['max_pulse_circle_count']
+        unit = kwargs['concrete_unit']
         n_pulses = kwargs['n_pulses']
+        measure_duration = kwargs['rhythm'].get_measure_duration(unit)
         draw_pulse_circles = (n_pulses <= max_pulse_circle_count)
 
         pulse_circle_styles = {
@@ -291,20 +302,21 @@ class RhythmPlotter(object):
         }
 
         for i in range(n_pulses):
+            is_down_beat = i % measure_duration == 0
             relative_t = float(i) / n_pulses
             pos_on_circle = get_coordinates_on_circle(main_center, main_radius, relative_t)
 
             if draw_pulse_circles:
                 pulse_circle = plt.Circle(pos_on_circle, **pulse_circle_styles)
                 axes.add_artist(pulse_circle)
-            else:
-                axes.plot(
-                    [main_center[0], pos_on_circle[0]],
-                    [main_center[1], pos_on_circle[1]],
-                    color='gray',
-                    linewidth=0.2,
-                    alpha=0.35
-                )
+
+            axes.plot(
+                [main_center[0], pos_on_circle[0]],
+                [main_center[1], pos_on_circle[1]],
+                color='gray',
+                linewidth=1 if is_down_beat else 0.3,
+                alpha=0.9 if is_down_beat else 0.5
+            )
 
         return circle
 
