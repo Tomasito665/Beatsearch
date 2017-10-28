@@ -20,7 +20,7 @@ class plot(object):
     # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
     colors = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
 
-    def __init__(self, title, subplot_layout='combined', share_axis=None, *args, **kwargs):
+    def __init__(self, title, subplot_layout='combined', share_axis=None, *_, **kwargs):
         self._title = title
         self._subplot_layout = subplot_layout
         self._share_x, self._share_y = plot.parse_axis_arg_str(share_axis)

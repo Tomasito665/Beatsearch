@@ -318,6 +318,7 @@ class Rhythm(object):
 
             return intervals
 
+        # TODO Add cyclic option to include the offset in the last onset's interval
         @concretize_unit()
         def get_post_note_inter_onset_intervals(self, unit='ticks', quantize=False):
             """
@@ -416,6 +417,37 @@ class Rhythm(object):
                 pass
             return chain
 
+        def get_interval_difference_vector(self, cyclic=True, unit='ticks', quantize=False):
+            """
+            Returns the interval difference vector (aka difference of rhythm vector). For each
+            note, this is the difference between the current onset interval and the next onset
+            interval. So, if N is the number of onsets, the returned vector will have a length
+            of N - 1. This is different with cyclic rhythms, where the last onset's interval is
+            compared with the first onset's interval. In this case, the length will be N.
+
+            For example, given the post-note inter-onset interval vector for the Rumba clave:
+              [3, 4, 3, 2, 4]
+
+            The interval difference vector would be:
+               With cyclic set to False: [4/3, 3/4, 2/3, 4/2]
+               With cyclic set to True:  [4/3, 3/4, 2/3, 4/2, 3/4]
+
+            :param cyclic: whether or not to treat this rhythm as a cyclic rhythm or not
+            :param unit: time unit
+            :param quantize: whether or not the inter onset interval vector should be quantized
+            :return: interval difference vector
+            """
+
+            vector = self.get_post_note_inter_onset_intervals(unit, quantize)
+            if cyclic:
+                vector.append(vector[0])
+            i = 0
+            while i < len(vector) - 1:
+                vector[i] = vector[i + 1] / float(vector[i])
+                i += 1
+            vector.pop()
+            return vector
+
         @concretize_unit()
         def get_onset_times(self, unit='ticks', quantize=False):
             """
@@ -460,7 +492,7 @@ class Rhythm(object):
             other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=True)
 
             if len(this_inter_onset_vector) != len(other_inter_onset_vector):
-                raise ValueError("Track have different onset counts (%i != %i)"
+                raise ValueError("Tracks have different onset counts (%i != %i)"
                                  % (len(this_inter_onset_vector), len(other_inter_onset_vector)))
 
             i = 0
@@ -473,6 +505,22 @@ class Rhythm(object):
                 i += 1
 
             return math.sqrt(sum_squared_dt)
+
+        def get_interval_difference_vector_distance_to(self, other, unit='ticks'):
+            this_inter_onset_vector = self.get_post_note_inter_onset_intervals(unit, quantize=True)
+            other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=True)
+
+            if len(this_inter_onset_vector) != len(other_inter_onset_vector):
+                raise ValueError("Tracks have different onset counts (%i != %i)"
+                                 % (len(this_inter_onset_vector), len(other_inter_onset_vector)))
+
+            result = 0
+            n_notes = len(this_inter_onset_vector)
+            i = 0
+
+            while i < n_notes:
+                pass
+
 
         def get_resolution(self):
             """

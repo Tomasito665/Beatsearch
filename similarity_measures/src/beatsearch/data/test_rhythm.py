@@ -166,6 +166,22 @@ class TestRhythm(unittest.TestCase):
         actual_intervals = rhythm.get_track(60).get_post_note_inter_onset_intervals()
         self.assertEqual(actual_intervals, expected_intervals)
 
+    def test_non_cyclic_track_interval_difference_vector_is_correct(self):
+        onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        expected_interval_difference_vector = [4. / 3., 3. / 4., 2. / 3., 4. / 2.]
+        actual_interval_difference_vector = rhythm.get_track(60).get_interval_difference_vector(cyclic=False)
+        self.assertEqual(actual_interval_difference_vector, expected_interval_difference_vector)
+
+    def test_cyclic_track_interval_difference_vector_is_correct(self):
+        onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        expected_interval_difference_vector = [4. / 3., 3. / 4., 2. / 3., 4. / 2., 3. / 4.]
+        actual_interval_difference_vector = rhythm.get_track(60).get_interval_difference_vector(cyclic=True)
+        print "Expected: %s" % str(expected_interval_difference_vector)
+        print "Actual: %s" % str(actual_interval_difference_vector)
+        self.assertEqual(actual_interval_difference_vector, expected_interval_difference_vector)
+
     def test_track_to_binary_without_resolution_change(self):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
