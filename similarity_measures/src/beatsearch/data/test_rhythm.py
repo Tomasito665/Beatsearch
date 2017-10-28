@@ -1,6 +1,7 @@
 import unittest
 import copy
 import midi
+import math
 from rhythm import Rhythm, TimeSignature
 
 
@@ -218,6 +219,31 @@ class TestRhythm(unittest.TestCase):
 
     def test_track_get_resolution_returns_same_as_rhythm_get_resolution(self):
         self.assertEqual(self.rhythm.get_track(60).get_resolution(), self.rhythm.get_resolution())
+
+    def test_hamming_distance_between_two_tracks_is_correct(self):
+        onset_data = {
+            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
+            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
+        }
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        track_a = rhythm.get_track('a')
+        track_b = rhythm.get_track('b')
+        expected_distance = 6
+        actual_distance = track_a.get_hamming_distance_to(track_b)
+        self.assertEqual(actual_distance, expected_distance)
+
+    def test_euclidean_inter_onset_vector_distance_is_correct(self):
+        onset_data = {
+            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
+            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
+        }
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        track_a = rhythm.get_track('a')
+        track_b = rhythm.get_track('b')
+        expected_distance = math.sqrt(11)
+        actual_distance = track_a.get_euclidean_inter_onset_vector_distance_to(track_b)
+        self.assertEqual(actual_distance, expected_distance)
+
 
 if __name__ == '__main__':
     unittest.main()

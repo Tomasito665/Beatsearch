@@ -428,6 +428,52 @@ class Rhythm(object):
 
             return map(lambda onset: convert_time(onset[0], self.get_resolution(), unit, quantize), self.onsets)
 
+        def get_hamming_distance_to(self, other, unit='eighths'):
+            """
+            Returns the hamming distance of this track's binary chain to the given track's binary chain. The given
+            track must have the same duration as this track.
+
+            :param other: track to compute the distance to
+            :param unit: grid unit
+            :return: the hamming distance as an integer
+            """
+
+            this_binary_chain = self.get_binary(unit)
+            other_binary_chain = other.get_binary(unit)
+
+            if len(this_binary_chain) != len(other_binary_chain):
+                raise ValueError("Track durations do not match (%i != %i)"
+                                 % (len(this_binary_chain), len(other_binary_chain)))
+
+            return sum(x != y for x, y in zip(this_binary_chain, other_binary_chain))
+
+        def get_euclidean_inter_onset_vector_distance_to(self, other, unit='ticks'):
+            """
+            Returns the euclidean inter-onset vector distance of this track to the given track.
+
+            :param other: track to compute the distance to
+            :param unit: unit to quantize the inter-onset intervals
+            :return: the euclidean inter-onset vector distance to the given track
+            """
+
+            this_inter_onset_vector = self.get_post_note_inter_onset_intervals(unit, quantize=True)
+            other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=True)
+
+            if len(this_inter_onset_vector) != len(other_inter_onset_vector):
+                raise ValueError("Track have different onset counts (%i != %i)"
+                                 % (len(this_inter_onset_vector), len(other_inter_onset_vector)))
+
+            i = 0
+            sum_squared_dt = 0
+            n_notes = len(this_inter_onset_vector)
+
+            while i < n_notes:
+                dt = this_inter_onset_vector[i] - other_inter_onset_vector[i]
+                sum_squared_dt += dt * dt
+                i += 1
+
+            return math.sqrt(sum_squared_dt)
+
         def get_resolution(self):
             """
             Returns the resolution of this rhythm in PPQ (pulses per quarter note).
