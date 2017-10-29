@@ -44,11 +44,19 @@ def print_progress_bar(iteration, total, prefix="", suffix="", decimals=1, lengt
 
     if starting_time is not None:
         elapsed_time = time() - starting_time
-        time_remaining = "Remaining: %s " % format_timespan(elapsed_time / progress)
+        if iteration < total:
+            try:
+                remaining = format_timespan((elapsed_time / progress) - elapsed_time)
+            except ZeroDivisionError:
+                remaining = "unknown"
+            time_info = "Remaining: %s " % remaining
+        else:
+            time_info = "Elapsed: %s" % format_timespan(elapsed_time)
     else:
-        time_remaining = ""
+        time_info = ""
 
-    sys.stdout.write('\r%s |%s| %s%% %s %s' % (prefix, bar, percent, suffix, time_remaining))
+    sys.stdout.write('\r%s |%s| %s%% %s %s' % (prefix, bar, percent, suffix, time_info))
     sys.stdout.flush()
+
     if iteration == total:
         print ""

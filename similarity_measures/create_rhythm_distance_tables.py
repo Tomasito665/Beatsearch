@@ -5,12 +5,12 @@ from time import time
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 from openpyxl.styles import colors
-from beatsearch.utils import print_progress_bar
 from create_pickle import create_ascii_spinner, log_replace
 from matplotlib import pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythm import Rhythm
 from beatsearch.data.rhythmcorpus import RhythmCorpus
+from beatsearch.utils import print_progress_bar
 
 
 def parse_args():
