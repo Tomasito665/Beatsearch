@@ -443,7 +443,10 @@ class Rhythm(object):
                 vector.append(vector[0])
             i = 0
             while i < len(vector) - 1:
-                vector[i] = vector[i + 1] / float(vector[i])
+                try:
+                    vector[i] = vector[i + 1] / float(vector[i])
+                except ZeroDivisionError:
+                    vector[i] = float('inf')
                 i += 1
             vector.pop()
             return vector
@@ -479,17 +482,18 @@ class Rhythm(object):
 
             return sum(x != y for x, y in zip(this_binary_chain, other_binary_chain))
 
-        def get_euclidean_inter_onset_vector_distance_to(self, other, unit='ticks'):
+        def get_euclidean_inter_onset_vector_distance_to(self, other, unit='ticks', quantize=False):
             """
             Returns the euclidean inter-onset vector distance of this track to the given track.
 
             :param other: track to compute the distance to
-            :param unit: unit to quantize the inter-onset intervals
+            :param unit: time unit
+            :param quantize: whether or not the inter onset interval vectors should be quantized
             :return: the euclidean inter-onset vector distance to the given track
             """
 
-            this_inter_onset_vector = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-            other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=True)
+            this_inter_onset_vector = self.get_post_note_inter_onset_intervals(unit, quantize=quantize)
+            other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=quantize)
 
             if len(this_inter_onset_vector) != len(other_inter_onset_vector):
                 raise ValueError("Tracks have different onset counts (%i != %i)"
@@ -506,21 +510,29 @@ class Rhythm(object):
 
             return math.sqrt(sum_squared_dt)
 
-        def get_interval_difference_vector_distance_to(self, other, unit='ticks'):
-            this_inter_onset_vector = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-            other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=True)
+        def get_interval_difference_vector_distance_to(self, other, unit='ticks', cyclic=True, quantize=False):
+            this_interval_diff_vector = self.get_interval_difference_vector(cyclic, unit, quantize)
+            other_interval_diff_vector = other.get_interval_difference_vector(cyclic, unit, quantize)
 
-            if len(this_inter_onset_vector) != len(other_inter_onset_vector):
+            if len(this_interval_diff_vector) != len(other_interval_diff_vector):
                 raise ValueError("Tracks have different onset counts (%i != %i)"
-                                 % (len(this_inter_onset_vector), len(other_inter_onset_vector)))
+                                 % (len(this_interval_diff_vector), len(other_interval_diff_vector)))
 
-            result = 0
-            n_notes = len(this_inter_onset_vector)
+            summed_fractions = 0
+            n_notes = len(this_interval_diff_vector)
             i = 0
 
             while i < n_notes:
-                pass
+                x = float(this_interval_diff_vector[i])
+                y = float(other_interval_diff_vector[i])
+                numerator, denominator = (x, y) if x > y else (y, x)
+                try:
+                    summed_fractions += numerator / denominator
+                except ZeroDivisionError:
+                    return float('inf')
+                i += 1
 
+            return summed_fractions - n_notes
 
         def get_resolution(self):
             """
@@ -733,8 +745,8 @@ class Rhythm(object):
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]
-                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch,
-                                           velocity=onset[1], channel=9)  # channel 9 for drums
+                # channel 9 for drums
+                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch, velocity=onset[1], channel=9)
                 note_off = midi.NoteOffEvent(tick=note_abs_tick + note_duration, pitch=pitch)
                 midi_track.extend([note_on, note_off])
 
