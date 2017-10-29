@@ -1,5 +1,6 @@
 import os
 import sys
+import midi
 from time import time
 from matplotlib import pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
@@ -52,9 +53,13 @@ if __name__ == '__main__':
     }
 
     plotter = RhythmPlotter()
-    n_plots = n_rhythms * len(single_unit_plots) + n_rhythms * len(multi_units) * len(multi_unit_plots)
+    n_steps = \
+        n_rhythms * len(single_unit_plots) + \
+        n_rhythms * len(multi_units) * len(multi_unit_plots) + \
+        n_rhythms  # One MIDI export per rhythm
+
     starting_time = time()
-    plot_i, rhythm_i = 0, 0
+    step_i, rhythm_i = 0, 0
 
     for rhythm in corpus:
         rhythm_dir = os.path.join(target_dir, rhythm.name)
@@ -64,10 +69,18 @@ if __name__ == '__main__':
 
         plotter.unit = single_unit
 
+        def print_progress():
+            print_progress_bar(step_i, n_steps, "Rendering rhythm plots",
+                               "[%i/%i]" % (rhythm_i, n_rhythms), 2,
+                               starting_time=starting_time, fill='O')
+
+        midi_file_path = os.path.join(rhythm_dir, "%s.mid" % rhythm.name)
+        midi_pattern = rhythm.to_midi()
+        midi.write_midifile(midi_file_path, midi_pattern)
+
         # noinspection PyShadowingNames
         def plot_and_save(plot_func_name, name, plot_args):
-            print_progress_bar(plot_i, n_plots, "Rendering rhythm plots",
-                               "[%i/%i]" % (rhythm_i, n_rhythms), 2, starting_time=starting_time)
+            print_progress()
             figure = getattr(plotter, plot_func_name)(rhythm, **plot_args)
             path = os.path.join(rhythm_dir, name)
             plt.savefig(path)
@@ -75,12 +88,12 @@ if __name__ == '__main__':
 
         for plot_func_name, name, plot_args in single_unit_plots:
             plot_and_save(plot_func_name, name, plot_args)
-            plot_i += 1
+            step_i += 1
 
         for plot_func_name, name, plot_args in multi_unit_plots:
             for unit_name, unit in multi_units.iteritems():
                 plotter.unit = unit
                 plot_and_save(plot_func_name, "%s_%s" % (name, unit_name), plot_args)
-                plot_i += 1
+                step_i += 1
 
         rhythm_i += 1

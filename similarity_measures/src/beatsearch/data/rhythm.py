@@ -733,7 +733,8 @@ class Rhythm(object):
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]
-                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch)
+                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch,
+                                           velocity=onset[1], channel=9)  # channel 9 for drums
                 note_off = midi.NoteOffEvent(tick=note_abs_tick + note_duration, pitch=pitch)
                 midi_track.extend([note_on, note_off])
 
