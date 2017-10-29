@@ -12,16 +12,19 @@ def plot_and_save(figure, name, output):
     plt.savefig(os.path.join(output, name))
     plt.close(figure)
 
+
 if __name__ == '__main__':
     try:
-        target_dir = sys.argv[1]
-    except IndexError:
-        raise Exception("No target directory given")
-
-    try:
-        corpus_binary = sys.argv[2]
+        corpus_binary = sys.argv[1]
     except IndexError:
         corpus_binary = "./data/rhythms.pkl"
+
+    try:
+        target_dir = sys.argv[2]
+    except IndexError:
+        target_dir = "./output/notations"
+        if not os.path.isdir(target_dir):
+            os.makedirs(target_dir)
 
     corpus = RhythmCorpus.load(corpus_binary)
     spinner = create_ascii_spinner("...ooOO@*         ")
