@@ -513,16 +513,25 @@ class Rhythm(object):
             return math.sqrt(sum_squared_dt)
 
         def get_interval_difference_vector_distance_to(self, other, unit='ticks', cyclic=True, quantize=False):
+            """
+            Returns the interval difference vector distance to the given track.
+
+            :param other: track to compute the interval difference vector distance to
+            :param unit: time unit
+            :param cyclic: see Rhythm.Track.get_interval_difference_vector
+            :param quantize: whether or not the interval difference vectors should be quantized
+            :return: interval difference vector distance to given track
+            """
+
             this_interval_diff_vector = self.get_interval_difference_vector(cyclic, unit, quantize)
             other_interval_diff_vector = other.get_interval_difference_vector(cyclic, unit, quantize)
 
             if len(this_interval_diff_vector) != len(other_interval_diff_vector):
-                raise ValueError("Tracks have different onset counts (%i != %i)"
-                                 % (len(this_interval_diff_vector), len(other_interval_diff_vector)))
+                raise ValueError("Tracks have different onset counts (%i != %i)" % (
+                    len(this_interval_diff_vector), len(other_interval_diff_vector)))
 
-            summed_fractions = 0
             n_notes = len(this_interval_diff_vector)
-            i = 0
+            summed_fractions, i = 0, 0
 
             while i < n_notes:
                 x = float(this_interval_diff_vector[i])
@@ -535,6 +544,69 @@ class Rhythm(object):
                 i += 1
 
             return summed_fractions - n_notes
+
+        def get_swap_distance_to(self, other, unit='ticks', quantize=False):
+            """
+            Returns the swap distance to the given rhythm track. That is, the minimal swap operations required to
+            transform this track to the given track. A swap is an interchange of a one and a zero that are adjacent to
+            each other in the binary representations.
+
+            Although the concept of the swap distance is based on the binary rhythm representations, this implementation
+            uses the absolute onset times of the onsets. This makes it possible to also work with floating point swap
+            operations (e.g. 0.14 swap operation). Enable this by setting quantize to False.
+
+            :param other: track to compute the swap distance to
+            :param unit: time unit
+            :param quantize: whether or not to quantize the binary strings
+            :return: swap distance to the given rhythm track
+            """
+
+            this_onset_times = self.get_onset_times(unit, quantize)
+            other_onset_times = other.get_onset_times(unit, quantize)
+
+            if len(this_onset_times) != len(other_onset_times):
+                raise ValueError("Tracks have different onset counts (%i != %i)" % (
+                    len(this_onset_times), len(other_onset_times)))
+
+            n_notes = len(this_onset_times)
+            swap_distance, i = 0, 0
+
+            while i < n_notes:
+                x = this_onset_times[i]
+                y = other_onset_times[i]
+                swap_distance += abs(x - y)
+                i += 1
+
+            return swap_distance
+
+        def get_chronotonic_distance_to(self, other, unit='ticks'):
+            """
+            Returns the chronotonic distance to the given rhythm track. That is, the area difference (aka measure K) of
+            the two chronotonic chains.
+
+            :param other: track to compute the chronotonic distance to
+            :param unit: time unit
+            :return: the chronotonic distance to the given track
+            """
+
+            this_chronotonic_chain = self.get_chronotonic_chain(unit)
+            other_chronotonic_chain = other.get_chronotonic_chain(unit)
+
+            if len(this_chronotonic_chain) != len(other_chronotonic_chain):
+                raise ValueError("Chronotonic chains have different lengths (%i != %i)" % (
+                    len(this_chronotonic_chain), len(other_chronotonic_chain)))
+
+            n_pulses = len(this_chronotonic_chain)
+            chronotonic_distance, i = 0, 0
+
+            while i < n_pulses:
+                x = this_chronotonic_chain[i]
+                y = other_chronotonic_chain[i]
+                # assuming that each pulse is a unit
+                chronotonic_distance += abs(x - y)
+                i += 1
+
+            return chronotonic_distance
 
         def get_resolution(self):
             """

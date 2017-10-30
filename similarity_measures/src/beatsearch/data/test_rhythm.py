@@ -178,8 +178,6 @@ class TestRhythm(unittest.TestCase):
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_interval_difference_vector = [4. / 3., 3. / 4., 2. / 3., 4. / 2., 3. / 4.]
         actual_interval_difference_vector = rhythm.get_track(60).get_interval_difference_vector(cyclic=True)
-        print "Expected: %s" % str(expected_interval_difference_vector)
-        print "Actual: %s" % str(actual_interval_difference_vector)
         self.assertEqual(actual_interval_difference_vector, expected_interval_difference_vector)
 
     def test_track_to_binary_without_resolution_change(self):
@@ -248,7 +246,7 @@ class TestRhythm(unittest.TestCase):
         actual_distance = track_a.get_hamming_distance_to(track_b)
         self.assertEqual(actual_distance, expected_distance)
 
-    def test_euclidean_inter_onset_vector_distance_is_correct(self):
+    def test_euclidean_ioi_vector_distance_between_two_tracks_is_correct(self):
         onset_data = {
             'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
             'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
@@ -259,6 +257,42 @@ class TestRhythm(unittest.TestCase):
         expected_distance = math.sqrt(11)
         actual_distance = track_a.get_euclidean_inter_onset_vector_distance_to(track_b)
         self.assertEqual(actual_distance, expected_distance)
+
+    def test_ioi_vector_distance_between_two_tracks_is_correct(self):
+        onset_data = {
+            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
+            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
+        }
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        track_a = rhythm.get_track('a')
+        track_b = rhythm.get_track('b')
+        expected_distance = 4.736111111111111
+        actual_distance = track_a.get_interval_difference_vector_distance_to(track_b)
+        self.assertAlmostEqual(expected_distance, actual_distance)
+
+    def test_swap_distance_between_two_tracks_is_correct(self):
+        onset_data = {
+            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
+            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
+        }
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        track_a = rhythm.get_track('a')
+        track_b = rhythm.get_track('b')
+        expected_distance = 4
+        actual_distance = track_a.get_swap_distance_to(track_b)
+        self.assertEqual(expected_distance, actual_distance)
+
+    def test_chronotonic_distance_between_two_tracks_is_correct(self):
+        onset_data = {
+            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
+            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
+        }
+        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
+        track_a = rhythm.get_track('a')
+        track_b = rhythm.get_track('b')
+        expected_distance = 19
+        actual_distance = track_a.get_chronotonic_distance_to(track_b)
+        self.assertEqual(expected_distance, actual_distance)
 
 
 if __name__ == '__main__':

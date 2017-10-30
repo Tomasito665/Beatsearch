@@ -27,6 +27,8 @@ def get_args():
     0) Hamming distance
     1) Euclidean inter-onset interval vector distance
     2) Interval difference vector distance
+    3) Swap distance
+    4) Chronotonic distance
 """)
     return parser.parse_args()
 
@@ -50,7 +52,9 @@ if __name__ == "__main__":
     similarity_funcs = (
         Rhythm.Track.get_hamming_distance_to,
         Rhythm.Track.get_euclidean_inter_onset_vector_distance_to,
-        Rhythm.Track.get_interval_difference_vector_distance_to
+        Rhythm.Track.get_interval_difference_vector_distance_to,
+        Rhythm.Track.get_swap_distance_to,
+        Rhythm.Track.get_chronotonic_distance_to
     )
 
     try:
