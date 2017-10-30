@@ -155,12 +155,12 @@ class TimeSignature(object):
     def get_beat_unit(self):
         return self._beat_unit
 
-    def to_midi_event(self):
+    def to_midi_event(self, metronome=24, thirty_seconds=8):
         return midi.TimeSignatureEvent(
             numerator=self.numerator,
             denominator=self.denominator,
-            metronome=24,
-            thirtyseconds=8
+            metronome=metronome,
+            thirtyseconds=thirty_seconds
         )
 
     def __eq__(self, other):
@@ -184,7 +184,7 @@ class Rhythm(object):
     """
 
     def __init__(self, name, bpm, time_signature, data, data_ppq, duration=None,
-                 ceil_duration_to_measure=True, rescale_to_ppq=None, midi_file_path=""):
+                 ceil_duration_to_measure=True, rescale_to_ppq=None, midi_file_path="", midi_metronome=None):
         """
         Constructs a new rhythm.
 
@@ -199,7 +199,8 @@ class Rhythm(object):
         :param rescale_to_ppq:     Resolution to rescale the onset data (and the length) to in pulses per quarter note or
                                    None for no rescaling
         :param midi_file_path:     The path to the midi file or an empty string if this rhythm is not
-                                    attached to a MIDI file
+                                   attached to a MIDI file
+        :param midi_metronome:     Midi TimeSignature event metronome
         """
 
         if not isinstance(time_signature, TimeSignature):
@@ -212,6 +213,7 @@ class Rhythm(object):
         self._duration = -1
         self._ppq = data_ppq
         self._midi_file_path = str(midi_file_path) if midi_file_path else None
+        self._midi_metronome = midi_metronome
 
         # add tracks
         for pitch, onsets in data.iteritems():
@@ -694,7 +696,6 @@ class Rhythm(object):
         bins = histogram[1].tolist()[:-1]
         return occurrences, bins
 
-
     def get_track(self, pitch):
         """
         Returns the rhythm track of the instrument on the given pitch or None if there is no track for the given pitch.
@@ -726,7 +727,7 @@ class Rhythm(object):
 
         return len(self._tracks)
 
-    def to_midi(self, note_duration=32):
+    def to_midi(self, note_duration=0):
         """
         Convert this rhythm to a MIDI.
 
@@ -737,7 +738,8 @@ class Rhythm(object):
         midi_track = midi.Track(tick_relative=False)  # create track and add metadata events
 
         midi_track.append(midi.TrackNameEvent(text=self._name))  # track name
-        midi_track.append(self._time_signature.to_midi_event())  # time signature
+        midi_metronome = 24 if self._midi_metronome is None else self._midi_metronome
+        midi_track.append(self._time_signature.to_midi_event(midi_metronome))  # time signature
         midi_track.append(midi.SetTempoEvent(bpm=self._bpm))     # tempo
 
         # add note events
@@ -745,9 +747,10 @@ class Rhythm(object):
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]
+                velocity = onset[1]
                 # channel 9 for drums
-                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch, velocity=onset[1], channel=9)
-                note_off = midi.NoteOffEvent(tick=note_abs_tick + note_duration, pitch=pitch)
+                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch, velocity=velocity, channel=9)
+                note_off = midi.NoteOffEvent(tick=note_abs_tick + note_duration, pitch=pitch, channel=9)
                 midi_track.extend([note_on, note_off])
 
         # sort the events in chronological order and convert to relative delta-time
@@ -758,7 +761,11 @@ class Rhythm(object):
         midi_track.append(midi.EndOfTrackEvent())
 
         # save the midi file
-        return midi.Pattern([midi_track])
+        return midi.Pattern(
+            [midi_track],
+            format=0,
+            resolution=self.get_resolution()
+        )
 
     @staticmethod
     def create_from_midi(pattern, path=None, resolution=240, end_on_eot_event=False):
@@ -787,6 +794,7 @@ class Rhythm(object):
             'name': os.path.splitext(os.path.basename(path))[0],
             'bpm': 120,
             'time_signature': None,
+            'midi_metronome': None,
             'data': {},
             'duration': 0,
             'data_ppq': pattern.resolution,
@@ -818,6 +826,7 @@ class Rhythm(object):
 
         try:
             args['time_signature'] = TimeSignature.from_midi_event(ts_midi_event)
+            args['midi_metronome'] = ts_midi_event.get_metronome()
         except ValueError:
             raise ValueError("No time signature MIDI event")
 
