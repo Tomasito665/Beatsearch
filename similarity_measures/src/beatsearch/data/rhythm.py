@@ -128,6 +128,36 @@ def concretize_unit(f_get_res=lambda *args, **kwargs: args[0].get_resolution()):
     return concretize_unit_decorator
 
 
+def check_iterables_meet_length_policy(iterables, len_policy):
+    """
+    Checks whether the given iterables meet a certain duration policy. Duration policies are:
+        'exact' - met when all iterables have the exact same length and are not empty
+        'multiple' - met when the length of the largest iterable is a multiple of all the other iterable lengths
+        'fill' - met when any of the chains is empty
+
+    :param iterables: iterables to check the lengths of
+    :param len_policy: one of {'exact', 'multiple' or 'fill'}
+    :return length of the largest iterable
+    """
+
+    if not iterables:
+        return
+
+    l = [len(c) for c in iterables]  # lengths
+
+    if len_policy == 'exact':
+        if not all(x == l[0] for x in l):
+            raise ValueError("When length policy is set to 'exact', iterables should have the same lengths")
+    elif len_policy == 'multiple':
+        if not all(x % l[0] == 0 or l[0] % x == 0 for x in l):
+            raise ValueError("When length policy is set to 'multiple', the length of the largest "
+                             "iterable should be a multiple of all the other iterable lengths")
+    elif len_policy != 'fill':
+        raise ValueError("Unknown length policy: '%s'" % len_policy)
+
+    return max(l)
+
+
 class TimeSignature(object):
     """
     This class represents a musical time signature, consisting of a numerator and a denominator.
@@ -465,54 +495,55 @@ class Rhythm(object):
 
             return map(lambda onset: convert_time(onset[0], self.get_resolution(), unit, quantize), self.onsets)
 
-        def get_hamming_distance_to(self, other, unit='eighths'):
+        def get_hamming_distance_to(self, other, unit='eighths', len_policy='multiple'):
             """
             Returns the hamming distance of this track's binary chain to the given track's binary chain. The given
             track must have the same duration as this track.
 
             :param other: track to compute the distance to
             :param unit: grid unit
+            :param len_policy: one of {'exact', 'multiple', 'fill'} (see check_iterables_meet_length_policy)
             :return: the hamming distance as an integer
             """
 
-            this_binary_chain = self.get_binary(unit)
-            other_binary_chain = other.get_binary(unit)
+            cx = self.get_binary(unit)  # chain x
+            cy = other.get_binary(unit)  # chain y
+            n = check_iterables_meet_length_policy([cx, cy], len_policy)
+            hamming_distance, i = 0, 0
 
-            if len(this_binary_chain) != len(other_binary_chain):
-                raise ValueError("Track durations do not match (%i != %i)"
-                                 % (len(this_binary_chain), len(other_binary_chain)))
+            while i < n:
+                hamming_distance += cx[i % len(cx)] != cy[i % len(cy)]
+                i += 1
 
-            return sum(x != y for x, y in zip(this_binary_chain, other_binary_chain))
+            return hamming_distance
 
-        def get_euclidean_inter_onset_vector_distance_to(self, other, unit='ticks', quantize=False):
+        def get_euclidean_inter_onset_vector_distance_to(self, other, unit='ticks',
+                                                         quantize=False, len_policy='exact'):
             """
             Returns the euclidean inter-onset vector distance of this track to the given track.
 
             :param other: track to compute the distance to
             :param unit: time unit
             :param quantize: whether or not the inter onset interval vectors should be quantized
+            :param len_policy: one of {'exact', 'multiple', 'fill'} (see check_iterables_meet_length_policy)
             :return: the euclidean inter-onset vector distance to the given track
             """
 
-            this_inter_onset_vector = self.get_post_note_inter_onset_intervals(unit, quantize=quantize)
-            other_inter_onset_vector = other.get_post_note_inter_onset_intervals(unit, quantize=quantize)
+            vx = self.get_post_note_inter_onset_intervals(unit, quantize=quantize)  # vector x
+            vy = other.get_post_note_inter_onset_intervals(unit, quantize=quantize)  # vector y
+            n = check_iterables_meet_length_policy([vx, vy], len_policy)
+            sum_squared_dt, i = 0, 0
 
-            if len(this_inter_onset_vector) != len(other_inter_onset_vector):
-                raise ValueError("Tracks have different onset counts (%i != %i)"
-                                 % (len(this_inter_onset_vector), len(other_inter_onset_vector)))
-
-            i = 0
-            sum_squared_dt = 0
-            n_notes = len(this_inter_onset_vector)
-
-            while i < n_notes:
-                dt = this_inter_onset_vector[i] - other_inter_onset_vector[i]
+            while i < n:
+                dt = vx[i % len(vx)] - vy[i % len(vy)]
                 sum_squared_dt += dt * dt
                 i += 1
 
             return math.sqrt(sum_squared_dt)
 
-        def get_interval_difference_vector_distance_to(self, other, unit='ticks', cyclic=True, quantize=False):
+        def get_interval_difference_vector_distance_to(self, other, unit='ticks',
+                                                       cyclic=True, quantize=False,
+                                                       len_policy='exact'):
             """
             Returns the interval difference vector distance to the given track.
 
@@ -520,22 +551,18 @@ class Rhythm(object):
             :param unit: time unit
             :param cyclic: see Rhythm.Track.get_interval_difference_vector
             :param quantize: whether or not the interval difference vectors should be quantized
+            :param len_policy: one of {'exact', 'multiple', 'fill'} (see check_iterables_meet_length_policy)
             :return: interval difference vector distance to given track
             """
 
-            this_interval_diff_vector = self.get_interval_difference_vector(cyclic, unit, quantize)
-            other_interval_diff_vector = other.get_interval_difference_vector(cyclic, unit, quantize)
-
-            if len(this_interval_diff_vector) != len(other_interval_diff_vector):
-                raise ValueError("Tracks have different onset counts (%i != %i)" % (
-                    len(this_interval_diff_vector), len(other_interval_diff_vector)))
-
-            n_notes = len(this_interval_diff_vector)
+            vx = self.get_interval_difference_vector(cyclic, unit, quantize)  # vector x
+            vy = other.get_interval_difference_vector(cyclic, unit, quantize)  # vector y
+            n = check_iterables_meet_length_policy([vx, vy], len_policy)
             summed_fractions, i = 0, 0
 
-            while i < n_notes:
-                x = float(this_interval_diff_vector[i])
-                y = float(other_interval_diff_vector[i])
+            while i < n:
+                x = float(vx[i % len(vx)])
+                y = float(vy[i % len(vy)])
                 numerator, denominator = (x, y) if x > y else (y, x)
                 try:
                     summed_fractions += numerator / denominator
@@ -543,9 +570,9 @@ class Rhythm(object):
                     return float('inf')
                 i += 1
 
-            return summed_fractions - n_notes
+            return summed_fractions - n
 
-        def get_swap_distance_to(self, other, unit='ticks', quantize=False):
+        def get_swap_distance_to(self, other, unit='ticks', quantize=False, len_policy='exact'):
             """
             Returns the swap distance to the given rhythm track. That is, the minimal swap operations required to
             transform this track to the given track. A swap is an interchange of a one and a zero that are adjacent to
@@ -558,50 +585,46 @@ class Rhythm(object):
             :param other: track to compute the swap distance to
             :param unit: time unit
             :param quantize: whether or not to quantize the binary strings
+            :param len_policy: one of {'exact', 'multiple', 'fill'} (see check_iterables_meet_length_policy)
             :return: swap distance to the given rhythm track
             """
 
-            this_onset_times = self.get_onset_times(unit, quantize)
-            other_onset_times = other.get_onset_times(unit, quantize)
+            vx = self.get_onset_times(unit, quantize)  # onset time vector x
+            vy = other.get_onset_times(unit, quantize)  # onset time vector y
+            dur_x = int(math.ceil(self.rhythm.get_duration(unit)))
+            dur_y = int(math.ceil(other.rhythm.get_duration(unit)))
+            n = check_iterables_meet_length_policy([vx, vy], len_policy)
+            swap_distance, i, x_offset, y_offset = 0, 0, 0, 0
 
-            if len(this_onset_times) != len(other_onset_times):
-                raise ValueError("Tracks have different onset counts (%i != %i)" % (
-                    len(this_onset_times), len(other_onset_times)))
-
-            n_notes = len(this_onset_times)
-            swap_distance, i = 0, 0
-
-            while i < n_notes:
-                x = this_onset_times[i]
-                y = other_onset_times[i]
+            while i < n:
+                x_offset = i // len(vx) * dur_x
+                y_offset = i // len(vy) * dur_y
+                x = vx[i % len(vx)] + x_offset
+                y = vy[i % len(vy)] + y_offset
                 swap_distance += abs(x - y)
                 i += 1
 
             return swap_distance
 
-        def get_chronotonic_distance_to(self, other, unit='ticks'):
+        def get_chronotonic_distance_to(self, other, unit='ticks', len_policy='multiple'):
             """
             Returns the chronotonic distance to the given rhythm track. That is, the area difference (aka measure K) of
             the two chronotonic chains.
 
             :param other: track to compute the chronotonic distance to
             :param unit: time unit
+            :param len_policy: one of {'exact', 'multiple', 'fill'} (see check_iterables_meet_length_policy)
             :return: the chronotonic distance to the given track
             """
 
-            this_chronotonic_chain = self.get_chronotonic_chain(unit)
-            other_chronotonic_chain = other.get_chronotonic_chain(unit)
-
-            if len(this_chronotonic_chain) != len(other_chronotonic_chain):
-                raise ValueError("Chronotonic chains have different lengths (%i != %i)" % (
-                    len(this_chronotonic_chain), len(other_chronotonic_chain)))
-
-            n_pulses = len(this_chronotonic_chain)
+            cx = self.get_chronotonic_chain(unit)
+            cy = other.get_chronotonic_chain(unit)
+            n = check_iterables_meet_length_policy([cx, cy], len_policy)
             chronotonic_distance, i = 0, 0
 
-            while i < n_pulses:
-                x = this_chronotonic_chain[i]
-                y = other_chronotonic_chain[i]
+            while i < n:
+                x = cx[i % len(cx)]
+                y = cy[i % len(cy)]
                 # assuming that each pulse is a unit
                 chronotonic_distance += abs(x - y)
                 i += 1
