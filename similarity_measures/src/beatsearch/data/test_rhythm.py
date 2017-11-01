@@ -2,7 +2,18 @@ import unittest
 import copy
 import midi
 import math
-from rhythm import Rhythm, TimeSignature
+from mock import MagicMock, PropertyMock
+
+from rhythm import (
+    Rhythm,
+    TimeSignature,
+    HammingDistanceMeasure,
+    TrackDistanceMeasure,
+    EuclideanIntervalVectorDistanceMeasure,
+    IntervalDifferenceVectorDistanceMeasure,
+    SwapDistanceMeasure,
+    ChronotonicDistanceMeasure,
+)
 
 
 class TestRhythm(unittest.TestCase):
@@ -234,153 +245,131 @@ class TestRhythm(unittest.TestCase):
     def test_track_get_resolution_returns_same_as_rhythm_get_resolution(self):
         self.assertEqual(self.rhythm.get_track(60).get_resolution(), self.rhythm.get_resolution())
 
-    def test_hamming_distance_between_two_tracks_is_correct(self):
-        onset_data = {
-            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
-            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
-        }
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track_a = rhythm.get_track('a')
-        track_b = rhythm.get_track('b')
-        expected_distance = 6
-        for len_policy in ['exact', 'multiple', 'fill']:
-            actual_distance = track_a.get_hamming_distance_to(track_b, len_policy=len_policy)
-            self.assertEqual(actual_distance, expected_distance)
+
+class TestTrackMeasures(unittest.TestCase):
+    def setUp(self):
+        self.tr_a = Rhythm.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)))
+        self.tr_b = Rhythm.Track(((1, 127), (3, 127), (6, 127), (10, 127), (14, 127)))
+        self.tr_aa = Rhythm.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127),
+                                   (16, 127), (19, 127), (23, 127), (26, 127), (28, 127)))
+
+        fake_rhythm = type('Rhythm', (object, ), dict(get_duration=lambda *_: None))
+        fake_rhythm_dur_16, fake_rhythm_dur_32 = fake_rhythm(), fake_rhythm()
+        fake_rhythm_dur_32.get_duration = MagicMock(return_value=32)
+        fake_rhythm_dur_16.get_duration = MagicMock(return_value=16)
+
+        for t in [self.tr_a, self.tr_b]:
+            t.rhythm = fake_rhythm_dur_16
+        self.tr_aa.rhythm = fake_rhythm_dur_32
+
+        for t in [self.tr_a, self.tr_b, self.tr_aa]:
+            t.get_resolution = MagicMock(return_value=4)
+
+        self.len_policies = ['exact', 'multiple', 'fill']
+
+    def test_track_measure_length_policy_property_given_to_constructor(self):
+        t = TrackDistanceMeasure('exact')
+        self.assertEqual(t.length_policy, 'exact')
+
+    ####################
+    # HAMMING DISTANCE #
+    ####################
+
+    def test_hamming_distance_is_correct(self):
+        d_expected = 6
+        for lp in self.len_policies:
+            m = HammingDistanceMeasure(lp, unit='ticks')
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_hamming_distance_is_zero(self):
-        onset_data = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track = rhythm.get_track('a')
-        for len_policy in ['exact', 'multiple', 'fill']:
-            distance = track.get_hamming_distance_to(track, len_policy=len_policy)
-            self.assertEqual(distance, 0)
+        for lp in self.len_policies:
+            m = HammingDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
-    def test_hamming_distance_is_zero_between_track_and_duplicate_with_len_policy_on_multiple(self):
-        data_a = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        data_b = {'b': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127), (16, 127), (19, 127), (23, 127), (26, 127), (28, 127))}
-        rhythm_a = Rhythm("", 120, TimeSignature(4, 4), data_a, 4, 16)
-        rhythm_b = Rhythm("", 120, TimeSignature(4, 4), data_b, 4, 32)
-        a = rhythm_a.get_track('a')
-        b = rhythm_b.get_track('b')
-        self.assertEqual(a.get_hamming_distance_to(b, len_policy='multiple'), 0)
+    def test_hamming_distance_single_to_double_is_zero(self):
+        for lp in self.len_policies[1:]:  # skip 'exact'
+            m = HammingDistanceMeasure(lp, unit='ticks')
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
-    def test_euclidean_ioi_vector_distance_between_two_tracks_is_correct(self):
-        onset_data = {
-            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
-            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
-        }
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track_a = rhythm.get_track('a')
-        track_b = rhythm.get_track('b')
-        expected_distance = math.sqrt(11)
-        for len_policy in ['exact', 'multiple', 'fill']:
-            actual_distance = track_a.get_euclidean_inter_onset_vector_distance_to(track_b, len_policy=len_policy)
-            self.assertEqual(actual_distance, expected_distance)
+    #############################
+    # EUCLIDEAN VECTOR DISTANCE #
+    #############################
 
-    def test_auto_euclidean_ioi_vector_distance_is_zero(self):
-        onset_data = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track = rhythm.get_track('a')
-        for len_policy in ['exact', 'multiple', 'fill']:
-            distance = track.get_euclidean_inter_onset_vector_distance_to(track, len_policy=len_policy)
-            self.assertEqual(distance, 0)
+    def test_euclidean_vector_distance_is_correct(self):
+        d_expected = math.sqrt(11)
+        for lp in self.len_policies:
+            m = EuclideanIntervalVectorDistanceMeasure(lp, 'ticks', quantize=True)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
-    def test_euclidean_ioi_vector_distance_is_zero_between_track_and_duplicate_with_len_policy_on_multiple(self):
-        data_a = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        data_b = {'b': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127), (16, 127), (19, 127), (23, 127), (26, 127), (28, 127))}
-        rhythm_a = Rhythm("", 120, TimeSignature(4, 4), data_a, 4, 16)
-        rhythm_b = Rhythm("", 120, TimeSignature(4, 4), data_b, 4, 32)
-        a = rhythm_a.get_track('a')
-        b = rhythm_b.get_track('b')
-        self.assertEqual(a.get_euclidean_inter_onset_vector_distance_to(b, len_policy='multiple'), 0)
+    def test_auto_euclidean_vector_distance_is_zero(self):
+        for lp in self.len_policies:
+            m = EuclideanIntervalVectorDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
-    def test_interval_difference_vector_distance_between_two_tracks_is_correct(self):
-        onset_data = {
-            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
-            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
-        }
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track_a = rhythm.get_track('a')
-        track_b = rhythm.get_track('b')
-        expected_distance = 4.736111111111111
-        for len_policy in ['exact', 'multiple', 'fill']:
-            actual_distance = track_a.get_interval_difference_vector_distance_to(track_b, len_policy=len_policy)
-            self.assertAlmostEqual(expected_distance, actual_distance)
+    def test_euclidean_vector_distance_single_to_double_is_zero(self):
+        for lp in self.len_policies[1:]:  # skip 'exact'
+            m = EuclideanIntervalVectorDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
+
+    #######################################
+    # INTERVAL DIFFERENCE VECTOR DISTANCE #
+    #######################################
+
+    def test_interval_difference_vector_distance_is_correct(self):
+        d_expected = 4.736111111111111
+        for lp in self.len_policies:
+            m = IntervalDifferenceVectorDistanceMeasure(lp, 'ticks', quantize=True, cyclic=True)
+            self.assertAlmostEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_interval_difference_vector_distance_is_zero(self):
-        onset_data = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track = rhythm.get_track('a')
-        for len_policy in ['exact', 'multiple', 'fill']:
-            distance = track.get_interval_difference_vector_distance_to(track, len_policy=len_policy)
-            self.assertEqual(distance, 0)
+        for lp in self.len_policies:
+            m = IntervalDifferenceVectorDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
-    def test_interval_difference_vector_distance_is_zero_between_track_and_duplicate_with_len_policy_on_multiple(self):
-        data_a = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        data_b = {'b': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127), (16, 127), (19, 127), (23, 127), (26, 127), (28, 127))}
-        rhythm_a = Rhythm("", 120, TimeSignature(4, 4), data_a, 4, 16)
-        rhythm_b = Rhythm("", 120, TimeSignature(4, 4), data_b, 4, 32)
-        a = rhythm_a.get_track('a')
-        b = rhythm_b.get_track('b')
-        self.assertEqual(a.get_interval_difference_vector_distance_to(b, len_policy='multiple'), 0)
+    def test_interval_difference_vector_distance_single_to_double_is_zero(self):
+        for lp in self.len_policies[1:]:  # skip 'exact'
+            m = IntervalDifferenceVectorDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
-    def test_swap_distance_between_two_tracks_is_correct(self):
-        onset_data = {
-            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
-            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
-        }
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track_a = rhythm.get_track('a')
-        track_b = rhythm.get_track('b')
-        expected_distance = 4
-        for len_policy in ['exact', 'multiple', 'fill']:
-            actual_distance = track_a.get_swap_distance_to(track_b, len_policy=len_policy)
-            self.assertEqual(expected_distance, actual_distance)
+    #################
+    # SWAP DISTANCE #
+    #################
+
+    def test_swap_distance_is_correct(self):
+        d_expected = 4
+        for lp in self.len_policies:
+            m = SwapDistanceMeasure(lp, 'ticks', quantize=True)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_swap_distance_is_zero(self):
-        onset_data = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track = rhythm.get_track('a')
-        for len_policy in ['exact', 'multiple', 'fill']:
-            self.assertEqual(track.get_swap_distance_to(track, len_policy=len_policy), 0)
+        for lp in self.len_policies:
+            m = SwapDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
-    def test_swap_distance_is_zero_between_track_and_duplicate_with_len_policy_on_multiple(self):
-        data_a = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        data_b = {'b': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127), (16, 127), (19, 127), (23, 127), (26, 127), (28, 127))}
-        rhythm_a = Rhythm("", 120, TimeSignature(4, 4), data_a, 4, 16)
-        rhythm_b = Rhythm("", 120, TimeSignature(4, 4), data_b, 4, 32)
-        a = rhythm_a.get_track('a')
-        b = rhythm_b.get_track('b')
-        self.assertEqual(a.get_swap_distance_to(b, len_policy='multiple'), 0)
+    def test_swap_distance_single_to_double_is_zero(self):
+        for lp in self.len_policies[1:]:
+            m = SwapDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
-    def test_chronotonic_distance_between_two_tracks_is_correct(self):
-        onset_data = {
-            'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)),
-            'b': ((1, 127), (3, 127), (6, 127), (10, 127), (14, 127))
-        }
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track_a = rhythm.get_track('a')
-        track_b = rhythm.get_track('b')
-        expected_distance = 19
-        for len_policy in ['exact', 'multiple', 'fill']:
-            actual_distance = track_a.get_chronotonic_distance_to(track_b, len_policy=len_policy)
-            self.assertEqual(expected_distance, actual_distance)
+    ########################
+    # CHRONOTONIC DISTANCE #
+    ########################
+
+    def test_chronotonic_distance_is_correct(self):
+        d_expected = 19
+        for lp in self.len_policies:
+            m = ChronotonicDistanceMeasure(lp, 'ticks')
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_chronotonic_distance_is_zero(self):
-        onset_data = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
-        track = rhythm.get_track('a')
-        for len_policy in ['exact', 'multiple', 'fill']:
-            self.assertEqual(track.get_chronotonic_distance_to(track, len_policy=len_policy), 0)
+        for lp in self.len_policies:
+            m = ChronotonicDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
-    def test_chronotonic_distance_is_zero_between_track_and_duplicate_with_len_policy_on_multiple(self):
-        data_a = {'a': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-        data_b = {'b': ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127), (16, 127), (19, 127), (23, 127), (26, 127), (28, 127))}
-        rhythm_a = Rhythm("", 120, TimeSignature(4, 4), data_a, 4, 16)
-        rhythm_b = Rhythm("", 120, TimeSignature(4, 4), data_b, 4, 32)
-        a = rhythm_a.get_track('a')
-        b = rhythm_b.get_track('b')
-        self.assertEqual(a.get_chronotonic_distance_to(b, len_policy='multiple'), 0)
+    def test_chronotonic_distance_single_to_double_is_zero(self):
+        for lp in self.len_policies[1:]:
+            m = ChronotonicDistanceMeasure(lp)
+            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
 
 if __name__ == '__main__':

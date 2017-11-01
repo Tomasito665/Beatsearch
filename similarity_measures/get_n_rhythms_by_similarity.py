@@ -1,13 +1,30 @@
 import os
 import sys
 import argparse
+from collections import OrderedDict
+
 import midi
 import numpy as np
 from argparse import RawTextHelpFormatter
 from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
-from beatsearch.data.rhythm import Rhythm
 from beatsearch.data.rhythmcorpus import RhythmCorpus
+from beatsearch.data.rhythm import (
+    Rhythm,
+    HammingDistanceMeasure,
+    EuclideanIntervalVectorDistanceMeasure,
+    IntervalDifferenceVectorDistanceMeasure,
+    SwapDistanceMeasure,
+    ChronotonicDistanceMeasure
+)
+
+
+sim_measures = OrderedDict()
+sim_measures['Hamming Distance'] = HammingDistanceMeasure()
+sim_measures['Euclidean interval vector distance'] = EuclideanIntervalVectorDistanceMeasure()
+sim_measures['Interval difference vector distance'] = IntervalDifferenceVectorDistanceMeasure()
+sim_measures['Swap distance'] = SwapDistanceMeasure()
+sim_measures['Chronotonic distance'] = ChronotonicDistanceMeasure()
 
 
 def get_args():
@@ -23,13 +40,8 @@ def get_args():
     parser.add_argument("--track", type=int, default=36,
                         help="The rhythm track to compare")
     parser.add_argument("-n", type=int, default=10, help="Number of rhythms to return")
-    parser.add_argument("--method", type=int, default=0, help="""Which similarity measure to use:
-    0) Hamming distance
-    1) Euclidean inter-onset interval vector distance
-    2) Interval difference vector distance
-    3) Swap distance
-    4) Chronotonic distance
-""")
+    info_sim_measures = ''.join(["\n   %i) %s" % (j + 1, name) for j, name in enumerate(sim_measures.keys())])
+    parser.add_argument("--measure", type=int, default=0, help="Which similarity measure to use:%s" % info_sim_measures)
     return parser.parse_args()
 
 
@@ -49,18 +61,14 @@ if __name__ == "__main__":
     corpus = RhythmCorpus.load(args.corpus)
     log_replace("Loaded rhythms from '%s' containing %i rhythms\n" % (args.corpus.name, len(corpus)))
 
-    similarity_funcs = (
-        Rhythm.Track.get_hamming_distance_to,
-        Rhythm.Track.get_euclidean_inter_onset_vector_distance_to,
-        Rhythm.Track.get_interval_difference_vector_distance_to,
-        Rhythm.Track.get_swap_distance_to,
-        Rhythm.Track.get_chronotonic_distance_to
-    )
-
     try:
-        get_similarity = similarity_funcs[args.method].im_func
+        distance_measure_index = args.measure - 1
+        if distance_measure_index < 0:
+            raise IndexError
+        distance_measure = sim_measures.values()[args.measure - 1]
     except IndexError:
-        print "Given unknown similarity method: '%i'" % args.method
+        print "Given unknown similarity method: %i (choose between: %s)" % \
+              (args.measure, range(1, len(sim_measures) + 1))
         sys.exit(-1)
 
     distances = []
@@ -71,7 +79,7 @@ if __name__ == "__main__":
             distances.append(float("inf"))
             continue
         try:
-            distance = get_similarity(target_track, track, 'eighths')
+            distance = distance_measure.get_distance(target_track, track)
         except ValueError:
             distances.append(float("inf"))
             continue
@@ -79,10 +87,11 @@ if __name__ == "__main__":
 
     sorted_indexes = np.argsort(distances)
     print "\nThe %i most similar rhythms to '%s', when measured with '%s' on track '%s' are:" \
-          % (args.n, target_rhythm.name, get_similarity.__name__, args.track)
+          % (args.n, target_rhythm.name, distance_measure.__class__.__name__, args.track)
 
     for i in range(args.n):
         index = sorted_indexes[i]
         rhythm = corpus[index]
         distance = distances[index]
-        print "    %i) (d = %.2f) %s" % (i + 1, distance, rhythm.name)
+        formatted_d = "%.2f" % distance if type(distance) == float else str(distance)
+        print "    %i) (d = %s) %s" % (i + 1, formatted_d, rhythm.name)
