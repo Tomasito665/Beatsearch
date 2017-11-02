@@ -60,3 +60,11 @@ def print_progress_bar(iteration, total, prefix="", suffix="", decimals=1, lengt
 
     if iteration == total:
         print ""
+
+
+def friendly_named_class(name):
+    # noinspection PyPep8Naming
+    def _friendly_named_class_decorator(Cls):
+        setattr(Cls, '__friendly_name__', name)
+        return Cls
+    return _friendly_named_class_decorator

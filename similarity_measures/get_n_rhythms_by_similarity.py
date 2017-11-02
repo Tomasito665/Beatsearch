@@ -1,7 +1,6 @@
 import os
 import sys
 import argparse
-from collections import OrderedDict
 
 import midi
 import numpy as np
@@ -9,22 +8,11 @@ from argparse import RawTextHelpFormatter
 from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythmcorpus import RhythmCorpus
-from beatsearch.data.rhythm import (
-    Rhythm,
-    HammingDistanceMeasure,
-    EuclideanIntervalVectorDistanceMeasure,
-    IntervalDifferenceVectorDistanceMeasure,
-    SwapDistanceMeasure,
-    ChronotonicDistanceMeasure
-)
+from beatsearch.data.rhythm import Rhythm, get_track_distance_measures
 
-
-sim_measures = OrderedDict()
-sim_measures['Hamming Distance'] = HammingDistanceMeasure()
-sim_measures['Euclidean interval vector distance'] = EuclideanIntervalVectorDistanceMeasure()
-sim_measures['Interval difference vector distance'] = IntervalDifferenceVectorDistanceMeasure()
-sim_measures['Swap distance'] = SwapDistanceMeasure()
-sim_measures['Chronotonic distance'] = ChronotonicDistanceMeasure()
+SIM_MEASURES = get_track_distance_measures()
+SIM_MEASURE_NAMES = SIM_MEASURES.keys()
+SIM_MEASURE_CLASSES = SIM_MEASURES.values()
 
 
 def get_args():
@@ -40,7 +28,7 @@ def get_args():
     parser.add_argument("--track", type=int, default=36,
                         help="The rhythm track to compare")
     parser.add_argument("-n", type=int, default=10, help="Number of rhythms to return")
-    info_sim_measures = ''.join(["\n   %i) %s" % (j + 1, name) for j, name in enumerate(sim_measures.keys())])
+    info_sim_measures = ''.join(["\n   %i) %s" % (j + 1, name) for j, name in enumerate(SIM_MEASURE_NAMES)])
     parser.add_argument("--measure", type=int, default=0, help="Which similarity measure to use:%s" % info_sim_measures)
     return parser.parse_args()
 
@@ -65,10 +53,10 @@ if __name__ == "__main__":
         distance_measure_index = args.measure - 1
         if distance_measure_index < 0:
             raise IndexError
-        distance_measure = sim_measures.values()[args.measure - 1]
+        distance_measure = SIM_MEASURE_CLASSES[args.measure - 1]()
     except IndexError:
         print "Given unknown similarity method: %i (choose between: %s)" % \
-              (args.measure, range(1, len(sim_measures) + 1))
+              (args.measure, range(1, len(SIM_MEASURE_CLASSES) + 1))
         sys.exit(-1)
 
     distances = []

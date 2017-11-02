@@ -1,10 +1,13 @@
 import inspect
 import os
 import itertools
+from collections import OrderedDict
 from functools import wraps
 import numpy as np
 import midi
 import math
+
+from beatsearch.utils import friendly_named_class
 
 
 def musical_unit_enum(**kwargs):
@@ -968,6 +971,7 @@ class TrackDistanceMeasure(DistanceMeasure):
         return max(l)
 
 
+@friendly_named_class("Hamming distance")
 class HammingDistanceMeasure(TrackDistanceMeasure):
     """
     The hamming distance is based on the binary chains of the rhythms. The hamming distance is the sum of indexes
@@ -990,6 +994,7 @@ class HammingDistanceMeasure(TrackDistanceMeasure):
         return hamming_distance
 
 
+@friendly_named_class("Euclidean interval vector distance")
 class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure):
     """
     The euclidean interval vector distance is the euclidean distance between the inter-onset vectors of the rhythms.
@@ -1011,6 +1016,7 @@ class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure):
         return math.sqrt(sum_squared_dt)
 
 
+@friendly_named_class("Interval difference vector distance")
 class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure):
     """
     The interval difference vector distance is based on the interval difference vectors of the rhythms.
@@ -1038,6 +1044,7 @@ class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure):
         return summed_fractions - n
 
 
+@friendly_named_class("Swap distance")
 class SwapDistanceMeasure(TrackDistanceMeasure):
     """
     The swap distance is the minimal number of swap operations required to transform one track to another track. A swap
@@ -1070,6 +1077,7 @@ class SwapDistanceMeasure(TrackDistanceMeasure):
         return swap_distance
 
 
+@friendly_named_class("Chronotonic distance")
 class ChronotonicDistanceMeasure(TrackDistanceMeasure):
     """
     The chronotonic distance is the area difference (aka measure K) of the rhythm's chronotonic chains.
@@ -1090,3 +1098,25 @@ class ChronotonicDistanceMeasure(TrackDistanceMeasure):
             chronotonic_distance += abs(x - y)
             i += 1
         return chronotonic_distance
+
+
+def get_track_distance_measures(friendly_name=True):
+    """
+    Returns an ordered dictionary containing implementations of TrackDistanceMeasure by name.
+
+    :param friendly_name: when True, the name will be retrieved with __friendly_name__ instead of __name__
+    :return: an ordered dictionary containing all subclasses of TrackDistanceMeasure by name
+    """
+
+    track_distance_measures = OrderedDict()
+
+    for tdm in TrackDistanceMeasure.__subclasses__():
+        name = tdm.__name__
+        if friendly_name:
+            try:
+                name = tdm.__friendly_name__
+            except AttributeError:
+                pass
+        track_distance_measures[name] = tdm
+
+    return track_distance_measures

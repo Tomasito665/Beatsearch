@@ -5,11 +5,21 @@ from time import time
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 from openpyxl.styles import colors
-from create_pickle import create_ascii_spinner, log_replace
+from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
-from beatsearch.data.rhythm import Rhythm
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import print_progress_bar
+from beatsearch.data.rhythm import get_track_distance_measures
+
+SIM_MEASURES = get_track_distance_measures()
+SIM_MEASURE_NAMES = SIM_MEASURES.keys()
+SIM_MEASURE_CLASSES = SIM_MEASURES.values()
+
+CELL_COLORS = {
+    'red': PatternFill(start_color=colors.RED, end_color=colors.RED, fill_type='solid'),
+    'blue': PatternFill(start_color=colors.BLUE, end_color=colors.BLUE, fill_type='solid'),
+    'green': PatternFill(start_color=colors.GREEN, end_color=colors.GREEN, fill_type='solid')
+}
 
 
 def get_args():
@@ -26,92 +36,69 @@ def get_args():
     return parser.parse_args()
 
 
-red_fill = PatternFill(start_color=colors.RED, end_color=colors.RED, fill_type='solid')
-blue_fill = PatternFill(start_color=colors.BLUE, end_color=colors.BLUE, fill_type='solid')
-green_fill = PatternFill(start_color=colors.GREEN, end_color=colors.GREEN, fill_type='solid')
-
-
 if __name__ == '__main__':
     args = get_args()
 
     # load corpus and get rhythm names for spreadsheet columns and rows headers
     log_replace("Loading rhythms from: %s" % args.corpus.name)
     corpus = RhythmCorpus.load(args.corpus)
-    rhythm_names = [""] + [rhythm.name for rhythm in corpus]
+    rhythm_names = [rhythm.name for rhythm in corpus]
     track_name = args.track
     log_replace("Loaded rhythms from '%s' containing %i rhythms\n" % (args.corpus.name, len(corpus)))
 
-    # create spreadsheet and remove the first
-    wb = Workbook()
-    wb.remove_sheet(wb.active)
+    # create spreadsheet with one worksheet per distance measure (truncate worksheet names on 31 chars)
+    wb = Workbook(write_only=True)
+    ws_gen = ((wb.create_sheet("%s.." % name[:29] if len(name) > 31 else name),
+               tsm()) for name, tsm in SIM_MEASURES.iteritems())
 
-    # create one worksheet per rhythm track distance measure
-    worksheets = ((
-            wb.create_sheet('Hamming distance'),
-            Rhythm.Track.get_hamming_distance_to
-        ), (
-            wb.create_sheet('Euclidean IOI vector distance'),
-            Rhythm.Track.get_euclidean_inter_onset_vector_distance_to
-        )
-    )
-
-    # set column headers
-    for ws, _ in worksheets:
-        ws.append(rhythm_names)
-
-    spinner = spinner = create_ascii_spinner("...ooOO@*         ")
-
-    # begin iterating at second row (first row is for headers)
-    row_i = 2
-    computation_i = 1
-    n_total_computations = len(corpus) * len(corpus)
+    # for progress bar and remaining time estimation
+    n_steps, step_i, row_i, ws_i = len(corpus) * len(corpus) * len(SIM_MEASURES), 0, 0, 0
     t_start = time()
 
-    for rhythm_a in corpus:
-        track_a = rhythm_a.get_track(track_name)
+    def print_progress(worksheet, worksheet_i):
+        print_progress_bar(
+            step_i + 1, n_steps,
+            "Computing track distances", "[%s (%i/%i), %i/%i]" % (
+                str(worksheet.title), worksheet_i + 1, len(SIM_MEASURES), row_i + 1, len(corpus)
+            ),
+            fill='O', length=25, decimals=2, starting_time=t_start
+        )
 
-        # set row headers
-        for ws, _ in worksheets:
-            ws.cell(row=row_i, column=1, value=rhythm_a.name)
+    # rhythms as column headers
+    column_headers = [""] + rhythm_names
 
-        # skip this rhythm if it doesn't have the desired track
-        if track_a is None:
-            row_i += 1
-            computation_i += len(corpus)
-            continue
+    for ws, measure in ws_gen:
+        ws.append(column_headers)
+        row_i = 0
 
-        # begin iterating at second column (first column is for headers)
-        col_i = 2
+        for rhythm_a in corpus:
+            track_a = rhythm_a.get_track(args.track)
 
-        for rhythm_b in corpus:
-            print_progress_bar(computation_i, n_total_computations, "Computing distances",
-                               "[%i/%i]" % (computation_i, n_total_computations), 2, starting_time=t_start)
-            track_b = rhythm_b.get_track(track_name)
-
-            # skip this rhythm if it doesn't have the desired track
-            if track_b is None:
-                col_i += 1
-                computation_i += 1
+            if track_a is None:
+                row_i += 1
+                step_i += len(corpus)
                 continue
 
-            # compute and fill in the distances from track_a to track_b
-            for ws, dist_measure in worksheets:
-                fill = green_fill
+            def create_row_generator():
+                global step_i
+                yield rhythm_names[row_i]  # row header
 
-                try:
-                    dist = dist_measure.im_func(track_a, track_b)
-                    if dist == 0:
-                        fill = blue_fill
-                except ValueError as e:
-                    dist = e.message
-                    fill = red_fill
+                for rhythm_b in corpus:
+                    print_progress(ws, ws_i)
+                    track_b = rhythm_b.get_track(args.track)
+                    if track_b is None:
+                        yield 'Track (%s) is None' % args.track
+                    else:
+                        try:
+                            yield measure.get_distance(track_a, track_b)
+                        except Exception as e:
+                            yield e.__class__.__name__
+                    step_i += 1
 
-                cell = ws.cell(row=row_i, column=col_i, value=dist)
-                cell.fill = fill
+            ws.append(create_row_generator())
+            row_i += 1
 
-            computation_i += 1
-            col_i += 1
-        row_i += 1
+        ws_i += 1
 
     save_msg = "Saving spreadsheet to: %s" % args.output
     log_replace(save_msg)
