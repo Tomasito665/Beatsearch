@@ -1,4 +1,5 @@
 # coding=utf-8
+from __future__ import print_function
 import sys
 from time import time
 
@@ -59,7 +60,7 @@ def print_progress_bar(iteration, total, prefix="", suffix="", decimals=1, lengt
     sys.stdout.flush()
 
     if iteration == total:
-        print ""
+        print("")
 
 
 def friendly_named_class(name):
@@ -67,4 +68,9 @@ def friendly_named_class(name):
     def _friendly_named_class_decorator(Cls):
         setattr(Cls, '__friendly_name__', name)
         return Cls
+
     return _friendly_named_class_decorator
+
+
+def err_print(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)

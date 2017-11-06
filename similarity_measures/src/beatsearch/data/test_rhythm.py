@@ -2,7 +2,7 @@ import unittest
 import copy
 import midi
 import math
-from mock import MagicMock, PropertyMock
+from mock import MagicMock
 
 from rhythm import (
     Rhythm,
@@ -195,25 +195,25 @@ class TestRhythm(unittest.TestCase):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_binary = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary = rhythm.get_track(60).get_binary('ticks')
+        actual_binary = rhythm.get_track(60).get_binary("ticks")
         self.assertEqual(actual_binary, expected_binary)
 
     def test_track_binary_with_down_scale_resolution_and_not_quantized_input_data(self):
         onset_data = {60: ((7, 127), (176, 127), (421, 127), (611, 127), (713, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 240, 960)
         expected_binary = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary = rhythm.get_track(60).get_binary('sixteenths')
+        actual_binary = rhythm.get_track(60).get_binary("sixteenths")
         self.assertEqual(actual_binary, expected_binary)
 
     def test_track_binary_schillinger_chain_is_correct(self):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_schillinger_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
-        actual_schillinger_chain = rhythm.get_track(60).get_binary_schillinger_chain('ticks')
+        actual_schillinger_chain = rhythm.get_track(60).get_binary_schillinger_chain("ticks")
         self.assertEqual(actual_schillinger_chain, expected_schillinger_chain)
 
     def test_track_binary_schillinger_chain_only_consists_of_given_binary_values(self):
-        values = ('real_madrid', 'fc_barcelona')
+        values = ("real_madrid", "fc_barcelona")
         schillinger_chain = self.rhythm.get_track(60).get_binary_schillinger_chain(values=values)
         self.assertTrue(all(val == values[0] or val == values[1] for val in schillinger_chain))
 
@@ -228,7 +228,7 @@ class TestRhythm(unittest.TestCase):
         onset_data = {60: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
         rhythm = Rhythm("", 120, TimeSignature(4, 4), onset_data, 4, 16)
         expected_onset_times = [0, 3, 7, 10, 12]
-        actual_onset_times = rhythm.get_track(60).get_onset_times('ticks')
+        actual_onset_times = rhythm.get_track(60).get_onset_times("ticks")
         self.assertEqual(actual_onset_times, expected_onset_times)
 
     def test_track_interval_histogram_is_correct(self):
@@ -238,7 +238,7 @@ class TestRhythm(unittest.TestCase):
             [1, 2, 2],
             [2, 3, 4]
         )
-        actual_histogram = rhythm.get_track(60).get_interval_histogram('ticks')
+        actual_histogram = rhythm.get_track(60).get_interval_histogram("ticks")
         self.assertEqual(actual_histogram[0], expected_histogram[0])
         self.assertEqual(actual_histogram[1], expected_histogram[1])
 
@@ -253,7 +253,7 @@ class TestTrackMeasures(unittest.TestCase):
         self.tr_aa = Rhythm.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127),
                                    (16, 127), (19, 127), (23, 127), (26, 127), (28, 127)))
 
-        fake_rhythm = type('Rhythm', (object, ), dict(get_duration=lambda *_: None))
+        fake_rhythm = type("Rhythm", (object, ), dict(get_duration=lambda *_: None))
         fake_rhythm_dur_16, fake_rhythm_dur_32 = fake_rhythm(), fake_rhythm()
         fake_rhythm_dur_32.get_duration = MagicMock(return_value=32)
         fake_rhythm_dur_16.get_duration = MagicMock(return_value=16)
@@ -265,11 +265,11 @@ class TestTrackMeasures(unittest.TestCase):
         for t in [self.tr_a, self.tr_b, self.tr_aa]:
             t.get_resolution = MagicMock(return_value=4)
 
-        self.len_policies = ['exact', 'multiple', 'fill']
+        self.len_policies = ["exact", "multiple", "fill"]
 
     def test_track_measure_length_policy_property_given_to_constructor(self):
-        t = TrackDistanceMeasure('exact')
-        self.assertEqual(t.length_policy, 'exact')
+        t = TrackDistanceMeasure("quarters", length_policy="exact")
+        self.assertEqual(t.length_policy, "exact")
 
     ####################
     # HAMMING DISTANCE #
@@ -278,17 +278,17 @@ class TestTrackMeasures(unittest.TestCase):
     def test_hamming_distance_is_correct(self):
         d_expected = 6
         for lp in self.len_policies:
-            m = HammingDistanceMeasure(lp, unit='ticks')
+            m = HammingDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_hamming_distance_is_zero(self):
         for lp in self.len_policies:
-            m = HammingDistanceMeasure(lp)
+            m = HammingDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
     def test_hamming_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:  # skip 'exact'
-            m = HammingDistanceMeasure(lp, unit='ticks')
+        for lp in self.len_policies[1:]:  # skip "exact"
+            m = HammingDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
     #############################
@@ -298,17 +298,17 @@ class TestTrackMeasures(unittest.TestCase):
     def test_euclidean_vector_distance_is_correct(self):
         d_expected = math.sqrt(11)
         for lp in self.len_policies:
-            m = EuclideanIntervalVectorDistanceMeasure(lp, 'ticks', quantize=True)
+            m = EuclideanIntervalVectorDistanceMeasure("ticks", lp, quantize=True)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_euclidean_vector_distance_is_zero(self):
         for lp in self.len_policies:
-            m = EuclideanIntervalVectorDistanceMeasure(lp)
+            m = EuclideanIntervalVectorDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
     def test_euclidean_vector_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:  # skip 'exact'
-            m = EuclideanIntervalVectorDistanceMeasure(lp)
+        for lp in self.len_policies[1:]:  # skip "exact"
+            m = EuclideanIntervalVectorDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
     #######################################
@@ -318,17 +318,17 @@ class TestTrackMeasures(unittest.TestCase):
     def test_interval_difference_vector_distance_is_correct(self):
         d_expected = 4.736111111111111
         for lp in self.len_policies:
-            m = IntervalDifferenceVectorDistanceMeasure(lp, 'ticks', quantize=True, cyclic=True)
+            m = IntervalDifferenceVectorDistanceMeasure("ticks", lp, quantize=True, cyclic=True)
             self.assertAlmostEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_interval_difference_vector_distance_is_zero(self):
         for lp in self.len_policies:
-            m = IntervalDifferenceVectorDistanceMeasure(lp)
+            m = IntervalDifferenceVectorDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
     def test_interval_difference_vector_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:  # skip 'exact'
-            m = IntervalDifferenceVectorDistanceMeasure(lp)
+        for lp in self.len_policies[1:]:  # skip "exact"
+            m = IntervalDifferenceVectorDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
     #################
@@ -338,17 +338,17 @@ class TestTrackMeasures(unittest.TestCase):
     def test_swap_distance_is_correct(self):
         d_expected = 4
         for lp in self.len_policies:
-            m = SwapDistanceMeasure(lp, 'ticks', quantize=True)
+            m = SwapDistanceMeasure("ticks", length_policy=lp, quantize=True)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_swap_distance_is_zero(self):
         for lp in self.len_policies:
-            m = SwapDistanceMeasure(lp)
+            m = SwapDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
     def test_swap_distance_single_to_double_is_zero(self):
         for lp in self.len_policies[1:]:
-            m = SwapDistanceMeasure(lp)
+            m = SwapDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
     ########################
@@ -358,19 +358,19 @@ class TestTrackMeasures(unittest.TestCase):
     def test_chronotonic_distance_is_correct(self):
         d_expected = 19
         for lp in self.len_policies:
-            m = ChronotonicDistanceMeasure(lp, 'ticks')
+            m = ChronotonicDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
 
     def test_auto_chronotonic_distance_is_zero(self):
         for lp in self.len_policies:
-            m = ChronotonicDistanceMeasure(lp)
+            m = ChronotonicDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
 
     def test_chronotonic_distance_single_to_double_is_zero(self):
         for lp in self.len_policies[1:]:
-            m = ChronotonicDistanceMeasure(lp)
+            m = ChronotonicDistanceMeasure("ticks", lp)
             self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

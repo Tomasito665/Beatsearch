@@ -1,6 +1,7 @@
 import inspect
 import os
 import itertools
+from typing import Union, Iterable, Tuple, Any
 from collections import OrderedDict
 from functools import wraps
 import numpy as np
@@ -129,7 +130,9 @@ def concretize_unit(f_get_res=lambda *args, **kwargs: args[0].get_resolution()):
                     kwargs["unit"] = unit
 
             return func(*args, **kwargs)
+
         return wrapper
+
     return concretize_unit_decorator
 
 
@@ -231,8 +234,8 @@ class Rhythm(object):
         :param data_ppq:           Resolution of the onset data and the length in PPQ (pulses per quarter note)
         :param duration:           The duration of the rhythm in ticks. When given None, the duration will be set to
                                    first downbeat after the last note in the rhythm.
-        :param rescale_to_ppq:     Resolution to rescale the onset data (and the length) to in pulses per quarter note or
-                                   None for no rescaling
+        :param rescale_to_ppq:     Resolution to rescale the onset data (and the length) to in pulses per quarter note
+                                   or None for no rescaling
         :param midi_file_path:     The path to the midi file or an empty string if this rhythm is not
                                    attached to a MIDI file
         :param midi_metronome:     Midi TimeSignature event metronome
@@ -451,7 +454,6 @@ class Rhythm(object):
                     delta = j - i
                 chain[i] = delta
                 i += 1
-                pass
             return chain
 
         def get_interval_difference_vector(self, cyclic=True, unit='ticks', quantize=False):
@@ -704,7 +706,7 @@ class Rhythm(object):
         midi_track.append(midi.TrackNameEvent(text=self._name))  # track name
         midi_metronome = 24 if self._midi_metronome is None else self._midi_metronome
         midi_track.append(self._time_signature.to_midi_event(midi_metronome))  # time signature
-        midi_track.append(midi.SetTempoEvent(bpm=self._bpm))     # tempo
+        midi_track.append(midi.SetTempoEvent(bpm=self._bpm))  # tempo
 
         # add note events
         for pitch, track in self._tracks.iteritems():
@@ -770,7 +772,7 @@ class Rhythm(object):
 
         for msg in track:
             if isinstance(msg, midi.NoteOnEvent):
-                midi_key = msg.get_pitch()
+                midi_key = str(msg.get_pitch())
                 if midi_key not in args['data']:
                     args['data'][midi_key] = []
                 onset = (msg.tick, msg.get_velocity())
@@ -827,11 +829,6 @@ class DistanceMeasure(object):
         raise NotImplementedError
 
 
-class RhythmSimilarityMeasure(DistanceMeasure):
-    def get_distance(self, rhythm_a, rhythm_b):
-        pass
-
-
 class TrackDistanceMeasure(DistanceMeasure):
     """
     Distance measure for rhythm tracks (a single instrument of a rhythm).
@@ -845,19 +842,21 @@ class TrackDistanceMeasure(DistanceMeasure):
                 "Given %s, please choose between: %s" % (
                     given_length_policy, TrackDistanceMeasure.LENGTH_POLICIES))
 
-    def __init__(self, unit, length_policy, output_unit='quarters'):
+    def __init__(self, unit, length_policy):
         """
         Creates a new track distance measure.
 
-        :param unit: unit used internally for distance computation. This unit is given to __get_iterable__.
+        :param unit: see internal_unit property
         :param length_policy: see documentation on length_policy property
-        :param output_unit: the result of get_distance will be converted to this unit
         """
 
         self._len_policy = ''
-        self._internal_unit = unit
-        self.output_unit = output_unit
+        self._internal_unit = 0
+        self._output_unit = 0
+
         self.length_policy = length_policy
+        self.internal_unit = unit
+        self.output_unit = unit
 
     @property
     def length_policy(self):
@@ -883,6 +882,36 @@ class TrackDistanceMeasure(DistanceMeasure):
             raise TrackDistanceMeasure.UnknownLengthPolicy(length_policy)
         self._len_policy = length_policy
 
+    @property
+    def internal_unit(self):
+        """
+        Unit used internally for distance computation. This unit is given to __get_iterable__
+        """
+
+        return self._internal_unit
+
+    @internal_unit.setter
+    def internal_unit(self, internal_unit):
+        if internal_unit != 'ticks':
+            convert_time(1, 1, internal_unit)
+        self._internal_unit = internal_unit
+
+    @property
+    def output_unit(self):
+        """
+        The output unit is the unit of the distance returned by get_distance. E.g. when the output_unit is 'ticks', the
+        distance returned by get_distance will be in 'ticks'.
+        """
+
+        return self._output_unit
+
+    @output_unit.setter
+    def output_unit(self, output_unit):
+        if output_unit != 'ticks':
+            # validates the given unit
+            convert_time(1, 1, output_unit)
+        self._output_unit = output_unit
+
     def get_distance(self, track_a, track_b):
         """
         Returns the distance between the given tracks.
@@ -892,21 +921,22 @@ class TrackDistanceMeasure(DistanceMeasure):
         :return: distance between the given tracks
         """
 
-        if self._internal_unit == 'ticks':
-            res_a, res_b = track_a.get_resolution(), track_b.get_resolution()
-            if res_a != res_b:
-                raise ValueError("Unit set to 'ticks', but given tracks have "
-                                 "different resolutions (%i != %i)" % (res_a, res_b))
-            concrete_internal_unit = res_a
-        else:
-            concrete_internal_unit = self._internal_unit
+        internal_unit_in_ticks = self._internal_unit == 'ticks'
+        output_unit_in_ticks = self._output_unit == 'ticks'
+        res_a, res_b = track_a.get_resolution(), track_b.get_resolution()
+        if (internal_unit_in_ticks or output_unit_in_ticks) and res_a != res_b:
+            raise ValueError("%s unit set to 'ticks', but given tracks have "
+                             "different resolutions (%i != %i)" %
+                             ("Internal" if internal_unit_in_ticks else "Output", res_a, res_b))
+        internal_unit = res_a if internal_unit_in_ticks else self._internal_unit
+        output_unit = res_a if output_unit_in_ticks else self._output_unit
 
         tracks = [track_a, track_b]
-        iterables = [self.__get_iterable__(t, concrete_internal_unit) for t in tracks]
-        cookies = [self.__get_cookie__(t, concrete_internal_unit) for t in tracks]
+        iterables = [self.__get_iterable__(t, internal_unit) for t in tracks]
+        cookies = [self.__get_cookie__(t, internal_unit) for t in tracks]
         max_len = self._check_if_iterables_meet_len_policy(*iterables)
         distance = self.__compute_distance__(max_len, *(iterables + cookies))
-        return convert_time(distance, concrete_internal_unit, self.output_unit, quantize=False)
+        return convert_time(distance, internal_unit, output_unit, quantize=False)
 
     def __get_iterable__(self, track, unit):
         """
@@ -955,18 +985,18 @@ class TrackDistanceMeasure(DistanceMeasure):
 
         l = [len(iterable_a), len(iterable_b)]
 
-        if self.length_policy == 'exact':
+        if self.length_policy == "exact":
             if l[0] != l[1]:
-                raise ValueError("When length policy is set to 'exact', both iterables "
+                raise ValueError("When length policy is set to \"exact\", both iterables "
                                  "should have the same number of elements")
 
-        elif self.length_policy == 'multiple':
+        elif self.length_policy == "multiple":
             if not all(x % l[0] == 0 or l[0] % x == 0 for x in l):
-                raise ValueError("When length policy is set to 'multiple', the length of the largest "
+                raise ValueError("When length policy is set to \"multiple\", the length of the largest "
                                  "iterable should be a multiple of all the other iterable lengths")
 
-        elif self.length_policy != 'fill':
-            raise ValueError("Unknown length policy: '%s'" % self.length_policy)
+        elif self.length_policy != "fill":
+            raise ValueError("Unknown length policy: \"%s\"" % self.length_policy)
 
         return max(l)
 
@@ -1120,3 +1150,150 @@ def get_track_distance_measures(friendly_name=True):
         track_distance_measures[name] = tdm
 
     return track_distance_measures
+
+
+def rhythm_pair_track_iterator(rhythm_a, rhythm_b, tracks):
+    # type: (Rhythm, Rhythm, Union[str, Iterable[Any]]) -> Tuple[Any, Tuple[Rhythm.Track, Rhythm.Track]]
+
+    """
+    Returns an iterator over the tracks of the given rhythms. Each iteration yields a track name and a pair of tracks
+    with that track name; rhythm_a.get_track(name) and rhythm_b.get_track(name). This is yielded as a tuple:
+        (track_name, (track_a, track_b))
+
+    The tracks to iterate over can be specified with the 'tracks' argument:
+
+        [iterable] - Iterate over tracks with the names in the given iterable
+        '*'        - Iterate over all track names. If the rhythms contain tracks with the same name, this will just
+                     result in one iteration. E.g. if both rhythms contain a track named 'foo', this will result in one
+                     iteration yielding ('foo', (track_a, track_b))).
+        'a*'      - Iterate over track names in rhythm a
+        'b*'      - Iterate over track names in rhythm b
+
+    :param rhythm_a: the first rhythm
+    :param rhythm_b: the second rhythm
+    :param tracks: either an iterable containing the track names, or one of the wildcards ['*', 'a*' or 'b*']
+    :return: an iterator over the tracks of the given rhythms
+    """
+
+    wildcards = ['*', 'a*', 'b*']  # NOTE: Don't change the wildcard order or the code will break
+
+    try:
+        wildcard_index = wildcards.index(tracks)
+    except ValueError:
+        wildcard_index = -1
+        try:
+            tracks = iter(tracks)
+        except TypeError:
+            raise ValueError("Excepted an iterable or "
+                             "one of %s but got %s" % (wildcards, tracks))
+
+    it_a, it_b = rhythm_a.track_iter(), rhythm_b.track_iter()
+
+    if wildcard_index == -1:  # if given specific tracks
+        for track_name in tracks:
+            track_a = rhythm_a.get_track(track_name)
+            track_b = rhythm_b.get_track(track_name)
+            yield (track_name, (track_a, track_b))
+
+    elif wildcard_index == 0:  # if '*' wildcard
+        names = set()
+        for name, track_a in it_a:
+            names.add(name)
+            track_b = rhythm_b.get_track(name)
+            names.add(name)
+            yield (name, (track_a, track_b))
+        for name, track_b in it_b:
+            if name in names:
+                continue
+            track_a = rhythm_a.get_track(name)
+            yield (name, (track_a, track_b))
+
+    elif wildcard_index == 1:  # if wildcard 'a*'
+        for name, track_a in it_a:
+            track_b = rhythm_b.get_track(name)
+            yield (name, (track_a, track_b))
+
+    elif wildcard_index == 2:  # if wildcard 'b*'
+        for name, track_b in it_b:
+            track_a = rhythm_a.get_track(name)
+            yield (name, (track_a, track_b))
+
+    else:
+        assert False
+
+
+class RhythmDistanceMeasure(DistanceMeasure):
+    def __init__(self, track_distance_measure=HammingDistanceMeasure, tracks='a*', normalize=True):
+        # type: (Union[TrackDistanceMeasure, type], Union[str, Iterable[Any]]) -> RhythmDistanceMeasure
+        self._tracks = []
+        self.tracks = tracks
+        self._track_distance_measure = None
+        self.track_distance_measure = track_distance_measure
+        self.normalize = normalize
+
+    @property
+    def track_distance_measure(self):
+        """
+        The distance measure used to compute the distance between the rhythm tracks; an instance of TrackDistanceMeasure.
+        """
+
+        return self._track_distance_measure
+
+    @track_distance_measure.setter
+    def track_distance_measure(self, track_distance_measure):
+        """
+        Setter for the track distance measure. This should be either a TrackDistanceMeasure subclass or instance. When
+        given a class, the measure will be initialized with no arguments.
+        """
+
+        if inspect.isclass(track_distance_measure) and \
+                issubclass(track_distance_measure, TrackDistanceMeasure):
+            track_distance_measure = track_distance_measure()
+        elif not isinstance(track_distance_measure, TrackDistanceMeasure):
+            raise ValueError("Expected a TrackDistanceMeasure subclass or "
+                             "instance, but got '%s'" % track_distance_measure)
+        self._track_distance_measure = track_distance_measure
+
+    @property
+    def tracks(self):
+        """
+        The tracks to iterate over when computing the distance. See rhythm_pair_track_iterator.
+        """
+
+        return self._tracks
+
+    @tracks.setter
+    def tracks(self, tracks):
+        self._tracks = tracks
+
+    def get_distance(self, rhythm_a, rhythm_b):
+        """
+        Returns the average track distance from the tracks of rhythm a and b. When the track distance can't be computed,
+        duration of the longest rhythm is used as a distance. This can either happen when the a certain track doesn't
+        exist in the two rhythms (e.g. 'snare' track in rhythm_a but not in rhythm_b) or when the track distance measure
+        raises an exception when computing the distance.
+
+        See RhythmSimilarityMeasure.tracks to specify which tracks should measured.
+
+        :param rhythm_a: the first rhythm
+        :param rhythm_b: the second rhythm
+        :return: the average track distance of the two rhythms
+        """
+
+        measure = self.track_distance_measure
+        unit = measure.output_unit
+        duration = max(rhythm_a.get_duration(unit), rhythm_b.get_duration(unit))
+        n_tracks, total_distance = 0, 0
+
+        for name, tracks in rhythm_pair_track_iterator(rhythm_a, rhythm_b, self.tracks):
+            distance = duration
+            if None not in tracks:
+                try:
+                    distance = measure.get_distance(tracks[0], tracks[1])
+                except ValueError:
+                    pass
+            total_distance += distance
+            n_tracks += 1
+
+        average_distance = float(total_distance) / n_tracks
+        return average_distance / duration if self.normalize else average_distance
