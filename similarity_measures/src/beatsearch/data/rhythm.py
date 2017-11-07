@@ -693,7 +693,7 @@ class Rhythm(object):
 
         return len(self._tracks)
 
-    def to_midi(self, note_duration=0):
+    def to_midi(self, note_duration=0):  # type: (int) -> midi.Pattern
         """
         Convert this rhythm to a MIDI.
 
@@ -710,6 +710,7 @@ class Rhythm(object):
 
         # add note events
         for pitch, track in self._tracks.iteritems():
+            pitch = int(pitch)
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]

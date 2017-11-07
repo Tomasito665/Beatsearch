@@ -3,12 +3,15 @@ import os
 import sys
 import argparse
 import textwrap
+from time import time
 import midi
 import numpy as np
+from matplotlib import pyplot as plt
 from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythmcorpus import RhythmCorpus
-from beatsearch.utils import err_print
+from beatsearch.utils import err_print, print_progress_bar, make_dirs_if_not_exist
+from beatsearch.graphics.plot import RhythmPlotter
 from beatsearch.data.rhythm import Rhythm, RhythmDistanceMeasure, get_track_distance_measures
 
 SIM_MEASURES = get_track_distance_measures()
@@ -31,7 +34,7 @@ def get_args():
             This script returns a list with rhythms that return the lowest distance 
             to the given target rhythm. The script will search through rhythms in the 
             given rhythm corpus. This corpus should be a *.pkl file and it can be set 
-            with the --corpus flag.
+            with the -c flag.
             
             The rhythms are compared as a whole by default. However, if you just want 
             to compare certain tracks, you can specify that with the -t flag. For 
@@ -61,9 +64,9 @@ def get_args():
     )
 
     parser.add_argument(
-        "--corpus",
+        "-c",
         type=argparse.FileType("r"),
-        metavar="CORPUS",
+        metavar="PATH",
         dest="corpus",
         help="specifies the path to the *.pkl corpus file",
         default="./data/rhythms.pkl"
@@ -75,7 +78,7 @@ def get_args():
         type=str,
         default=['a*'],
         nargs='*',
-        metavar='T',
+        metavar='TRK',
         help="specifies the tracks to compare"
     )
 
@@ -87,14 +90,44 @@ def get_args():
     )
 
     parser.add_argument(
-        "--measure",
+        "-m",
         type=int,
         dest="measure",
         default=1,
         help="specifies which track similarity measure to use"
     )
 
+    parser.add_argument(
+        "-o",
+        metavar="DIR",
+        dest="out_dir",
+        help="specifies the output directory",
+        type=str,
+        default="./output"
+    )
+
+    parser.add_argument(
+        "--export-midi",
+        action="store_true",
+        dest="export_midi",
+        help="results will be exported as MIDI files to OUTPUT when set"
+    )
+
+    parser.add_argument(
+        "--render-notations",
+        action="store_true",
+        dest="render_notations",
+        help="results will be rendered to OUTPUT when set"
+    )
+
     return parser.parse_args()
+
+
+# noinspection PyShadowingNames
+def save_rhythm_figure(rhythm, figure, directory, prefix):
+    path = os.path.join(directory, "%s_%s" % (prefix, rhythm.name))
+    plt.savefig(path)
+    plt.close(figure)
 
 
 if __name__ == "__main__":
@@ -133,3 +166,33 @@ if __name__ == "__main__":
         distance = distances[index]
         formatted_d = "%.4f" % distance if type(distance) == float else str(distance)
         print "    %i) (d = %s) %s" % (i + 1, formatted_d, rhythm.name)
+
+    if not args.export_midi or not args.render_notations:
+        sys.exit(0)
+
+    out = make_dirs_if_not_exist(args.out_dir)
+    t_start = time()
+    plotter = RhythmPlotter("eighths")
+
+    if not os.path.isdir(out):
+        os.makedirs(out)
+
+    print ""
+
+    for i in range(args.n):
+        index = sorted_indexes[i]
+        rhythm = corpus[index]
+        print_progress_bar(i + 1, args.n, "Exporting...", fill="O", starting_time=t_start)
+        rhythm_prefix = str(i).zfill(2)
+
+        if args.export_midi:
+            pattern = rhythm.to_midi()
+            path = os.path.join(out, "%s_%s.mid" % (rhythm_prefix, rhythm.name))
+            midi.write_midifile(path, pattern)
+
+        if args.render_notations:
+            save_rhythm_figure(rhythm, plotter.chronotonic(rhythm), out, "chronotonic_%s" % rhythm_prefix)
+            save_rhythm_figure(rhythm, plotter.polygon(rhythm, quantize=False), out, "polygon_%s" % rhythm_prefix)
+            save_rhythm_figure(rhythm, plotter.schillinger(rhythm), out, "schillinger_%s" % rhythm_prefix)
+            save_rhythm_figure(rhythm, plotter.tedas(rhythm, quantize=False), out, "tedas_%s" % rhythm_prefix)
+            save_rhythm_figure(rhythm, plotter.spectral(rhythm, quantize=False), out, "spectral_%s" % rhythm_prefix)

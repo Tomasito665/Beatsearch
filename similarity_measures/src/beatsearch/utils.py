@@ -3,6 +3,8 @@ from __future__ import print_function
 import sys
 from time import time
 
+import os
+
 
 def merge_dicts(x, y):
     z = x.copy()
@@ -73,4 +75,21 @@ def friendly_named_class(name):
 
 
 def err_print(*args, **kwargs):
+    """
+    Print function wrapper for printing to stderr.
+    """
+
     print(*args, file=sys.stderr, **kwargs)
+
+
+def make_dirs_if_not_exist(directory):
+    """
+    Creates a directory if it doesn't exist yet.
+
+    :param directory: path
+    :return: path
+    """
+
+    if not os.path.isdir(directory):
+        os.makedirs(directory)
+    return directory
