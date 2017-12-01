@@ -7,3 +7,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+# BeatSearch generated stuff
+data/**/*.pkl
+output/
+
