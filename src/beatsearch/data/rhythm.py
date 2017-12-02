@@ -7,35 +7,76 @@ from functools import wraps
 import numpy as np
 import midi
 import math
-
 from beatsearch.utils import friendly_named_class
 
 
-def musical_unit_enum(**kwargs):
-    props = dict(map(lambda key: (key, kwargs[key][0]), kwargs))
-    props['__quarter_unit_scale_factors'] = dict(kwargs.values())
+class Unit(object):
+    _units = OrderedDict()
+    _unit_names = []
 
-    # noinspection PyDecorator
+    def __init__(self, name, value, scale_factor_from_quarter_note):
+        self._name = str(name)
+        self._value = value
+        self._scale_from_quarter = float(scale_factor_from_quarter_note)
+        Unit._units[value] = self
+
+    class UnknownTimeUnit(Exception):
+        pass
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def value(self):
+        return self._value
+
+    @property
+    def scale_factor_from_quarter_note(self):
+        return self._scale_from_quarter
+
     @staticmethod
-    def exists(unit):
-        return unit in props.values()
+    def exists(unit_value):
+        return unit_value in Unit._units
 
-    props['exists'] = exists
-    return type('Enum', (), props)
+    @staticmethod
+    def get(unit):  # type: (Union[str, Unit]) -> Unit
+        """
+        Returns the Unit object for the given unit value, e.g. "quarters" or "eighths". If the given unit is already
+        a Unit object, this method will return that.
+
+        :return: Unit object for given unit value or Unit if given Unit as argument
+        """
+
+        try:
+            unit_value = unit.value
+        except AttributeError:
+            unit_value = unit
+
+        try:
+            return Unit._units[unit_value]
+        except KeyError:
+            raise Unit.UnknownTimeUnit(unit_value)
+
+    @staticmethod
+    def get_unit_names():
+        """
+        Returns a tuple containing the names of the units.
+
+        :return: tuple with unit names
+        """
+
+        if len(Unit._unit_names) != len(Unit._units):
+            Unit._unit_names = tuple(unit.name for unit in Unit._units.values())
+        return Unit._unit_names
 
 
-Unit = musical_unit_enum(
-    FULL=('fulls', 0.25),
-    HALF=('halves', 0.5),
-    QUARTER=('quarters', 1.0),
-    EIGHTH=('eighths', 2.0),
-    SIXTEENTH=('sixteenths', 4.0),
-    THIRTYSECOND=('thirty-seconds', 8.0)
-)
-
-
-class UnknownTimeUnit(Exception):
-    pass
+Unit.FULL = Unit("Full", "fulls", 0.25)
+Unit.HALF = Unit("Half", "halves", 0.5)
+Unit.QUARTER = Unit("Quarter", "quarters", 1.0)
+Unit.EIGHTH = Unit("Eighth", "eighths", 2.0)
+Unit.SIXTEENTH = Unit("Sixteenth", "sixteenths", 4.0)
+Unit.THIRTY_SECOND = Unit("Thirty-second", "thirty-seconds", 8.0)
 
 
 def convert_time(time, unit_from, unit_to, quantize=False):
@@ -53,25 +94,23 @@ def convert_time(time, unit_from, unit_to, quantize=False):
     """
 
     if unit_from == unit_to:
-        return time
-
-    # noinspection PyUnresolvedReferences
-    quarter_unit_scale_factors = Unit.__quarter_unit_scale_factors
+        return int(round(time)) if quantize else time
 
     try:
-        time_in_quarters = time / float(unit_from)
-    except ValueError:
-        try:
-            time_in_quarters = time / quarter_unit_scale_factors[unit_from]
-        except KeyError:
-            raise UnknownTimeUnit(unit_from)
+        # if unit_from is a time resolution
+        time_in_quarters = time / float(unit_from)  # if unit_from is a time resolution
+    except (ValueError, TypeError):
+        # if unit_from is musical unit
+        unit_from = Unit.get(unit_from)
+        time_in_quarters = time / unit_from.scale_factor_from_quarter_note
+
     try:
+        # if unit_to is a time resolution
         converted_time = time_in_quarters * float(unit_to)
-    except ValueError:
-        try:
-            converted_time = time_in_quarters * quarter_unit_scale_factors[unit_to]
-        except KeyError:
-            raise UnknownTimeUnit(unit_to)
+    except (ValueError, TypeError):
+        # if unit_to is a musical unit
+        unit_to = Unit.get(unit_to)
+        converted_time = time_in_quarters * unit_to.scale_factor_from_quarter_note
 
     return int(round(converted_time)) if quantize else converted_time
 
@@ -1153,6 +1192,9 @@ def get_track_distance_measures(friendly_name=True):
     return track_distance_measures
 
 
+TRACK_WILDCARDS = ["*", "a*", "b*"]  # NOTE: Don't change the wildcard order or the code will break
+
+
 def rhythm_pair_track_iterator(rhythm_a, rhythm_b, tracks):
     # type: (Rhythm, Rhythm, Union[str, Iterable[Any]]) -> Tuple[Any, Tuple[Rhythm.Track, Rhythm.Track]]
 
@@ -1176,17 +1218,15 @@ def rhythm_pair_track_iterator(rhythm_a, rhythm_b, tracks):
     :return: an iterator over the tracks of the given rhythms
     """
 
-    wildcards = ['*', 'a*', 'b*']  # NOTE: Don't change the wildcard order or the code will break
-
     try:
-        wildcard_index = wildcards.index(tracks)
+        wildcard_index = TRACK_WILDCARDS.index(tracks)
     except ValueError:
         wildcard_index = -1
         try:
             tracks = iter(tracks)
         except TypeError:
             raise ValueError("Excepted an iterable or "
-                             "one of %s but got %s" % (wildcards, tracks))
+                             "one of %s but got %s" % (TRACK_WILDCARDS, tracks))
 
     it_a, it_b = rhythm_a.track_iter(), rhythm_b.track_iter()
 
@@ -1225,7 +1265,7 @@ def rhythm_pair_track_iterator(rhythm_a, rhythm_b, tracks):
 
 class RhythmDistanceMeasure(DistanceMeasure):
     def __init__(self, track_distance_measure=HammingDistanceMeasure, tracks='a*', normalize=True):
-        # type: (Union[TrackDistanceMeasure, type], Union[str, Iterable[Any]]) -> RhythmDistanceMeasure
+        # type: (Union[TrackDistanceMeasure, type], Union[str, Iterable[Any]]) -> None
         self._tracks = []
         self.tracks = tracks
         self._track_distance_measure = None
