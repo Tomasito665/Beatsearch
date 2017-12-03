@@ -245,6 +245,9 @@ class TimeSignature(object):
             return False
         return self.numerator == other.numerator and self.denominator == other.denominator
 
+    def __str__(self):
+        return "%i/%i" % (self.numerator, self.denominator)
+
     @staticmethod
     def from_midi_event(midi_event):
         if not isinstance(midi_event, midi.TimeSignatureEvent):
@@ -1040,6 +1043,44 @@ class TrackDistanceMeasure(DistanceMeasure):
 
         return max(l)
 
+    __measures__ = {}  # track distance implementations by __friendly_name__
+
+    @classmethod
+    def get_measures(cls, friendly_name=True):
+        """
+        Returns an ordered dictionary containing implementations of TrackDistanceMeasure by name.
+
+        :param friendly_name: when True, the name will be retrieved with __friendly_name__ instead of __name__
+        :return: an ordered dictionary containing all subclasses of TrackDistanceMeasure by name
+        """
+
+        if len(TrackDistanceMeasure.__measures__) != TrackDistanceMeasure.__subclasses__():
+            measures = OrderedDict()
+            for tdm in cls.__subclasses__():
+                name = tdm.__name__
+                if friendly_name:
+                    try:
+                        name = tdm.__friendly_name__
+                    except AttributeError:
+                        pass
+                measures[name] = tdm
+            cls.__measures__ = measures
+
+        return TrackDistanceMeasure.__measures__
+
+    @classmethod
+    def get_measure_names(cls):
+        measures = cls.get_measures()
+        return measures.keys()
+
+    @classmethod
+    def get_measure_by_name(cls, measure_name):
+        measures = cls.get_measures()
+        try:
+            return measures[measure_name]
+        except KeyError:
+            raise ValueError("No measure with name: '%s'" % measure_name)
+
 
 @friendly_named_class("Hamming distance")
 class HammingDistanceMeasure(TrackDistanceMeasure):
@@ -1168,28 +1209,6 @@ class ChronotonicDistanceMeasure(TrackDistanceMeasure):
             chronotonic_distance += abs(x - y)
             i += 1
         return chronotonic_distance
-
-
-def get_track_distance_measures(friendly_name=True):
-    """
-    Returns an ordered dictionary containing implementations of TrackDistanceMeasure by name.
-
-    :param friendly_name: when True, the name will be retrieved with __friendly_name__ instead of __name__
-    :return: an ordered dictionary containing all subclasses of TrackDistanceMeasure by name
-    """
-
-    track_distance_measures = OrderedDict()
-
-    for tdm in TrackDistanceMeasure.__subclasses__():
-        name = tdm.__name__
-        if friendly_name:
-            try:
-                name = tdm.__friendly_name__
-            except AttributeError:
-                pass
-        track_distance_measures[name] = tdm
-
-    return track_distance_measures
 
 
 TRACK_WILDCARDS = ["*", "a*", "b*"]  # NOTE: Don't change the wildcard order or the code will break
@@ -1338,3 +1357,19 @@ class RhythmDistanceMeasure(DistanceMeasure):
 
         average_distance = float(total_distance) / n_tracks
         return average_distance / duration if self.normalize else average_distance
+
+
+def create_rumba_rhythm(resolution=240, track=38, bpm=120):
+    """
+    Utility function that creates a one-bar rumba rhythm.
+
+    :param resolution: rhythm resolution
+    :param track: which track to place the rumba pattern on
+    :param bpm: rhythm tempo in beats per minute
+    :return: rumba rhythm
+    """
+
+    onset_data = {track: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
+    rhythm = Rhythm("<Dummy: Rumba>", bpm, TimeSignature(4, 4), onset_data, 4, 16)
+    rhythm.set_resolution(resolution)
+    return rhythm

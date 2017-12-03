@@ -1,9 +1,8 @@
 # coding=utf-8
 from __future__ import print_function
+import os
 import sys
 from time import time
-
-import os
 
 
 def merge_dicts(x, y):
@@ -93,3 +92,38 @@ def make_dirs_if_not_exist(directory):
     if not os.path.isdir(directory):
         os.makedirs(directory)
     return directory
+
+
+def head_trail_iter(iterable):
+    """
+    Returns an iterator which yields a tuple (is_first, is_last, item) on each iteration.
+
+    :param iterable: iterable with length
+    :return: iterator returning (is_first, is_last, item)
+    """
+
+    last_i = len(iterable) - 1
+    for i, item in enumerate(iterable):
+        first = i == 0
+        last = i == last_i
+        yield first, last, item
+
+
+def get_beatsearch_dir(mkdir=True):
+    """
+    Returns the beatsearch directory. This directory is used to store *.ini files and output various beatsearch output
+    data.
+
+    :param mkdir: when True, this function will create the beatsearch directory in case it does not exist
+    :return: beatsearch directory path
+    """
+
+    home = os.path.expanduser("~")
+    beatsearch_dir = os.path.join(home, "beatsearch")
+    if not os.path.isdir(beatsearch_dir) and mkdir:
+        os.mkdir(beatsearch_dir)
+    return beatsearch_dir
+
+
+def no_callback(*_, **__):
+    return None
