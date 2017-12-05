@@ -2,7 +2,9 @@
 from __future__ import print_function
 import os
 import sys
+import typing as tp
 from time import time
+from inspect import isclass
 
 
 def merge_dicts(x, y):
@@ -127,3 +129,30 @@ def get_beatsearch_dir(mkdir=True):
 
 def no_callback(*_, **__):
     return None
+
+
+def type_check_and_instantiate_if_necessary(thing, thing_base_type, allow_none=True, *args, **kwargs):
+    """
+    Instantiates the given 'thing' with the given args and kwargs and returns it. If the given 'thing' is already an
+    instance of the given 'thing_base_type' it will return 'thing'.
+
+    :param thing: either an instance or a (sub)-class of 'thing_base_type'
+    :param thing_base_type: a class
+    :param allow_none: when True, this function will allow None things (it will return None if 'thing' is None)
+    :param args: if an initialization is needed, this positional arguments will be passed to the constructor
+    :param kwargs: if an initialization is needed, this named arguments will be passed to the constructor
+    :return: an instance of 'thing_base_type' (might return None if 'allow_none' is True)
+    """
+    # type: (tp.Any, tp.Type, bool) -> tp.Any
+
+    if not isclass(thing_base_type):
+        raise TypeError("Expected a class but got \"%s\"" % str(thing_base_type))
+
+    if (allow_none and thing is None) or isinstance(thing, thing_base_type):
+        return thing
+
+    if not isclass(thing) or not issubclass(thing, thing_base_type):
+        raise TypeError("Expected either a \"%s\" (sub)-class or "
+                        "an instance but got \"%s\"" % (thing_base_type, str(thing)))
+
+    return thing(*args, **kwargs)

@@ -1,7 +1,6 @@
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from functools import wraps
 from inspect import isclass
-
 import typing as tp
 import threading
 import numpy as np
@@ -14,10 +13,10 @@ from beatsearch.data.rhythm import (
     HammingDistanceMeasure
 )
 from beatsearch.data.rhythmcorpus import RhythmCorpus
-from beatsearch.utils import no_callback
+from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
 
 
-class BSRhythmController(object):
+class BSRhythmPlayer(object):
     def __init__(self):
         self._on_playback_ended_callback = no_callback
 
@@ -30,9 +29,6 @@ class BSRhythmController(object):
     def is_playing(self):  # type: () -> bool
         raise NotImplementedError
 
-    def get_target_rhythm(self):  # type: () -> Rhythm
-        raise NotImplementedError
-
     @property
     def on_playback_ended(self):  # type: () -> tp.Callable
         return self._on_playback_ended_callback
@@ -42,10 +38,10 @@ class BSRhythmController(object):
         self._on_playback_ended_callback = callback
 
 
-class BSFakeRhythmController(BSRhythmController):
+class BSFakeRhythmPlayer(BSRhythmPlayer):
 
     def __init__(self, playback_duration=2.0, rhythm=create_rumba_rhythm(track=36)):
-        super(BSFakeRhythmController, self).__init__()
+        super(BSFakeRhythmPlayer, self).__init__()
         self._playback_duration = playback_duration
         self._timer = None
         self._rhythm = rhythm
@@ -66,9 +62,6 @@ class BSFakeRhythmController(BSRhythmController):
     def is_playing(self):
         return self._timer is not None
 
-    def get_target_rhythm(self):
-        return self._rhythm
-
 
 class BSController(object):
     _rhythm_info_types = None
@@ -79,6 +72,7 @@ class BSController(object):
     RHYTHM_PLAYBACK_STOP = "<RhythmPlayback-Stop>"
     CORPUS_LOADED = "<Corpus-Loaded>"
     DISTANCES_TO_TARGET_UPDATED = "<TargetDistances-Updated>"
+    TARGET_RHYTHM_SET = "<TargetRhythm-Set>"
 
     # description of data returned by get_rhythm_info
     RHYTHM_INFO_STRUCTURE = OrderedDict((
@@ -90,33 +84,27 @@ class BSController(object):
         ("Track count", int)
     ))
 
-    def __init__(
-            self,
-            distance_measure=HammingDistanceMeasure,
-            rhythm_controller=BSRhythmController
-    ):  # type: (tp.Type[TrackDistanceMeasure], tp.Union[BSRhythmController, tp.Type[BSRhythmController]]) -> None
+    def __init__(self, distance_measure=HammingDistanceMeasure, rhythm_player=None):
+        # type: (tp.Type[TrackDistanceMeasure], tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None]) -> None
 
         self._corpus = None
         self._distances_to_target = np.empty(0)
+        self._distances_went_stale = False
         self._rhythm_measure = RhythmDistanceMeasure()
         self._rhythm_selection = OrderedSet()
-        if isclass(rhythm_controller) and issubclass(rhythm_controller, BSRhythmController):
-            self._rhythm_controller = rhythm_controller()
-        elif isinstance(rhythm_controller, BSRhythmController):
-            self._rhythm_controller = rhythm_controller
-        else:
-            raise TypeError("Expected either a BSRhythmHandler class or instance but got '%s'" % str(rhythm_controller))
+        self._target_rhythm = None
         self._target_rhythm_prev_update = None
-        self._rhythm_controller.on_playback_ended = self._on_rhythm_playback_ended
         self._lock = threading.Lock()
-        self._distances_went_stale = False
+        self._rhythm_player = None
         self.set_distance_measure(distance_measure)
-        self._callbacks = dict((event, []) for event in [
+        self.set_rhythm_player(rhythm_player)
+        self._callbacks = dict((event, OrderedSet()) for event in [
             BSController.RHYTHM_SELECTION,
             BSController.CORPUS_LOADED,
             BSController.DISTANCES_TO_TARGET_UPDATED,
             BSController.RHYTHM_PLAYBACK_START,
-            BSController.RHYTHM_PLAYBACK_STOP
+            BSController.RHYTHM_PLAYBACK_STOP,
+            BSController.TARGET_RHYTHM_SET
         ])
 
     def load_corpus(self, in_file):
@@ -149,6 +137,40 @@ class BSController(object):
 
         return self._corpus is not None
 
+    @property
+    def target_rhythm(self):
+        return self._target_rhythm
+
+    @target_rhythm.setter
+    def target_rhythm(self, target_rhythm):
+        if target_rhythm == self._target_rhythm:
+            return
+        if target_rhythm is None:
+            self._target_rhythm = None
+            return
+        if not isinstance(target_rhythm, Rhythm):
+            raise TypeError("Expected a Rhythm but got \"%s\"" % target_rhythm)
+        self._target_rhythm = target_rhythm
+        self._distances_went_stale = True
+        self._fire_event(self.TARGET_RHYTHM_SET)
+
+    def set_rhythm_player(self, rhythm_player):
+        # type: (tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None]) -> None
+
+        # stop and reset previous player
+        if self._rhythm_player is not None:
+            self._rhythm_player.stop_playback()
+            self._fire_event(self.RHYTHM_PLAYBACK_STOP)
+            self._rhythm_player.on_playback_ended = no_callback
+
+        if rhythm_player is None:
+            self._rhythm_player = None
+            return
+
+        rhythm_player = type_check_and_instantiate_if_necessary(rhythm_player, BSRhythmPlayer, allow_none=True)
+        rhythm_player.on_playback_ended = lambda *args: self._fire_event(self.RHYTHM_PLAYBACK_STOP)
+        self._rhythm_player = rhythm_player
+
     def set_distance_measure(self, track_distance_measure):
         if isinstance(track_distance_measure, str):
             try:
@@ -161,10 +183,6 @@ class BSController(object):
     def set_tracks_to_compare(self, tracks):
         self._rhythm_measure.tracks = tracks
         self._distances_went_stale = True
-
-    def check_if_corpus_loaded(self):
-        if not self.has_corpus_loaded():
-            raise Exception("Corpus not loaded")
 
     def get_rhythm_count(self):
         try:
@@ -186,10 +204,11 @@ class BSController(object):
                 self._distances_to_target = np.full(n_rhythms, np.inf)
 
     def update_distances(self):
-        self.check_if_corpus_loaded()
+        self._precondition_check_corpus_loaded()
+        self._precondition_check_target_rhythm_set()
 
         measure = self._rhythm_measure
-        target_rhythm = self._rhythm_controller.get_target_rhythm()
+        target_rhythm = self._target_rhythm
 
         if target_rhythm == self._target_rhythm_prev_update:
             self._distances_went_stale = True
@@ -238,6 +257,10 @@ class BSController(object):
     def get_corpus_name(self):
         return self._corpus.name
 
+    def get_rhythm_by_index(self, rhythm_ix):
+        self._precondition_check_rhythm_index(rhythm_ix)
+        return self._corpus[rhythm_ix]
+
     @staticmethod
     def get_rhythm_info_names():
         structure = BSController.RHYTHM_INFO_STRUCTURE
@@ -250,12 +273,13 @@ class BSController(object):
 
     def rhythm_selection_set(self, selected_rhythms):
         self._rhythm_selection.clear()
-        n_rhythms = self.get_rhythm_count()
         for rhythm_ix in selected_rhythms:
-            if not (0 <= rhythm_ix < n_rhythms):
-                raise IndexError("Expected rhythm index in range [0, %i]" % (n_rhythms - 1))
+            self._precondition_check_rhythm_index(rhythm_ix)
             self._rhythm_selection.add(rhythm_ix)
         self._fire_event(BSController.RHYTHM_SELECTION)
+
+    def rhythm_player_set(self):
+        return self._rhythm_player is not None
 
     def rhythm_selection_clear(self):
         self.rhythm_selection_set([])
@@ -264,32 +288,66 @@ class BSController(object):
         return tuple(self._rhythm_selection)
 
     def are_rhythms_playing_back(self):
-        return self._rhythm_controller.is_playing()
+        return self._rhythm_player.is_playing()
+
+    def is_target_rhythm_set(self):
+        return self._target_rhythm is not None
 
     def playback_selected_rhythms(self):
-        self.check_if_corpus_loaded()
-        rhythms = self._corpus
+        self._precondition_check_corpus_loaded()
+        self._precondition_check_rhythm_player_set()
         selected_rhythm_indices = self.get_rhythm_selection()
-        rhythms = [rhythms[rhythm_ix] for rhythm_ix in selected_rhythm_indices]
-        self._rhythm_controller.playback_rhythms(rhythms)
+        rhythms = [self.get_rhythm_by_index(i) for i in selected_rhythm_indices]
+        self._rhythm_player.playback_rhythms(rhythms)
         self._fire_event(BSController.RHYTHM_PLAYBACK_START)
 
     def stop_rhythm_playback(self):
-        self._rhythm_controller.stop_playback()
+        self._precondition_check_rhythm_player_set()
+        self._rhythm_player.stop_playback()
         self._fire_event(BSController.RHYTHM_PLAYBACK_STOP)
 
     def bind(self, event_name, callback):
         if not callable(callback):
             raise TypeError("Expected a callable")
-        try:
-            self._callbacks[event_name].append(callback)
-        except KeyError:
-            raise ValueError("Unknown event '%s'" % event_name)
+        self._precondition_check_event_name(event_name)
+        event_callbacks = self._callbacks[event_name]
+        if callback in event_callbacks:
+            event_callbacks.remove(callback)
+        self._callbacks[event_name].add(callback)
+
+    def unbind(self, event_name, callback):
+        self._precondition_check_event_name(event_name)
+        event_callbacks = self._callbacks[event_name]
+        if callback not in event_callbacks:
+            return False
+        self._callbacks[event_name].remove(callback)
+        return True
 
     def _fire_event(self, event_name, *args, **kwargs):
-        callbacks = self._callbacks.get(event_name, [])
-        for clb in callbacks:
+        self._precondition_check_event_name(event_name)
+        for clb in self._callbacks[event_name]:
             clb(*args, **kwargs)
 
     def _on_rhythm_playback_ended(self):
         self._fire_event(BSController.RHYTHM_PLAYBACK_STOP)
+
+    def _precondition_check_rhythm_index(self, rhythm_ix):
+        n_rhythms = self.get_rhythm_count()
+        if not (0 <= rhythm_ix < n_rhythms):
+            raise IndexError("Expected rhythm index in range [0, %i]" % (n_rhythms - 1))
+
+    def _precondition_check_rhythm_player_set(self):
+        if not self.rhythm_player_set():
+            raise Exception("Rhythm player not set")
+
+    def _precondition_check_event_name(self, event_name):
+        if event_name not in self._callbacks:
+            raise ValueError("Unknown event \"%s\"" % event_name)
+
+    def _precondition_check_corpus_loaded(self):
+        if not self.has_corpus_loaded():
+            raise Exception("Corpus not loaded")
+
+    def _precondition_check_target_rhythm_set(self):
+        if not self.is_target_rhythm_set():
+            raise Exception("Target rhythm not set")

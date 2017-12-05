@@ -1,16 +1,18 @@
+import os
 import ttk
 # noinspection PyPep8Naming
 import Tkinter as tk
+import tkFileDialog
 import tkFont
 from functools import wraps
-from typing import Type, Callable
+import typing as tp
 from collections import OrderedDict
 from beatsearch.data.rhythm import (
     TrackDistanceMeasure,
     TRACK_WILDCARDS,
     Unit
 )
-from beatsearch.utils import head_trail_iter, no_callback
+from beatsearch.utils import head_trail_iter, no_callback, type_check_and_instantiate_if_necessary
 from beatsearch.app.control import BSController
 
 
@@ -75,18 +77,19 @@ class BSSearchForm(object, BSAppFrame):
         ])
 
     def redraw(self):
-        pass
+        controller = self.controller
+        self._btn_search.config(state=tk.NORMAL if controller.is_target_rhythm_set() else tk.DISABLED)
 
     @property
-    def on_new_measure(self):  # type: () -> Callable[str]
+    def on_new_measure(self):  # type: () -> tp.Callable[str]
         return self._callbacks[self.COMBO_DISTANCE_MEASURE]
 
     @property
-    def on_new_tracks(self):  # type: () -> Callable[str]
+    def on_new_tracks(self):  # type: () -> tp.Callable[str]
         return self._callbacks[self.COMBO_TRACKS]
 
     @property
-    def on_new_quantize(self):  # type: () -> Callable[str]
+    def on_new_quantize(self):  # type: () -> tp.Callable[str]
         return self._callbacks[self.COMBO_QUANTIZE]
 
     @on_new_measure.setter
@@ -102,7 +105,7 @@ class BSSearchForm(object, BSAppFrame):
         self._set_combobox_value_callback(self.COMBO_QUANTIZE, callback)
 
     def _set_combobox_value_callback(self, combobox_name, callback):
-        # type: (str, Callable[str]) -> None
+        # type: (str, tp.Callable[str]) -> None
         @wraps(callback)
         def wrapper(event):
             value = event.widget.get()
@@ -119,6 +122,18 @@ class BSSearchForm(object, BSAppFrame):
         if not callable(callback):
             raise TypeError("Expected callable but got '%s'" % str(callback))
         self._btn_search.configure(command=callback)
+
+
+class ContextMenu(tk.Menu):
+    def __init__(self, root, event_show="<Button-3>", **kwargs):
+        tk.Menu.__init__(self, root, tearoff=0, **kwargs)
+        root.bind(event_show, lambda event: self.show(event.x_root, event.y_root))
+
+    def show(self, x, y):
+        try:
+            self.tk_popup(x, y, 0)
+        finally:
+            self.grab_release()
 
 
 class BSRhythmList(BSAppFrame):
@@ -152,16 +167,49 @@ class BSRhythmList(BSAppFrame):
 
         self._corpus_name = None
 
+        context_menu = ContextMenu(self._tree_view)
+        context_menu.add_command(label="Set as target rhythm", command=self._on_set_as_target_rhythm)
+        context_menu.add_command(label="Plot rhythms")  # TODO
+        self._context_menu = context_menu
+
+        self._on_request_target_rhythm = no_callback
+
+    def redraw(self):
+        controller = self.controller
+
+        if self._corpus_changed():
+            self._clear_tree_view()
+            self._fill_tree_view()
+            return
+
+        rhythm_info = tuple(controller.get_rhythm_info())
+
+        tv = self._tree_view
+        for item_iid in tv.get_children():
+            rhythm_ix = self._get_rhythm_index(item_iid)
+            tv.item(item_iid, values=rhythm_info[rhythm_ix])
+
+    @property
+    def on_request_target_rhythm(self):  # type: () -> tp.Callable[int]
+        return self._on_request_target_rhythm
+
+    @on_request_target_rhythm.setter
+    def on_request_target_rhythm(self, callback):  # type: (tp.Callable[int]) -> None
+        if not callable(callback):
+            raise Exception("Expected a callback but got \"%s\"" % str(callback))
+        self._on_request_target_rhythm = callback
+
+    def _on_set_as_target_rhythm(self):
+        selected_rhythms = self._get_selected_rhythm_indices()
+        assert len(selected_rhythms) == 1
+        self.on_request_target_rhythm(selected_rhythms[0])
+
     def _fill_tree_view(self):
         controller = self.controller
         column_headers = controller.get_rhythm_info_names()
 
         for col in column_headers:
-            self._tree_view.heading(
-                col, text=col,
-                command=lambda c=col: BSRhythmList.sort_tree_view(self._tree_view, c, False)
-            )
-
+            self._tree_view.heading(col, text=col, command=lambda c=col: self._sort_tree_view(c, False))
             # adjust column width to header string
             self._tree_view.column(col, width=tkFont.Font().measure(col))
 
@@ -184,21 +232,6 @@ class BSRhythmList(BSAppFrame):
         corpus_name = self.controller.get_corpus_name()
         return self._corpus_name != corpus_name
 
-    def redraw(self):
-        controller = self.controller
-
-        if self._corpus_changed():
-            self._clear_tree_view()
-            self._fill_tree_view()
-            return
-
-        rhythm_info = tuple(controller.get_rhythm_info())
-
-        tv = self._tree_view
-        for item_iid in tv.get_children():
-            rhythm_ix = self._get_rhythm_index(item_iid)
-            tv.item(item_iid, values=rhythm_info[rhythm_ix])
-
     def _on_mousewheel(self, event):
         self._tree_view.yview_scroll(-1 * (event.delta / 15), tk.UNITS)
 
@@ -208,21 +241,31 @@ class BSRhythmList(BSAppFrame):
         tv_values = tv_item['values']
         return tv_values[0]
 
+    def _get_selected_rhythm_indices(self):
+        tv_selection = self._tree_view.selection()
+        return [self._get_rhythm_index(item_iid) for item_iid in tv_selection]
+
     def _on_tree_select(self, _):
         controller = self.controller
-        tv = self._tree_view
-        tv_selection = tv.selection()
-        selected_rhythms = [self._get_rhythm_index(item_iid) for item_iid in tv_selection]
+        selected_rhythms = self._get_selected_rhythm_indices()
         controller.rhythm_selection_set(selected_rhythms)
 
-    @staticmethod
-    def sort_tree_view(tree_view, column, descending=False):
-        column_type = BSController.RHYTHM_INFO_STRUCTURE[column]  # type to cast the data to
-        data = [(tree_view.set(child, column), child) for child in tree_view.get_children("")]  # data to sort
-        data.sort(reverse=descending, key=lambda cell_data: column_type(cell_data[0]))  # cast for correct sort
-        for i, item in enumerate(data):
-            tree_view.move(item[1], "", i)
-        tree_view.heading(column, command=lambda c=column: BSRhythmList.sort_tree_view(tree_view, c, not descending))
+    def _sort_tree_view(self, column, descending):  # sorts the rhythms by the given column
+        tv = self._tree_view
+        data_type = BSController.RHYTHM_INFO_STRUCTURE[column]
+        data = [(tv.set(item_iid, column), item_iid) for item_iid in tv.get_children("")]
+        data.sort(reverse=descending, key=lambda cell: data_type(cell[0]))
+        for i, row_info in enumerate(data):
+            tv.move(row_info[1], "", i)
+        tv.heading(column, command=lambda col=column: self._sort_tree_view(col, not descending))
+
+    class SingleRhythmContextMenu(ContextMenu):
+        def __init__(self, root, **kwargs):
+            ContextMenu.__init__(self, root, **kwargs)
+            self.add_command(label="Set as target rhythm")
+            self.add_command(label="Plot rhythm")
+            self.add_separator()
+            self.add_command(label="Hola, soy Juan")
 
 
 class BSTransportControls(object, BSAppFrame):
@@ -251,6 +294,50 @@ class BSTransportControls(object, BSAppFrame):
         self._btn_toggle_play.configure(command=callback)
 
 
+class BSMainMenu(tk.Menu):
+    def __init__(self, root, **kwargs):
+        tk.Menu.__init__(self, root, **kwargs)
+        f_menu = tk.Menu(self, tearoff=0)
+        f_menu.add_command(label="Load corpus", command=self._show_open_corpus_file_dialog)
+        f_menu.add_separator()
+        f_menu.add_command(label="Exit", command=lambda *_: self.on_request_exit())
+        self.add_cascade(label="File", menu=f_menu)
+        self._on_request_load_corpus = no_callback
+        self._on_request_exit = no_callback
+
+    @property
+    def on_request_load_corpus(self):  # type: () -> tp.Callable[str]
+        return self._on_request_load_corpus
+
+    @on_request_load_corpus.setter
+    def on_request_load_corpus(self, callback):
+        if not callable(callback):
+            raise Exception("Expected callable but got \"%s\"" % str(callback))
+        self._on_request_load_corpus = callback
+
+    @property
+    def on_request_exit(self):
+        return self._on_request_exit
+
+    @on_request_exit.setter
+    def on_request_exit(self, callback):
+        if not callable(callback):
+            raise Exception("Expected callable but got \"%s\"" % str(callback))
+        self._on_request_exit()
+
+    def _show_open_corpus_file_dialog(self):
+        fname = tkFileDialog.askopenfilename(
+            title="Open rhythm corpus file",
+            filetypes=[("Pickle files", "*.pkl")],
+            parent=self.master
+        )
+
+        if not os.path.isfile(fname):
+            return
+
+        self.on_request_load_corpus(fname)
+
+
 class BSApp(tk.Tk):
     WINDOW_TITLE = "BeatSearch search tool"
 
@@ -263,18 +350,15 @@ class BSApp(tk.Tk):
     FRAME_TRANSPORT = '<Frame-Transport>'
     FRAME_SEARCH = '<Frame-Search>'
 
-    def __init__(
-            self,
-            controller=BSController(),
-            search_frame_cls=BSSearchForm,
-            rhythms_frame_cls=BSRhythmList,
-            transport_frame_cls=BSTransportControls
-    ):  # type: (BSController, Type[BSSearchForm], Type[BSRhythmList], Type[BSTransportControls]) -> None
+    def __init__(self, controller=BSController(), search_frame_cls=BSSearchForm,
+                 rhythms_frame_cls=BSRhythmList, transport_frame_cls=BSTransportControls, main_menu=BSMainMenu):
+        # type: (BSController, tp.Type[BSSearchForm], tp.Type[BSRhythmList], tp.Union[tp.Type[BSTransportControls], None], tp.Union[BSMainMenu, tp.Type[BSMainMenu], None]) -> None
 
         tk.Tk.__init__(self)
         self.wm_title(BSApp.WINDOW_TITLE)
         self.controller = controller
 
+        self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
 
         frame_info = (
@@ -288,6 +372,7 @@ class BSApp(tk.Tk):
                 continue
             self.frames[frame_name] = frame_cls(self)
 
+        self._setup_menubar()
         self._setup_frames()
 
         pady = BSApp.STYLES['inner-pad-y'] / 2.0
@@ -308,6 +393,7 @@ class BSApp(tk.Tk):
             BSController.RHYTHM_PLAYBACK_STOP: [BSApp.FRAME_TRANSPORT],
             BSController.CORPUS_LOADED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.DISTANCES_TO_TARGET_UPDATED: [BSApp.FRAME_RHYTHM_LIST],
+            BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH],
         }
 
         for event_name, frames in redraw_frames_on_controller_callbacks.items():
@@ -323,19 +409,35 @@ class BSApp(tk.Tk):
         if not frame_names:
             frame_names = self.frames.keys()
         for name in frame_names:
-            self.frames[name].redraw()
+            try:
+                self.frames[name].redraw()
+            except KeyError:
+                pass
 
     def get_frame_names(self):
         return self.frames.keys()
 
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
-        transport_frame = self.frames[BSApp.FRAME_TRANSPORT]
+        rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
+        rhythms_frame.on_request_target_rhythm = self._handle_target_rhythm_request
         search_frame.search_command = self.controller.update_distances
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
-        if transport_frame is not None:
+
+        try:
+            transport_frame = self.frames[BSApp.FRAME_TRANSPORT]
             transport_frame.toggle_play_command = self._toggle_rhythm_playback
+        except KeyError:
+            pass
+
+    def _setup_menubar(self):
+        menubar = self._menubar
+        if menubar is None:
+            return
+        menubar.on_request_load_corpus = self.controller.load_corpus
+        menubar.on_request_exit = self.destroy
+        self.config(menu=menubar)
 
     def _toggle_rhythm_playback(self):
         controller = self.controller
@@ -343,6 +445,11 @@ class BSApp(tk.Tk):
             controller.stop_rhythm_playback()
         else:
             controller.playback_selected_rhythms()
+
+    def _handle_target_rhythm_request(self, rhythm_ix):
+        controller = self.controller
+        rhythm = controller.get_rhythm_by_index(rhythm_ix)
+        controller.target_rhythm = rhythm
 
 
 class ToggleButton(tk.Button):
