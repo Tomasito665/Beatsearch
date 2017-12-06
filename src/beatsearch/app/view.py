@@ -140,7 +140,7 @@ class BSRhythmList(BSAppFrame):
 
     def __init__(self, app, h_scroll=False, v_scroll=True, **kwargs):
         BSAppFrame.__init__(self, app, **kwargs)
-        column_headers = BSController.get_rhythm_info_names()
+        column_headers = BSController.get_rhythm_data_attr_names()
         self._tree_view = ttk.Treeview(columns=column_headers, show="headings")
 
         scrollbars = {
@@ -182,12 +182,12 @@ class BSRhythmList(BSAppFrame):
             self._fill_tree_view()
             return
 
-        rhythm_info = tuple(controller.get_rhythm_info())
+        rhythm_data = tuple(controller.get_rhythm_data())
 
         tv = self._tree_view
         for item_iid in tv.get_children():
             rhythm_ix = self._get_rhythm_index(item_iid)
-            tv.item(item_iid, values=rhythm_info[rhythm_ix])
+            tv.item(item_iid, values=rhythm_data[rhythm_ix])
 
     @property
     def on_request_target_rhythm(self):  # type: () -> tp.Callable[int]
@@ -206,14 +206,14 @@ class BSRhythmList(BSAppFrame):
 
     def _fill_tree_view(self):
         controller = self.controller
-        column_headers = controller.get_rhythm_info_names()
+        column_headers = controller.get_rhythm_data_attr_names()
 
         for col in column_headers:
             self._tree_view.heading(col, text=col, command=lambda c=col: self._sort_tree_view(c, False))
             # adjust column width to header string
             self._tree_view.column(col, width=tkFont.Font().measure(col))
 
-        for item in controller.get_rhythm_info():
+        for item in controller.get_rhythm_data():
             self._tree_view.insert("", tk.END, values=item)
 
             # adjust column width if necessary to fit each value
@@ -248,11 +248,11 @@ class BSRhythmList(BSAppFrame):
     def _on_tree_select(self, _):
         controller = self.controller
         selected_rhythms = self._get_selected_rhythm_indices()
-        controller.rhythm_selection_set(selected_rhythms)
+        controller.set_rhythm_selection(selected_rhythms)
 
     def _sort_tree_view(self, column, descending):  # sorts the rhythms by the given column
         tv = self._tree_view
-        data_type = BSController.RHYTHM_INFO_STRUCTURE[column]
+        data_type = BSController.RHYTHM_DATA_TYPES[column]
         data = [(tv.set(item_iid, column), item_iid) for item_iid in tv.get_children("")]
         data.sort(reverse=descending, key=lambda cell: data_type(cell[0]))
         for i, row_info in enumerate(data):
@@ -278,7 +278,7 @@ class BSTransportControls(object, BSAppFrame):
     def redraw(self):
         controller = self.controller
         rhythm_selection = controller.get_rhythm_selection()
-        is_playing = controller.are_rhythms_playing_back()
+        is_playing = controller.is_rhythm_player_playing()
         btn = self._btn_toggle_play
         btn.set_enabled(len(rhythm_selection) > 0)
         btn.set_toggle(is_playing)
@@ -396,12 +396,12 @@ class BSApp(tk.Tk):
             BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH],
         }
 
-        for event_name, frames in redraw_frames_on_controller_callbacks.items():
+        for action, frames in redraw_frames_on_controller_callbacks.items():
             def get_callback(_frames):
                 def callback(*_, **__):
                     self.redraw_frames(*_frames)
                 return callback
-            self.controller.bind(event_name, get_callback(frames))
+            self.controller.bind(action, get_callback(frames))
 
         self.redraw_frames()
 
@@ -421,7 +421,7 @@ class BSApp(tk.Tk):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
         rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
         rhythms_frame.on_request_target_rhythm = self._handle_target_rhythm_request
-        search_frame.search_command = self.controller.update_distances
+        search_frame.search_command = self.controller.calculate_distances_to_target_rhythm
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
 
@@ -435,13 +435,13 @@ class BSApp(tk.Tk):
         menubar = self._menubar
         if menubar is None:
             return
-        menubar.on_request_load_corpus = self.controller.load_corpus
+        menubar.on_request_load_corpus = self.controller.set_corpus
         menubar.on_request_exit = self.destroy
         self.config(menu=menubar)
 
     def _toggle_rhythm_playback(self):
         controller = self.controller
-        if controller.are_rhythms_playing_back():
+        if controller.is_rhythm_player_playing():
             controller.stop_rhythm_playback()
         else:
             controller.playback_selected_rhythms()
