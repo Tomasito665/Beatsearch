@@ -180,3 +180,16 @@ def inject_numpy(func):
         func(*args, **kwargs)
     return wrapper
 
+
+def eat_args(func):
+    """
+    Adds ignored positional and named arguments to the given function's signature.
+
+    :param func: function to add the fake arguments to
+    :return: wrapped function
+    """
+
+    @wraps(func)
+    def wrapper(*_, **__):
+        func()
+    return wrapper

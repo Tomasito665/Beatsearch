@@ -30,6 +30,12 @@ class BSRhythmPlayer(object):
     def is_playing(self):  # type: () -> bool
         raise NotImplementedError
 
+    def set_repeat(self, enabled):  # type: (bool) -> None
+        raise NotImplementedError
+
+    def get_repeat(self):
+        raise NotImplementedError
+
     @property
     def on_playback_ended(self):  # type: () -> tp.Callable
         return self._on_playback_ended_callback
@@ -46,12 +52,16 @@ class BSFakeRhythmPlayer(BSRhythmPlayer):
         self._playback_duration = playback_duration
         self._timer = None
         self._rhythm = rhythm
+        self._repeat = False
 
     def playback_rhythms(self, rhythms):
         @wraps(self.on_playback_ended)
         def on_playback_ended():
-            self._timer = None
-            self.on_playback_ended()
+            if self.get_repeat():
+                self.playback_rhythms(rhythms)
+            else:
+                self._timer = None
+                self.on_playback_ended()
         self._timer = threading.Timer(self._playback_duration, on_playback_ended)
         self._timer.start()
 
@@ -62,6 +72,12 @@ class BSFakeRhythmPlayer(BSRhythmPlayer):
 
     def is_playing(self):
         return self._timer is not None
+
+    def set_repeat(self, enabled):
+        self._repeat = enabled
+
+    def get_repeat(self):
+        return self._repeat
 
 
 class BSController(object):

@@ -12,7 +12,7 @@ from beatsearch.data.rhythm import (
     TRACK_WILDCARDS,
     Unit
 )
-from beatsearch.utils import head_trail_iter, no_callback, type_check_and_instantiate_if_necessary
+from beatsearch.utils import head_trail_iter, no_callback, type_check_and_instantiate_if_necessary, eat_args
 from beatsearch.app.control import BSController
 
 
@@ -338,7 +338,7 @@ class BSMainMenu(tk.Menu):
         self.on_request_load_corpus(fname)
 
 
-class BSApp(tk.Tk):
+class BSApp(object, tk.Tk):
     WINDOW_TITLE = "BeatSearch search tool"
 
     STYLES = {
@@ -351,12 +351,12 @@ class BSApp(tk.Tk):
     FRAME_SEARCH = '<Frame-Search>'
 
     def __init__(self, controller=BSController(), search_frame_cls=BSSearchForm,
-                 rhythms_frame_cls=BSRhythmList, transport_frame_cls=BSTransportControls, main_menu=BSMainMenu):
+                 rhythms_frame_cls=BSRhythmList, transport_frame_cls=BSTransportControls, main_menu=BSMainMenu, **kwargs):
         # type: (BSController, tp.Type[BSSearchForm], tp.Type[BSRhythmList], tp.Union[tp.Type[BSTransportControls], None], tp.Union[BSMainMenu, tp.Type[BSMainMenu], None]) -> None
+        tk.Tk.__init__(self, **kwargs)
 
-        tk.Tk.__init__(self)
         self.wm_title(BSApp.WINDOW_TITLE)
-        self.controller = controller
+        self.controller = self._controller = controller
 
         self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
@@ -405,6 +405,21 @@ class BSApp(tk.Tk):
 
         self.redraw_frames()
 
+    @property
+    def controller(self):  # type: () -> tp.Union[BSController, None]
+        return self._controller
+
+    @controller.setter
+    def controller(self, controller):  # type: (tp.Union[BSController, None]) -> None
+        self.unbind_all("<space>")
+        if controller is None:
+            self._controller = None
+            return
+        if not isinstance(controller, BSController):
+            raise TypeError("Expected a BSController but got \"%s\"" % str(controller))
+        self.bind("<space>", eat_args(self._toggle_rhythm_playback))
+        self._controller = controller
+
     def redraw_frames(self, *frame_names):
         if not frame_names:
             frame_names = self.frames.keys()
@@ -449,7 +464,7 @@ class BSApp(tk.Tk):
     def _handle_target_rhythm_request(self, rhythm_ix):
         controller = self.controller
         rhythm = controller.get_rhythm_by_index(rhythm_ix)
-        controller.target_rhythm = rhythm
+        controller.set_target_rhythm(rhythm)
 
 
 class ToggleButton(tk.Button):
