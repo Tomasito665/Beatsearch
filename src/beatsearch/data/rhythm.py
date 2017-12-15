@@ -4,10 +4,10 @@ import itertools
 from typing import Union, Iterable, Tuple, Any
 from collections import OrderedDict
 from functools import wraps
-import numpy as np
 import midi
 import math
-from beatsearch.utils import friendly_named_class
+from beatsearch.config import __USE_NUMPY__
+from beatsearch.utils import friendly_named_class, inject_numpy
 
 
 class Unit(object):
@@ -431,7 +431,8 @@ class Rhythm(object):
 
             return intervals
 
-        def get_interval_histogram(self, unit='eighths'):
+        @inject_numpy
+        def get_interval_histogram(self, unit='eighths', numpy=None):
             """
             Returns the number of occurrences of all the inter-onset intervals from the smallest to the biggest
             interval. The inter onset intervals are retrieved with get_post_note_inter_onset_intervals().
@@ -447,7 +448,7 @@ class Rhythm(object):
             """
 
             intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-            histogram = np.histogram(intervals, range(min(intervals), max(intervals) + 2))
+            histogram = numpy.histogram(intervals, range(min(intervals), max(intervals) + 2))
             occurrences = histogram[0].tolist()
             bins = histogram[1].tolist()[:-1]
             return occurrences, bins
@@ -686,7 +687,8 @@ class Rhythm(object):
         beat_unit = self.time_signature.get_beat_unit()
         return convert_time(numerator, beat_unit, unit)
 
-    def get_interval_histogram(self, unit='ticks'):
+    @inject_numpy
+    def get_interval_histogram(self, unit='ticks', numpy=None):
         """
         Returns the interval histogram of all the tracks combined.
 
@@ -699,7 +701,7 @@ class Rhythm(object):
             track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=unit)
             intervals.extend(track_intervals)
 
-        histogram = np.histogram(intervals, range(min(intervals), max(intervals) + 2))
+        histogram = numpy.histogram(intervals, range(min(intervals), max(intervals) + 2))
         occurrences = histogram[0].tolist()
         bins = histogram[1].tolist()[:-1]
         return occurrences, bins

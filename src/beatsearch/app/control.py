@@ -1,8 +1,7 @@
-from collections import OrderedDict, namedtuple
+from collections import OrderedDict
 from functools import wraps
 import typing as tp
 import threading
-import numpy as np
 from sortedcollections import OrderedSet
 from beatsearch.data.rhythm import (
     Rhythm,
@@ -11,8 +10,11 @@ from beatsearch.data.rhythm import (
     TrackDistanceMeasure,
     HammingDistanceMeasure
 )
+from beatsearch.config import __USE_NUMPY__
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
+if __USE_NUMPY__:
+    import numpy
 
 
 class BSRhythmPlayer(object):
@@ -97,7 +99,10 @@ class BSController(object):
         # type: (tp.Type[TrackDistanceMeasure], tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None]) -> None
 
         self._corpus = None
-        self._distances_to_target = np.empty(0)
+        if __USE_NUMPY__:
+            self._distances_to_target = numpy.empty(0)
+        else:
+            self._distances_to_target = []
         self._distances_to_target_rhythm_are_stale = False
         self._rhythm_measure = RhythmDistanceMeasure()
         self._rhythm_selection = OrderedSet()
@@ -225,7 +230,7 @@ class BSController(object):
                 d_to_target = self._distances_to_target[i]
                 yield (
                     i,
-                    "NaN" if d_to_target == np.inf else d_to_target,
+                    "NaN" if d_to_target == float("inf") else d_to_target,
                     rhythm.name,
                     rhythm.bpm,
                     str(rhythm.time_signature),
@@ -276,6 +281,8 @@ class BSController(object):
     def playback_selected_rhythms(self):
         """
         Starts playing the currently selected rhythms. The rhythm player will be used for rhythm playback.
+
+        :return: None
         """
 
         self._precondition_check_corpus_set()
@@ -288,6 +295,8 @@ class BSController(object):
     def stop_rhythm_playback(self):
         """
         Stops rhythm playback.
+
+        :return: None
         """
 
         self._precondition_check_rhythm_player_set()
@@ -425,9 +434,17 @@ class BSController(object):
     def _reset_distances_to_target_rhythm(self):  # Note: the caller should acquire the lock
         n_rhythms = self.get_rhythm_count()
         if len(self._distances_to_target) == n_rhythms:
-            self._distances_to_target.fill(np.inf)
+            if __USE_NUMPY__:
+                # noinspection PyUnresolvedReferences
+                self._distances_to_target.fill(numpy.inf)
+            else:
+                for i in xrange(n_rhythms):
+                    self._distances_to_target[i] = 0
         else:
-            self._distances_to_target = np.full(n_rhythms, np.inf)
+            if __USE_NUMPY__:
+                self._distances_to_target = numpy.full(n_rhythms, numpy.inf)
+            else:
+                self._distances_to_target = [float("inf")] * n_rhythms
 
     def _dispatch(self, action, *args, **kwargs):
         self._precondition_check_action(action)
