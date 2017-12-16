@@ -66,7 +66,7 @@ class plot(object):
             track_iter = rhythm.track_iter()
         elif isinstance(obj, Rhythm.Track):
             rhythm = obj.rhythm
-            track_iter = {'Track': obj}.iteritems()
+            track_iter = iter({'Track': obj}.items())
         else:
             raise ValueError("Expected either a Rhythm or a Rhythm.Track "
                              "object but got a '%s' instead" % obj)
@@ -101,13 +101,13 @@ class plot(object):
 
         track_i = 0
         for track_name, track in track_iter:
-            axes, axes_setup_result = subplots.next()
+            axes, axes_setup_result = next(subplots)
 
             handle = fill_subplot(
                 track=track,
                 axes=axes,
                 track_i=track_i,
-                color=color_pool.next(),
+                color=next(color_pool),
                 setup_result=axes_setup_result,
                 *args, **merge_dicts(kwargs, setup_args)
             )[0]
@@ -188,7 +188,7 @@ class plot(object):
         try:
             return axis_arg_options[axis_arg_str]
         except KeyError:
-            raise ValueError("Unknown axis '%s', choose between %s" % (axis_arg_str, axis_arg_options.keys()))
+            raise ValueError("Unknown axis '%s', choose between %s" % (axis_arg_str, list(axis_arg_options.keys())))
 
 
 class RhythmPlotter(object):
@@ -329,7 +329,7 @@ class RhythmPlotter(object):
         # compute inter onset intervals and draw bars
         concrete_unit = kwargs['concrete_unit']
         inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=quantize)
-        return axes.bar(range(len(inter_onsets)), inter_onsets, width=0.95, color=kwargs['color'])
+        return axes.bar(list(range(len(inter_onsets))), inter_onsets, width=0.95, color=kwargs['color'])
 
     @plot("TEDAS Notation", subplot_layout='v_stack', share_axis='x')
     def tedas(self, track, quantize=False, **kwargs):

@@ -1,9 +1,9 @@
 import os
-import ttk
+import tkinter.ttk
 # noinspection PyPep8Naming
-import Tkinter as tk
-import tkFileDialog
-import tkFont
+import tkinter as tk
+import tkinter.filedialog
+import tkinter.font
 from functools import wraps
 import typing as tp
 from collections import OrderedDict
@@ -27,7 +27,7 @@ class BSAppFrame(tk.Frame):
         raise NotImplementedError
 
 
-class BSSearchForm(object, BSAppFrame):
+class BSSearchForm(BSAppFrame):
     INNER_PAD_X = 6
 
     COMBO_DISTANCE_MEASURE = "<Combo-DistanceMeasure>"
@@ -50,7 +50,7 @@ class BSSearchForm(object, BSAppFrame):
             box_container = tk.Frame(self)
 
             # setup combobox
-            combobox = ttk.Combobox(box_container, values=values, state="readonly")
+            combobox = tkinter.ttk.Combobox(box_container, values=values, state="readonly")
             combobox.current(0)
             combobox.pack(side=tk.BOTTOM, fill=tk.X, expand=True)
             self._combo_boxes[name] = combobox
@@ -141,11 +141,11 @@ class BSRhythmList(BSAppFrame):
     def __init__(self, app, h_scroll=False, v_scroll=True, **kwargs):
         BSAppFrame.__init__(self, app, **kwargs)
         column_headers = BSController.get_rhythm_data_attr_names()
-        self._tree_view = ttk.Treeview(columns=column_headers, show="headings")
+        self._tree_view = tkinter.ttk.Treeview(columns=column_headers, show="headings")
 
         scrollbars = {
-            tk.X: ttk.Scrollbar(orient="horizontal", command=self._tree_view.xview),
-            tk.Y: ttk.Scrollbar(orient="vertical", command=self._tree_view.yview)
+            tk.X: tkinter.ttk.Scrollbar(orient="horizontal", command=self._tree_view.xview),
+            tk.Y: tkinter.ttk.Scrollbar(orient="vertical", command=self._tree_view.yview)
         }
 
         self.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -211,14 +211,14 @@ class BSRhythmList(BSAppFrame):
         for col in column_headers:
             self._tree_view.heading(col, text=col, command=lambda c=col: self._sort_tree_view(c, False))
             # adjust column width to header string
-            self._tree_view.column(col, width=tkFont.Font().measure(col))
+            self._tree_view.column(col, width=tkinter.font.Font().measure(col))
 
         for item in controller.get_rhythm_data():
             self._tree_view.insert("", tk.END, values=item)
 
             # adjust column width if necessary to fit each value
             for ix, val in enumerate(item):
-                col_w = tkFont.Font().measure(val)
+                col_w = tkinter.font.Font().measure(val)
                 if self._tree_view.column(column_headers[ix], width=None) < col_w:
                     self._tree_view.column(column_headers[ix], width=col_w)
 
@@ -233,7 +233,7 @@ class BSRhythmList(BSAppFrame):
         return self._corpus_name != corpus_name
 
     def _on_mousewheel(self, event):
-        self._tree_view.yview_scroll(-1 * (event.delta / 15), tk.UNITS)
+        self._tree_view.yview_scroll(-1 * (event.delta // 15), tk.UNITS)
 
     def _get_rhythm_index(self, tree_view_item_iid):
         tv = self._tree_view
@@ -268,7 +268,7 @@ class BSRhythmList(BSAppFrame):
             self.add_command(label="Hola, soy Juan")
 
 
-class BSTransportControls(object, BSAppFrame):
+class BSTransportControls(BSAppFrame, object):
     def __init__(self, controller, **kwargs):
         BSAppFrame.__init__(self, controller, **kwargs)
         self._btn_toggle_play = ToggleButton(self, text=("Play", "Stop"), width=20)
@@ -326,7 +326,7 @@ class BSMainMenu(tk.Menu):
         self._on_request_exit()
 
     def _show_open_corpus_file_dialog(self):
-        fname = tkFileDialog.askopenfilename(
+        fname = tkinter.filedialog.askopenfilename(
             title="Open rhythm corpus file",
             filetypes=[("Pickle files", "*.pkl")],
             parent=self.master
@@ -338,7 +338,7 @@ class BSMainMenu(tk.Menu):
         self.on_request_load_corpus(fname)
 
 
-class BSApp(object, tk.Tk):
+class BSApp(tk.Tk, object):
     WINDOW_TITLE = "BeatSearch search tool"
 
     STYLES = {
@@ -350,9 +350,15 @@ class BSApp(object, tk.Tk):
     FRAME_TRANSPORT = '<Frame-Transport>'
     FRAME_SEARCH = '<Frame-Search>'
 
-    def __init__(self, controller=BSController(), search_frame_cls=BSSearchForm,
-                 rhythms_frame_cls=BSRhythmList, transport_frame_cls=BSTransportControls, main_menu=BSMainMenu, **kwargs):
-        # type: (BSController, tp.Type[BSSearchForm], tp.Type[BSRhythmList], tp.Union[tp.Type[BSTransportControls], None], tp.Union[BSMainMenu, tp.Type[BSMainMenu], None]) -> None
+    def __init__(
+            self,
+            controller: BSController = BSController(),  # TODO Get rid of mutable default
+            search_frame_cls: tp.Type[BSSearchForm] = BSSearchForm,
+            rhythms_frame_cls: tp.Type[BSRhythmList] = BSRhythmList,
+            transport_frame_cls: tp.Union[tp.Type[BSTransportControls], None] = BSTransportControls,
+            main_menu: tp.Union[BSMainMenu, tp.Type[BSMainMenu], None] = BSMainMenu,
+            **kwargs
+    ):
         tk.Tk.__init__(self, **kwargs)
 
         self.wm_title(BSApp.WINDOW_TITLE)
@@ -378,7 +384,7 @@ class BSApp(object, tk.Tk):
         pady = BSApp.STYLES['inner-pad-y'] / 2.0
         padx = BSApp.STYLES['inner-pad-x']
 
-        for is_first, is_last, frame in head_trail_iter(self.frames.values()):
+        for is_first, is_last, frame in head_trail_iter(tuple(self.frames.values())):
             frame.pack(
                 side=tk.TOP,
                 fill=tk.BOTH,
@@ -430,7 +436,7 @@ class BSApp(object, tk.Tk):
                 pass
 
     def get_frame_names(self):
-        return self.frames.keys()
+        return list(self.frames.keys())
 
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]

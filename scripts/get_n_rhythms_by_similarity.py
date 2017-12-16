@@ -12,11 +12,11 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src")
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import err_print, print_progress_bar, make_dirs_if_not_exist
 from beatsearch.graphics.plot import RhythmPlotter
-from beatsearch.data.rhythm import Rhythm, RhythmDistanceMeasure, get_track_distance_measures
+from beatsearch.data.rhythm import Rhythm, RhythmDistanceMeasure, TrackDistanceMeasure
 
-SIM_MEASURES = get_track_distance_measures()
-SIM_MEASURE_NAMES = SIM_MEASURES.keys()
-SIM_MEASURE_CLASSES = SIM_MEASURES.values()
+SIM_MEASURES = TrackDistanceMeasure.get_measures()
+SIM_MEASURE_CLASSES = tuple(SIM_MEASURES.values())
+SIM_MEASURE_NAMES = tuple(SIM_MEASURES.keys())
 
 
 def get_args():
@@ -150,22 +150,22 @@ if __name__ == "__main__":
         track_distance_measure = SIM_MEASURE_CLASSES[args.measure - 1]()
     except IndexError:
         err_print("Given unknown similarity method: %i (choose between: %s)" % (
-            args.measure, range(1, len(SIM_MEASURE_CLASSES) + 1)))
+            args.measure, list(range(1, len(SIM_MEASURE_CLASSES) + 1))))
         sys.exit(-1)
 
     measure = RhythmDistanceMeasure(track_distance_measure, tracks)
     distances = [measure.get_distance(target_rhythm, other) for other in corpus]
 
     sorted_indexes = np.argsort(distances)
-    print "\nThe %i most similar rhythms to '%s', when measured with '%s' on tracks '%s' are:" \
-          % (args.n, target_rhythm.name, track_distance_measure.__class__.__name__, tracks)
+    print("\nThe %i most similar rhythms to '%s', when measured with '%s' on tracks '%s' are:" % (
+        args.n, target_rhythm.name, track_distance_measure.__class__.__name__, tracks))
 
     for i in range(args.n):
         index = sorted_indexes[i]
         rhythm = corpus[index]
         distance = distances[index]
         formatted_d = "%.4f" % distance if type(distance) == float else str(distance)
-        print "    %i) (d = %s) %s" % (i + 1, formatted_d, rhythm.name)
+        print("    %i) (d = %s) %s" % (i + 1, formatted_d, rhythm.name))
 
     if not args.export_midi or not args.render_notations:
         sys.exit(0)
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     if not os.path.isdir(out):
         os.makedirs(out)
 
-    print ""
+    print("")
 
     for i in range(args.n):
         index = sorted_indexes[i]

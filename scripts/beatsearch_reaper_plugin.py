@@ -2,7 +2,7 @@ import os
 import sys
 import midi
 import threading
-from StringIO import StringIO
+from io import StringIO
 from tempfile import TemporaryFile
 from beatsearch_dirs import BS_LIB, BS_ROOT
 sys.path.append(BS_LIB)
@@ -47,11 +47,11 @@ def main():
     player = ReaperRhythmPlayer(bs_input_track)
     player.set_repeat(True)
 
-    print "Initializing controller..."
+    print("Initializing controller...")
     controller = BSController(rhythm_player=player)
     controller.set_corpus(os.path.join(BS_ROOT, "data", "rhythms.pkl"))
 
-    print "Initializing view..."
+    print("Initializing view...")
     app = BSApp(controller, baseName="beatsearch-reaper-plugin")
     app.mainloop()
 
@@ -118,7 +118,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
 
     def populate_track(self, rhythms):
         if rhythms == self._current_rhythms:
-            print "Rhythms are the same... not re-populating track"
+            print("Rhythms are the same... not re-populating track")
             return
 
         ReaperUtils.clear_track(self._output_track)
@@ -192,7 +192,7 @@ class ReaperUtils(object):
         """
 
         n_media_items, i = RPR_GetTrackNumMediaItems(track_id), 0
-        print "Iterating over track %s, which has %i media items" % (track_id, n_media_items)
+        print("Iterating over track %s, which has %i media items" % (track_id, n_media_items))
         while i < n_media_items:
             yield RPR_GetTrackMediaItem(track_id, i)
             i += 1

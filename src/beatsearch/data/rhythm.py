@@ -4,6 +4,7 @@ import itertools
 from typing import Union, Iterable, Tuple, Any
 from collections import OrderedDict
 from functools import wraps
+# noinspection PyUnresolvedReferences
 import midi
 import math
 from beatsearch.config import __USE_NUMPY__
@@ -296,7 +297,7 @@ class Rhythm(object):
         self._midi_metronome = midi_metronome
 
         # add tracks
-        for pitch, onsets in data.iteritems():
+        for pitch, onsets in data.items():
             self._tracks[pitch] = Rhythm.Track(onsets, self)
 
         # default the duration to the timestamp of the last note
@@ -448,7 +449,7 @@ class Rhythm(object):
             """
 
             intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-            histogram = numpy.histogram(intervals, range(min(intervals), max(intervals) + 2))
+            histogram = numpy.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
             occurrences = histogram[0].tolist()
             bins = histogram[1].tolist()[:-1]
             return occurrences, bins
@@ -543,7 +544,7 @@ class Rhythm(object):
             :return: a list with the onset times of this rhythm track
             """
 
-            return map(lambda onset: convert_time(onset[0], self.get_resolution(), unit, quantize), self.onsets)
+            return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
 
         def get_resolution(self):
             """
@@ -701,7 +702,7 @@ class Rhythm(object):
             track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=unit)
             intervals.extend(track_intervals)
 
-        histogram = numpy.histogram(intervals, range(min(intervals), max(intervals) + 2))
+        histogram = numpy.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
         occurrences = histogram[0].tolist()
         bins = histogram[1].tolist()[:-1]
         return occurrences, bins
@@ -726,7 +727,7 @@ class Rhythm(object):
         :return: track iterator
         """
 
-        return self._tracks.iteritems()
+        return iter(self._tracks.items())
 
     def track_count(self):
         """
@@ -753,7 +754,7 @@ class Rhythm(object):
         midi_track.append(midi.SetTempoEvent(bpm=self._bpm))  # tempo
 
         # add note events
-        for pitch, track in self._tracks.iteritems():
+        for pitch, track in self._tracks.items():
             pitch = int(pitch)
             onsets = track.onsets
             for onset in onsets:
@@ -825,8 +826,9 @@ class Rhythm(object):
             elif isinstance(msg, midi.TimeSignatureEvent):
                 if ts_midi_event is None:
                     ts_midi_event = msg
-                elif ts_midi_event != msg:
-                    raise ValueError("Time signature changes are not supported")
+                elif ts_midi_event.data != msg.data:
+                    raise ValueError("Time signature changes are "
+                                     "not supported (from %s to %s)" % (ts_midi_event, msg))
             elif isinstance(msg, midi.SetTempoEvent):
                 args['bpm'] = msg.get_bpm()
             elif isinstance(msg, midi.EndOfTrackEvent):
@@ -849,7 +851,7 @@ class Rhythm(object):
     @concretize_unit()
     def get_last_onset_time(self, unit='ticks'):
         last_onset_tick = 0
-        for onsets in map(lambda track: track.onsets, self._tracks.values()):
+        for onsets in [track.onsets for track in self._tracks.values()]:
             last_onset_tick = max(onsets[-1][0], last_onset_tick)
         return convert_time(last_onset_tick, self._ppq, unit)
 
@@ -857,13 +859,13 @@ class Rhythm(object):
         state = self.__dict__.copy()
         del state['_tracks']
         state['__track_onsets__'] = {}
-        for pitch, track in self._tracks.iteritems():
+        for pitch, track in self._tracks.items():
             state['__track_onsets__'][pitch] = track.onsets
         return state
 
     def __setstate__(self, state):
         state['_tracks'] = {}
-        for pitch, onsets in state['__track_onsets__'].iteritems():
+        for pitch, onsets in state['__track_onsets__'].items():
             state['_tracks'][pitch] = Rhythm.Track(onsets, self)
         del state['__track_onsets__']
         self.__dict__.update(state)
@@ -1073,7 +1075,7 @@ class TrackDistanceMeasure(DistanceMeasure):
     @classmethod
     def get_measure_names(cls):
         measures = cls.get_measures()
-        return measures.keys()
+        return tuple(measures.keys())
 
     @classmethod
     def get_measure_by_name(cls, measure_name):

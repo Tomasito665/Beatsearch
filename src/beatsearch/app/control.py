@@ -104,12 +104,12 @@ class BSController(object):
     @staticmethod
     def get_rhythm_data_attr_names():
         structure = BSController.RHYTHM_DATA_TYPES
-        return structure.keys()
+        return tuple(structure.keys())  # TODO Avoid re-allocation
 
     @staticmethod
     def get_rhythm_data_attr_types():
         structure = BSController.RHYTHM_DATA_TYPES
-        return structure.values()
+        return tuple(structure.values())  # TODO Avoid re-allocation
 
     def __init__(self, distance_measure=HammingDistanceMeasure, rhythm_player=None):
         # type: (tp.Type[TrackDistanceMeasure], tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None]) -> None
@@ -454,7 +454,7 @@ class BSController(object):
                 # noinspection PyUnresolvedReferences
                 self._distances_to_target.fill(numpy.inf)
             else:
-                for i in xrange(n_rhythms):
+                for i in range(n_rhythms):
                     self._distances_to_target[i] = 0
         else:
             if __USE_NUMPY__:

@@ -1,0 +1,3 @@
+[submodule "third-party/python3-midi"]
+	path = third-party/python3-midi
+	url = https://github.com/Tomasito665/python3-midi

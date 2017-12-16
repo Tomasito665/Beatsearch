@@ -91,7 +91,7 @@ if __name__ == '__main__':
             step_i += 1
 
         for plot_func_name, name, plot_args in multi_unit_plots:
-            for unit_name, unit in multi_units.iteritems():
+            for unit_name, unit in multi_units.items():
                 plotter.unit = unit
                 plot_and_save(plot_func_name, "%s_%s" % (name, unit_name), plot_args)
                 step_i += 1

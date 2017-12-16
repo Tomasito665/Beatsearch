@@ -9,11 +9,12 @@ from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import print_progress_bar
-from beatsearch.data.rhythm import get_track_distance_measures
+from beatsearch.data.rhythm import TrackDistanceMeasure
 
-SIM_MEASURES = get_track_distance_measures()
-SIM_MEASURE_NAMES = SIM_MEASURES.keys()
-SIM_MEASURE_CLASSES = SIM_MEASURES.values()
+SIM_MEASURES = TrackDistanceMeasure.get_measures()
+SIM_MEASURE_NAMES = tuple(SIM_MEASURES.keys())
+SIM_MEASURE_CLASSES = tuple(SIM_MEASURES.values())
+
 
 CELL_COLORS = {
     'red': PatternFill(start_color=colors.RED, end_color=colors.RED, fill_type='solid'),
@@ -49,7 +50,7 @@ if __name__ == '__main__':
     # create spreadsheet with one worksheet per distance measure (truncate worksheet names on 31 chars)
     wb = Workbook(write_only=True)
     ws_gen = ((wb.create_sheet("%s.." % name[:29] if len(name) > 31 else name),
-               tsm()) for name, tsm in SIM_MEASURES.iteritems())
+               tsm()) for name, tsm in SIM_MEASURES.items())
 
     # for progress bar and remaining time estimation
     n_steps, step_i, row_i, ws_i = len(corpus) * len(corpus) * len(SIM_MEASURES), 0, 0, 0

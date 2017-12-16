@@ -1,6 +1,5 @@
 import os
-# noinspection PyPep8Naming
-import cPickle as pickle
+import pickle
 
 
 class RhythmCorpus(list):

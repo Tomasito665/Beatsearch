@@ -1,5 +1,4 @@
 # coding=utf-8
-from __future__ import print_function
 import os
 import sys
 import typing as tp
@@ -177,7 +176,7 @@ def inject_numpy(func):
         if not __USE_NUMPY__:
             raise Exception("%s needs numpy" % func.__name__)
         kwargs['numpy'] = np
-        func(*args, **kwargs)
+        return func(*args, **kwargs)
     return wrapper
 
 
@@ -191,5 +190,5 @@ def eat_args(func):
 
     @wraps(func)
     def wrapper(*_, **__):
-        func()
+        return func()
     return wrapper

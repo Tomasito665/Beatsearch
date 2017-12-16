@@ -1,10 +1,9 @@
 import unittest
 import copy
-import midi
 import math
-from mock import MagicMock
+from unittest.mock import MagicMock
 
-from rhythm import (
+from beatsearch.data.rhythm import (
     Rhythm,
     TimeSignature,
     HammingDistanceMeasure,
@@ -14,6 +13,9 @@ from rhythm import (
     SwapDistanceMeasure,
     ChronotonicDistanceMeasure,
 )
+
+# noinspection PyUnresolvedReferences
+import midi
 
 
 class TestRhythm(unittest.TestCase):
@@ -87,7 +89,7 @@ class TestRhythm(unittest.TestCase):
         }
 
         rhythm = Rhythm("", 120, TimeSignature(4, 4), data, 240, 1)
-        for pitch in data.keys():
+        for pitch in list(data.keys()):
             track = rhythm.get_track(pitch)
             self.assertIsInstance(track, Rhythm.Track)
 
