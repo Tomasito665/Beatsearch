@@ -4,7 +4,7 @@ import tkinter.ttk
 import tkinter as tk
 import tkinter.filedialog
 import tkinter.font
-from functools import wraps
+from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
 from beatsearch.data.rhythm import (
@@ -14,6 +14,8 @@ from beatsearch.data.rhythm import (
 )
 from beatsearch.utils import head_trail_iter, no_callback, type_check_and_instantiate_if_necessary, eat_args
 from beatsearch.app.control import BSController
+from beatsearch.graphics.plot import RhythmPlotter
+from matplotlib import pyplot as plt
 
 
 class BSAppFrame(tk.Frame):
@@ -135,6 +137,11 @@ class ContextMenu(tk.Menu):
         finally:
             self.grab_release()
 
+    def add_submenu(self, label):
+        submenu = tk.Menu(tearoff=0)
+        self.add_cascade(label=label, menu=submenu)
+        return submenu
+
 
 class BSRhythmList(BSAppFrame):
 
@@ -169,10 +176,18 @@ class BSRhythmList(BSAppFrame):
 
         context_menu = ContextMenu(self._tree_view)
         context_menu.add_command(label="Set as target rhythm", command=self._on_set_as_target_rhythm)
-        context_menu.add_command(label="Plot rhythms")  # TODO
+        plot_rhythms_menu = context_menu.add_submenu("Plot rhythms")
+
+        for plot_type_name in BSApp.RHYTHM_PLOT_TYPES_BY_NAME.keys():
+            plot_rhythms_menu.add_command(
+                label=plot_type_name,
+                command=partial(self._on_plot_rhythms, plot_type_name=plot_type_name)
+            )
+
         self._context_menu = context_menu
 
         self._on_request_target_rhythm = no_callback
+        self._on_request_rhythm_plot = no_callback
 
     def redraw(self):
         controller = self.controller
@@ -196,13 +211,27 @@ class BSRhythmList(BSAppFrame):
     @on_request_target_rhythm.setter
     def on_request_target_rhythm(self, callback):  # type: (tp.Callable[int]) -> None
         if not callable(callback):
-            raise Exception("Expected a callback but got \"%s\"" % str(callback))
+            raise TypeError("Expected a callback but got \"%s\"" % str(callback))
         self._on_request_target_rhythm = callback
+
+    @property
+    def on_request_rhythm_plot(self):
+        return self._on_request_rhythm_plot
+
+    @on_request_rhythm_plot.setter
+    def on_request_rhythm_plot(self, callback: tp.Callable[[tp.Iterable[int]], None]):
+        if not callable(callback):
+            raise TypeError("Expected a callback but got \"%s\"" % str(callback))
+        self._on_request_rhythm_plot = callback
 
     def _on_set_as_target_rhythm(self):
         selected_rhythms = self._get_selected_rhythm_indices()
         assert len(selected_rhythms) == 1
         self.on_request_target_rhythm(selected_rhythms[0])
+
+    def _on_plot_rhythms(self, plot_type_name):
+        selected_rhythms = self._get_selected_rhythm_indices()
+        self.on_request_rhythm_plot(selected_rhythms, plot_type_name)
 
     def _fill_tree_view(self):
         controller = self.controller
@@ -346,9 +375,18 @@ class BSApp(tk.Tk, object):
         'inner-pad-y': 6.0
     }
 
-    FRAME_RHYTHM_LIST = '<Frame-RhythmList>'
-    FRAME_TRANSPORT = '<Frame-Transport>'
-    FRAME_SEARCH = '<Frame-Search>'
+    FRAME_RHYTHM_LIST = "<Frame-RhythmList>"
+    FRAME_TRANSPORT = "<Frame-Transport>"
+    FRAME_SEARCH = "<Frame-Search>"
+
+    RHYTHM_PLOT_TYPES_BY_NAME = OrderedDict((
+        ("Chronotonic", "chronotonic"),
+        ("Polygon", "polygon"),
+        ("Schillinger", "schillinger"),
+        ("Spectral", "spectral"),
+        ("TEDAS", "tedas"),
+        ("IOI Histogram", "inter_onset_interval_histogram"),
+    ))
 
     def __init__(
             self,
@@ -363,6 +401,7 @@ class BSApp(tk.Tk, object):
 
         self.wm_title(BSApp.WINDOW_TITLE)
         self.controller = self._controller = controller
+        self.rhythm_plotter = RhythmPlotter()
 
         self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
@@ -442,6 +481,7 @@ class BSApp(tk.Tk, object):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
         rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
         rhythms_frame.on_request_target_rhythm = self._handle_target_rhythm_request
+        rhythms_frame.on_request_rhythm_plot = self._handle_rhythm_plot_request
         search_frame.search_command = self.controller.calculate_distances_to_target_rhythm
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
@@ -471,6 +511,17 @@ class BSApp(tk.Tk, object):
         controller = self.controller
         rhythm = controller.get_rhythm_by_index(rhythm_ix)
         controller.set_target_rhythm(rhythm)
+
+    def _handle_rhythm_plot_request(self, rhythm_indices, plot_type_name):
+        controller = self.controller
+        plotter = self.rhythm_plotter
+        plot_function_name = self.RHYTHM_PLOT_TYPES_BY_NAME[plot_type_name]
+        plot_function = getattr(plotter, plot_function_name)
+        rhythms = iter(controller.get_rhythm_by_index(ix) for ix in rhythm_indices)
+        for rhythm in rhythms:
+            plot_function(rhythm)
+            plt.draw()
+        plt.show()
 
 
 class ToggleButton(tk.Button):
