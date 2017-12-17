@@ -1,4 +1,7 @@
 import os
+import socket
+import threading
+
 try:
     # noinspection PyUnresolvedReferences
     import beyond.Reaper
@@ -19,13 +22,22 @@ ReaperApi = Reaper
 
 
 def main():
-    with ReaperApi as api:
-        try:
-            bs_input_track = ReaperUtils.find_track_by_name(api, "BS_Output")
-        except ValueError:
-            bs_input_track = ReaperUtils.insert_track(api, 0, "BS_Output")
+    player = ReaperRhythmPlayer()
 
-    player = ReaperRhythmPlayer(bs_input_track)
+    def find_reaper_thread_target():
+        try:
+            with ReaperApi as api:
+                print("Connected to Reaper")
+                try:
+                    bs_input_track = ReaperUtils.find_track_by_name(api, "BS_Output")
+                except ValueError:
+                    bs_input_track = ReaperUtils.insert_track(api, 0, "BS_Output")
+            player.set_output_track(bs_input_track)
+        except socket.timeout:
+            app.destroy()
+
+    print("Trying to connect to Reaper...")
+    threading.Thread(target=find_reaper_thread_target).start()
 
     print("Initializing controller...")
     controller = BSController(rhythm_player=player)
@@ -39,7 +51,7 @@ def main():
 class ReaperRhythmPlayer(BSRhythmPlayer):
     """Implementation of BSRhythmPlayer that uses Reaper as MIDI output for the rhythms"""
 
-    def __init__(self, output_track):
+    def __init__(self, output_track=None):
         super(ReaperRhythmPlayer, self).__init__()
         self._tmp_files = set()
         self._start_pos = -1
@@ -49,10 +61,27 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         self._current_rhythms = []
         self._is_playing = False
 
-        with ReaperApi as api:
-            api.OnStopButton()
-            api.GetSetRepeat(1)  # enable repeat
-            ReaperUtils.clear_track(api, self._output_track)
+        if output_track is not None:
+            self.set_output_track(output_track)
+
+    @property
+    def output_track(self):
+        return self._output_track
+
+    @output_track.setter
+    def output_track(self, output_track):
+        self.set_output_track(output_track)
+
+    def set_output_track(self, output_track, reaper_api=None):
+        if reaper_api is None:
+            with ReaperApi as api:
+                self.set_output_track(output_track, api)
+            return
+
+        reaper_api.OnStopButton()
+        reaper_api.GetSetRepeat(1)  # enable repeat
+        ReaperUtils.clear_track(reaper_api, self._output_track)
+        self._output_track = output_track
 
     def playback_rhythms(self, rhythms):
         with ReaperApi as api:
