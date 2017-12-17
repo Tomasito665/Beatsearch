@@ -391,6 +391,9 @@ class BSController(object):
         :param selected_rhythms: the indices in the current corpus of the rhythms to select
         """
 
+        if self.is_rhythm_player_set() and self.is_rhythm_player_playing():
+            self.stop_rhythm_playback()
+
         self._rhythm_selection.clear()
         for rhythm_ix in selected_rhythms:
             self._precondition_check_rhythm_index(rhythm_ix)
