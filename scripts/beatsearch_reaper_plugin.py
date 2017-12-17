@@ -10,7 +10,7 @@ except ModuleNotFoundError:
                               "https://forum.cockos.com/showthread.php?t=129696")
 from tkinter import *
 from tempfile import TemporaryFile
-# noinspection PyUnresolvedReference
+# noinspection PyUnresolvedReferences
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer

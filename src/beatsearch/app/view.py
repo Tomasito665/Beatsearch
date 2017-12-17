@@ -407,30 +407,28 @@ class BSApp(tk.Tk, object):
         self.frames = OrderedDict()
 
         frame_info = (
-            (BSApp.FRAME_SEARCH, search_frame_cls),
-            (BSApp.FRAME_RHYTHM_LIST, rhythms_frame_cls),
-            (BSApp.FRAME_TRANSPORT, transport_frame_cls)
+            (BSApp.FRAME_SEARCH, search_frame_cls, dict(expand=False, fill=tk.X)),
+            (BSApp.FRAME_RHYTHM_LIST, rhythms_frame_cls, dict(expand=True, fill=tk.BOTH)),
+            (BSApp.FRAME_TRANSPORT, transport_frame_cls, dict(expand=False, fill=tk.X))
         )
-
-        for frame_name, frame_cls in frame_info:
-            if frame_cls is None:
-                continue
-            self.frames[frame_name] = frame_cls(self)
-
-        self._setup_menubar()
-        self._setup_frames()
 
         pady = BSApp.STYLES['inner-pad-y'] / 2.0
         padx = BSApp.STYLES['inner-pad-x']
 
-        for is_first, is_last, frame in head_trail_iter(tuple(self.frames.values())):
+        for is_first, is_last, [frame_name, frame_cls, pack_args] in head_trail_iter(frame_info):
+            if frame_cls is None:
+                continue
+            frame = frame_cls(self)
+            self.frames[frame_name] = frame
             frame.pack(
                 side=tk.TOP,
-                fill=tk.BOTH,
-                expand=True,
                 padx=padx,
-                pady=(pady * 2 if is_first else pady, pady * 2 if is_last else pady)
+                pady=(pady * 2 if is_first else pady, pady * 2 if is_last else pady),
+                **pack_args
             )
+
+        self._setup_menubar()
+        self._setup_frames()
 
         redraw_frames_on_controller_callbacks = {
             BSController.RHYTHM_SELECTION: [BSApp.FRAME_TRANSPORT],
