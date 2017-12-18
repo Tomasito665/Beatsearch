@@ -1,11 +1,12 @@
 import os
+import signal
 import tkinter.ttk
 # noinspection PyPep8Naming
 import tkinter as tk
 import tkinter.font
 import tkinter.filedialog
 from contextlib import contextmanager
-from itertools import zip_longest
+from itertools import zip_longest, repeat
 from tkinter import ttk
 import matplotlib
 
@@ -344,134 +345,160 @@ class BSTransportControls(BSAppFrame, object):
 
 
 class BSRhythmComparisonStrip(BSAppTtkFrame):
-    def __init__(self, app, **kwargs):
+    def __init__(self, app, background_left="gray", background_right="white", **kwargs):
         super().__init__(app, **kwargs)
         self.rhythm_plotter = RhythmPlotter()
         self._rhythm_plot_function = self.rhythm_plotter.polygon
 
-        self._target_rhythm_frame = self.TargetRhythmBox(self, self.dpi)
-        self._target_rhythm_frame.pack(side=tk.LEFT, padx=(6, 3))
+        label_target = tk.Label(self, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_left)
+        frame_target = self.TargetRhythmBox(self, self.dpi, background=background_left)
 
-        rhythm_box_container_wrapper = tk.Frame(self)
-        rhythm_box_container_wrapper.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
-        rhythm_box_container = HorizontalScrolledFrame(rhythm_box_container_wrapper)
-        rhythm_box_container.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT, padx=(3, 6))
+        header_selection = tk.Frame(self, bg=background_right)
+        label_selection = tk.Label(
+            header_selection, text="Selected Rhythms", anchor=tk.W, font=BSApp.FONT['header'], bg=background_right)
+        combo_label_selection = tk.Label(header_selection, text="Plot type", bg=background_right)
+        combo_selection = tkinter.ttk.Combobox(
+            header_selection, values=tuple(BSApp.RHYTHM_PLOT_TYPES_BY_NAME.keys()), state="readonly")
+        label_selection.pack(side=tk.LEFT, padx=3)
+        combo_selection.pack(side=tk.RIGHT, padx=(0, 6))
+        combo_label_selection.pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+        frame_selection = BSRhythmComparisonStrip.SelectedRhythmsFrame(
+            self, n_boxes=19, dpi=self.dpi, background=background_right)
 
-        n_rhythm_boxes = 19  # matplotlib is limited to 20 open figures by default (-1 for target rhythm box)
-        self._rhythm_boxes = tuple(BSRhythmComparisonStrip.SelectedRhythmBox(
-            rhythm_box_container.interior, self.dpi) for _ in range(n_rhythm_boxes))
+        # left panel (target rhythm)
+        label_target.grid(row=0, column=0, sticky="ew", ipadx=3)
+        frame_target.grid(row=1, column=0, sticky="nsew")
 
-    class RhythmPlotBox(tk.Frame):
-        def __init__(self, master, dpi=100, pack_canvas=True, **kwargs):
-            super().__init__(master, **kwargs)
+        # right panel (selection rhythms)
+        header_selection.grid(row=0, column=1, sticky="ew")
+        frame_selection.grid(row=1, column=1, sticky="nsew")
+        self.grid_columnconfigure(1, weight=1)  # expand horizontally
 
-            self._canvas = FigureCanvasTkAgg(plt.Figure(
-                dpi=dpi,
-                figsize=(3, 3)
-            ), master=self)
+        self._frame_target = frame_target
+        self._frame_selection = frame_selection
 
-            if pack_canvas:
-                self.__pack_canvas__()
+        def on_plot_type_combobox(event):
+            value = event.widget.get()
+            plot_function_name = BSApp.RHYTHM_PLOT_TYPES_BY_NAME[value]
+            self.set_rhythm_plot_function(plot_function_name)
 
-            self._prev_redraw_rhythm = None
-            self._prev_redraw_plot_function = None
+        combo_selection.current(0)  # select first option
+        combo_selection.bind("<<ComboboxSelected>>", on_plot_type_combobox)
+
+    class RhythmPlottingCanvas(FigureCanvasTkAgg):
+        def __init__(self, master, dpi, background="white", figsize=(3, 3), **kwargs):
+            figure = plt.Figure(dpi=dpi, figsize=figsize, facecolor=background)
+            self.background = background
+            super().__init__(figure=figure, master=master, **kwargs)
+
+        @property
+        def widget(self):
+            return self.get_tk_widget()
+
+        @contextmanager
+        def figure_update(self):
+            figure = self.figure
+            figure.clear()
+            figure.set_facecolor(self.background)
+            yield figure
+            self.draw()
+
+        def reset(self):
+            with self.figure_update() as _:
+                pass
+
+    class SelectedRhythmsFrame(tk.Frame):
+        def __init__(self, root, n_boxes=20, dpi=100, background=None, **kwargs):
+            super().__init__(root, background=background, **kwargs)
+            scrolled_frame = HorizontalScrolledFrame(self, bg=background)
+            self._boxes = tuple(box(scrolled_frame.interior, dpi, background=background)
+                                for box in repeat(self.SelectedRhythmBox, n_boxes))
+            scrolled_frame.pack(expand=True, fill=tk.BOTH)
+
+        class SelectedRhythmBox(tk.Frame):
+            def __init__(self, master, dpi, background="white", **kwargs):
+                super().__init__(master, background=background, **kwargs)
+                self._plot = BSRhythmComparisonStrip.RhythmPlottingCanvas(self, dpi, background)
+                self._prev_redraw_args = ()
+                self._plot.widget.pack(expand=True, fill=tk.BOTH)
+
+            def redraw(self, rhythm: Rhythm, plot_function: tp.Callable):
+                # plot function should be a @plot decorated RhythmPlotter method
+                if (rhythm, plot_function) == self._prev_redraw_args:
+                    return
+
+                with self._plot.figure_update() as figure:
+                    if rhythm is not None:
+                        plot_function(rhythm, figure=figure)
+                        figure.suptitle(rhythm.name, fontsize="small", y=0.13)
+
+                self._prev_redraw_args = (rhythm, plot_function)
+
+        def redraw(self, rhythms: tp.Iterable[Rhythm], plot_function: tp.Callable):
+            n_boxes = len(self._boxes)
+
+            for i, [box, rhythm] in enumerate(zip_longest(self._boxes, rhythms)):
+                if i >= n_boxes:
+                    break
+
+                box.redraw(rhythm, plot_function)
+
+                if rhythm is None:
+                    box.pack_forget()
+                else:
+                    box.pack(side=tk.LEFT)
+
+    class TargetRhythmBox(tk.Frame):
+        def __init__(self, master, dpi, background=None, **kwargs):
+            super().__init__(master, background=background, **kwargs)
+            container = tk.Frame(self)
+            container.pack(side="top", fill="both", expand=True)
+            container.grid_rowconfigure(0, weight=1)
+            container.grid_columnconfigure(0, weight=1)
+
+            self._screen_no_target = tk.Label(container, text="No target rhythm set", bg="gray")
+            self._screen_main = tk.Frame(container, bg=background)
+
+            plot_canvas = BSRhythmComparisonStrip.RhythmPlottingCanvas(self._screen_main, dpi, background)
+            plot_canvas.widget.pack()
+            self._plot_canvas = plot_canvas
+
+            for screen in [self._screen_no_target, self._screen_main]:
+                screen.grid(row=0, column=0, sticky="nsew")
+
+            container.pack(padx=3)
 
         def redraw(self, rhythm: Rhythm, plot_function: tp.Callable):
-            if rhythm == self._prev_redraw_rhythm and plot_function == self._prev_redraw_plot_function:
-                return False
-
-            figure = self._canvas.figure
-            figure.clear()
-
-            if rhythm is None:
-                self._canvas.draw()
-                return False
-
-            plot_function(rhythm, figure=figure)
-            self._canvas.draw()
-
-            self._prev_redraw_rhythm = rhythm
-            self._prev_redraw_plot_function = plot_function
-            return True
-
-        def __pack_canvas__(self, **kwargs):
-            widget = self._canvas.get_tk_widget()
-            widget.pack(expand=True, fill=tk.BOTH, **kwargs)
-
-    class TargetRhythmBox(RhythmPlotBox):
-        def __init__(self, rhythm_comparison_strip, dpi, **kwargs):
-            super().__init__(rhythm_comparison_strip, dpi, bg='white', pack_canvas=False, **kwargs)
-            plot_type_combobox = tkinter.ttk.Combobox(
-                self, values=tuple(BSApp.RHYTHM_PLOT_TYPES_BY_NAME.keys()), state="readonly")
-            plot_type_combobox.current(0)
-            plot_type_combobox.pack(side=tk.TOP, expand=True, fill=tk.X, pady=6, padx=6)
-
-            def on_plot_type_combobox(event):
-                value = event.widget.get()
-                plot_function_name = BSApp.RHYTHM_PLOT_TYPES_BY_NAME[value]
-                rhythm_comparison_strip.set_rhythm_plot_function(plot_function_name)
-
-            plot_type_combobox.bind("<<ComboboxSelected>>", on_plot_type_combobox)
-            self.__pack_canvas__(pady=(0, 14))
-
-    class SelectedRhythmBox(RhythmPlotBox):
-        def __init__(self, master, dpi, **kwargs):
-            super().__init__(master, dpi, **kwargs)
-
-            self._var_rhythm_name = tk.StringVar()
-            tk.Label(
-                self,
-                textvariable=self._var_rhythm_name,
-                anchor=tk.W
-            ).pack(side=tk.TOP, expand=True, fill=tk.X, padx=2, pady=2)
-
-        def redraw(self, rhythm: Rhythm, plot_function: tp.Callable, pack_kwargs=None):
-            should_redraw = super().redraw(rhythm, plot_function)
-            if not rhythm:
-                self.pack_forget()
-                return False
-            if not should_redraw:
-                return False
-            self._var_rhythm_name.set(rhythm.name)
-            self.pack(**(pack_kwargs or {}))
-            return True
+            with self._plot_canvas.figure_update() as figure:
+                figure.clear()
+                if rhythm is not None:
+                    plot_function(rhythm, figure=figure)
+                    figure.suptitle(rhythm.name, fontsize="small", y=0.13)
+                    self._screen_main.tkraise()
+                else:
+                    self._screen_no_target.tkraise()
 
     def redraw(self):
         controller = self.controller
-        rhythm_boxes = self._rhythm_boxes
-        target_rhythm = controller.get_target_rhythm()
-        n_rhythm_boxes = len(rhythm_boxes)
-        rhythm_selection = controller.get_rhythm_selection()
-        n_selected_rhythms = len(rhythm_selection)
         plot_function = self._rhythm_plot_function
-        pad = 3
 
-        rhythm_box_pack_args = dict(
-            side=tk.LEFT,
-            expand=False,
-            fill=None,
-            padx=pad * 2,
-            pady=(0, pad * 2)
+        target_rhythm_frame = self._frame_target
+        target_rhythm = controller.get_target_rhythm()
+        target_rhythm_frame.redraw(target_rhythm, plot_function)
+
+        rhythm_selection_frame = self._frame_selection
+        rhythm_selection = controller.get_rhythm_selection()
+        rhythm_selection_frame.redraw(
+            iter(controller.get_rhythm_by_index(ix) for ix in rhythm_selection),
+            plot_function
         )
-
-        self._target_rhythm_frame.redraw(target_rhythm, plot_function)
-
-        if n_selected_rhythms > n_rhythm_boxes:
-            rhythm_selection = rhythm_selection[:n_rhythm_boxes]
-
-        for i, [rhythm_box, rhythm_ix] in enumerate(zip_longest(rhythm_boxes, rhythm_selection)):
-            rhythm = controller.get_rhythm_by_index(rhythm_ix) if rhythm_ix is not None else None
-            rhythm_box.redraw(rhythm, plot_function, pack_kwargs={
-                **rhythm_box_pack_args,
-                'padx': pad
-            })
 
     def set_rhythm_plot_function(self, plot_function_name):
         self._rhythm_plot_function = getattr(self.rhythm_plotter, plot_function_name)
         self.redraw()
 
 
-class BSMainMenu(tk.Menu):
+class BSMainMenu(tk.Menu, object):
     def __init__(self, root, **kwargs):
         tk.Menu.__init__(self, root, **kwargs)
         f_menu = tk.Menu(self, tearoff=0)
@@ -500,7 +527,7 @@ class BSMainMenu(tk.Menu):
     def on_request_exit(self, callback):
         if not callable(callback):
             raise Exception("Expected callable but got \"%s\"" % str(callback))
-        self._on_request_exit()
+        self._on_request_exit = callback
 
     def _show_open_corpus_file_dialog(self):
         fname = tkinter.filedialog.askopenfilename(
@@ -537,6 +564,11 @@ class BSApp(tk.Tk, object):
         ("IOI Histogram", "inter_onset_interval_histogram"),
     ))
 
+    FONT = {
+        'header': ("Helvetica", 14),
+        'normal': ("Helvetica", 12)
+    }
+
     def __init__(
             self,
             controller: BSController = BSController(),  # TODO Get rid of mutable default
@@ -548,6 +580,10 @@ class BSApp(tk.Tk, object):
             **kwargs
     ):
         tk.Tk.__init__(self, **kwargs)
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.bind("<Control-c>", eat_args(self.close))
+        signal.signal(signal.SIGTERM, eat_args(self.close))
+        signal.signal(signal.SIGINT, eat_args(self.close))
 
         self.wm_title(BSApp.WINDOW_TITLE)
         self.controller = self._controller = controller
@@ -626,6 +662,10 @@ class BSApp(tk.Tk, object):
     def get_frame_names(self):
         return list(self.frames.keys())
 
+    def close(self):
+        self.quit()
+        self.destroy()
+
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
         rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
@@ -646,7 +686,7 @@ class BSApp(tk.Tk, object):
         if menubar is None:
             return
         menubar.on_request_load_corpus = self.controller.set_corpus
-        menubar.on_request_exit = self.destroy
+        menubar.on_request_exit = self.close
         self.config(menu=menubar)
 
     def _toggle_rhythm_playback(self):
@@ -728,7 +768,7 @@ class HorizontalScrolledFrame(tk.Frame):
         # create a canvas object and a vertical scrollbar for scrolling it
         scrollbar = tk.Scrollbar(self, orient=tk.HORIZONTAL)
         scrollbar.pack(fill=tk.X, side=tk.BOTTOM, expand=tk.FALSE)
-        canvas = tk.Canvas(self, bd=0, highlightthickness=0, xscrollcommand=scrollbar.set)
+        canvas = tk.Canvas(self, bd=0, highlightthickness=0, xscrollcommand=scrollbar.set, bg=self.cget("bg"))
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=tk.TRUE)
         scrollbar.config(command=canvas.xview)
 
