@@ -60,7 +60,7 @@ class plot(object):
         self._f_fill_subplot = f_fill_subplot
         return plot.Descriptor(obj_decorator=self)
 
-    def create_plot_figure(self, obj, *args, **kwargs):
+    def create_plot_figure(self, obj, figure=None, figure_kwargs=None, legend_kwargs=None, *args, **kwargs):
         if isinstance(obj, Rhythm):
             rhythm = obj
             track_iter = rhythm.track_iter()
@@ -72,7 +72,7 @@ class plot(object):
                              "object but got a '%s' instead" % obj)
 
         # the figure to add the subplot(s) to
-        figure = plt.figure("%s - %s" % (self._title, rhythm.name))
+        figure = figure or plt.figure("%s - %s" % (self._title, rhythm.name), **(figure_kwargs or {}))
 
         rhythm_plotter = self._rhythm_plotter
         concrete_unit = to_concrete_unit(rhythm_plotter.unit, rhythm)
@@ -109,7 +109,7 @@ class plot(object):
                 track_i=track_i,
                 color=next(color_pool),
                 setup_result=axes_setup_result,
-                *args, **merge_dicts(kwargs, setup_args)
+                *args, **merge_dicts(kwargs, setup_args)  # TODO merge_dicts not necessary anymore now with Python 3
             )[0]
 
             axes.set_xlabel(rhythm_plotter.unit)
@@ -117,7 +117,7 @@ class plot(object):
             plot_handles.append(handle)
             track_i += 1
 
-        figure.legend(plot_handles, track_names, loc="center right")
+        figure.legend(plot_handles, track_names, loc="center right", **(legend_kwargs or {}))
         plt.draw()
         return figure
 

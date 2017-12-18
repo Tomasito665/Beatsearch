@@ -1,9 +1,9 @@
-import inspect
 import os
+import inspect
 import itertools
+from functools import wraps
 from typing import Union, Iterable, Tuple, Any
 from collections import OrderedDict
-from functools import wraps
 # noinspection PyUnresolvedReferences
 import midi
 import math

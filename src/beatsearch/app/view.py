@@ -2,8 +2,16 @@ import os
 import tkinter.ttk
 # noinspection PyPep8Naming
 import tkinter as tk
-import tkinter.filedialog
 import tkinter.font
+import tkinter.filedialog
+from contextlib import contextmanager
+from itertools import zip_longest
+from tkinter import ttk
+import matplotlib
+
+matplotlib.use("TkAgg")
+from matplotlib import pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
@@ -15,7 +23,7 @@ from beatsearch.data.rhythm import (
 from beatsearch.utils import head_trail_iter, no_callback, type_check_and_instantiate_if_necessary, eat_args
 from beatsearch.app.control import BSController
 from beatsearch.graphics.plot import RhythmPlotter
-from matplotlib import pyplot as plt
+from beatsearch.data.rhythm import Rhythm
 
 
 class BSAppFrame(tk.Frame):
@@ -24,9 +32,20 @@ class BSAppFrame(tk.Frame):
             raise TypeError("Expected a BSApp but got '%s'" % app)
         tk.Frame.__init__(self, app, **kwargs)
         self.controller = app.controller
+        self.dpi = app.winfo_fpixels("1i")
 
     def redraw(self):
         raise NotImplementedError
+
+
+# TODO Remove duplicated functionality
+class BSAppTtkFrame(ttk.Frame):
+    def __init__(self, app, **kwargs):
+        if not isinstance(app, BSApp):
+            raise TypeError("Expected a BSApp but got '%s'" % app)
+        ttk.Frame.__init__(self, app, **kwargs)
+        self.controller = app.controller
+        self.dpi = app.winfo_fpixels("1i")
 
 
 class BSSearchForm(BSAppFrame):
@@ -112,6 +131,7 @@ class BSSearchForm(BSAppFrame):
         def wrapper(event):
             value = event.widget.get()
             return callback(value)
+
         combobox = self._combo_boxes[combobox_name]
         combobox.bind("<<ComboboxSelected>>", wrapper)
 
@@ -323,6 +343,134 @@ class BSTransportControls(BSAppFrame, object):
         self._btn_toggle_play.configure(command=callback)
 
 
+class BSRhythmComparisonStrip(BSAppTtkFrame):
+    def __init__(self, app, **kwargs):
+        super().__init__(app, **kwargs)
+        self.rhythm_plotter = RhythmPlotter()
+        self._rhythm_plot_function = self.rhythm_plotter.polygon
+
+        self._target_rhythm_frame = self.TargetRhythmBox(self, self.dpi)
+        self._target_rhythm_frame.pack(side=tk.LEFT, padx=(6, 3))
+
+        rhythm_box_container_wrapper = tk.Frame(self)
+        rhythm_box_container_wrapper.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        rhythm_box_container = HorizontalScrolledFrame(rhythm_box_container_wrapper)
+        rhythm_box_container.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT, padx=(3, 6))
+
+        n_rhythm_boxes = 19  # matplotlib is limited to 20 open figures by default (-1 for target rhythm box)
+        self._rhythm_boxes = tuple(BSRhythmComparisonStrip.SelectedRhythmBox(
+            rhythm_box_container.interior, self.dpi) for _ in range(n_rhythm_boxes))
+
+    class RhythmPlotBox(tk.Frame):
+        def __init__(self, master, dpi=100, pack_canvas=True, **kwargs):
+            super().__init__(master, **kwargs)
+
+            self._canvas = FigureCanvasTkAgg(plt.Figure(
+                dpi=dpi,
+                figsize=(3, 3)
+            ), master=self)
+
+            if pack_canvas:
+                self.__pack_canvas__()
+
+            self._prev_redraw_rhythm = None
+            self._prev_redraw_plot_function = None
+
+        def redraw(self, rhythm: Rhythm, plot_function: tp.Callable):
+            if rhythm == self._prev_redraw_rhythm and plot_function == self._prev_redraw_plot_function:
+                return False
+
+            figure = self._canvas.figure
+            figure.clear()
+
+            if rhythm is None:
+                self._canvas.draw()
+                return False
+
+            plot_function(rhythm, figure=figure)
+            self._canvas.draw()
+
+            self._prev_redraw_rhythm = rhythm
+            self._prev_redraw_plot_function = plot_function
+            return True
+
+        def __pack_canvas__(self, **kwargs):
+            widget = self._canvas.get_tk_widget()
+            widget.pack(expand=True, fill=tk.BOTH, **kwargs)
+
+    class TargetRhythmBox(RhythmPlotBox):
+        def __init__(self, rhythm_comparison_strip, dpi, **kwargs):
+            super().__init__(rhythm_comparison_strip, dpi, bg='white', pack_canvas=False, **kwargs)
+            plot_type_combobox = tkinter.ttk.Combobox(
+                self, values=tuple(BSApp.RHYTHM_PLOT_TYPES_BY_NAME.keys()), state="readonly")
+            plot_type_combobox.current(0)
+            plot_type_combobox.pack(side=tk.TOP, expand=True, fill=tk.X, pady=6, padx=6)
+
+            def on_plot_type_combobox(event):
+                value = event.widget.get()
+                plot_function_name = BSApp.RHYTHM_PLOT_TYPES_BY_NAME[value]
+                rhythm_comparison_strip.set_rhythm_plot_function(plot_function_name)
+
+            plot_type_combobox.bind("<<ComboboxSelected>>", on_plot_type_combobox)
+            self.__pack_canvas__(pady=(0, 14))
+
+    class SelectedRhythmBox(RhythmPlotBox):
+        def __init__(self, master, dpi, **kwargs):
+            super().__init__(master, dpi, **kwargs)
+
+            self._var_rhythm_name = tk.StringVar()
+            tk.Label(
+                self,
+                textvariable=self._var_rhythm_name,
+                anchor=tk.W
+            ).pack(side=tk.TOP, expand=True, fill=tk.X, padx=2, pady=2)
+
+        def redraw(self, rhythm: Rhythm, plot_function: tp.Callable, pack_kwargs=None):
+            should_redraw = super().redraw(rhythm, plot_function)
+            if not rhythm:
+                self.pack_forget()
+                return False
+            if not should_redraw:
+                return False
+            self._var_rhythm_name.set(rhythm.name)
+            self.pack(**(pack_kwargs or {}))
+            return True
+
+    def redraw(self):
+        controller = self.controller
+        rhythm_boxes = self._rhythm_boxes
+        target_rhythm = controller.get_target_rhythm()
+        n_rhythm_boxes = len(rhythm_boxes)
+        rhythm_selection = controller.get_rhythm_selection()
+        n_selected_rhythms = len(rhythm_selection)
+        plot_function = self._rhythm_plot_function
+        pad = 3
+
+        rhythm_box_pack_args = dict(
+            side=tk.LEFT,
+            expand=False,
+            fill=None,
+            padx=pad * 2,
+            pady=(0, pad * 2)
+        )
+
+        self._target_rhythm_frame.redraw(target_rhythm, plot_function)
+
+        if n_selected_rhythms > n_rhythm_boxes:
+            rhythm_selection = rhythm_selection[:n_rhythm_boxes]
+
+        for i, [rhythm_box, rhythm_ix] in enumerate(zip_longest(rhythm_boxes, rhythm_selection)):
+            rhythm = controller.get_rhythm_by_index(rhythm_ix) if rhythm_ix is not None else None
+            rhythm_box.redraw(rhythm, plot_function, pack_kwargs={
+                **rhythm_box_pack_args,
+                'padx': pad
+            })
+
+    def set_rhythm_plot_function(self, plot_function_name):
+        self._rhythm_plot_function = getattr(self.rhythm_plotter, plot_function_name)
+        self.redraw()
+
+
 class BSMainMenu(tk.Menu):
     def __init__(self, root, **kwargs):
         tk.Menu.__init__(self, root, **kwargs)
@@ -378,6 +526,7 @@ class BSApp(tk.Tk, object):
     FRAME_RHYTHM_LIST = "<Frame-RhythmList>"
     FRAME_TRANSPORT = "<Frame-Transport>"
     FRAME_SEARCH = "<Frame-Search>"
+    FRAME_RHYTHM_COMPARISON_STRIP = "<Frame-RhythmComparisonStrip>"
 
     RHYTHM_PLOT_TYPES_BY_NAME = OrderedDict((
         ("Chronotonic", "chronotonic"),
@@ -394,6 +543,7 @@ class BSApp(tk.Tk, object):
             search_frame_cls: tp.Type[BSSearchForm] = BSSearchForm,
             rhythms_frame_cls: tp.Type[BSRhythmList] = BSRhythmList,
             transport_frame_cls: tp.Union[tp.Type[BSTransportControls], None] = BSTransportControls,
+            rhythm_comparison_strip_frame: tp.Type[BSRhythmComparisonStrip] = BSRhythmComparisonStrip,
             main_menu: tp.Union[BSMainMenu, tp.Type[BSMainMenu], None] = BSMainMenu,
             **kwargs
     ):
@@ -409,7 +559,8 @@ class BSApp(tk.Tk, object):
         frame_info = (
             (BSApp.FRAME_SEARCH, search_frame_cls, dict(expand=False, fill=tk.X)),
             (BSApp.FRAME_RHYTHM_LIST, rhythms_frame_cls, dict(expand=True, fill=tk.BOTH)),
-            (BSApp.FRAME_TRANSPORT, transport_frame_cls, dict(expand=False, fill=tk.X))
+            (BSApp.FRAME_RHYTHM_COMPARISON_STRIP, rhythm_comparison_strip_frame, dict(expand=False, fill=tk.X)),
+            (BSApp.FRAME_TRANSPORT, transport_frame_cls, dict(expand=False, fill=tk.X)),
         )
 
         pady = BSApp.STYLES['inner-pad-y'] / 2.0
@@ -431,12 +582,12 @@ class BSApp(tk.Tk, object):
         self._setup_frames()
 
         redraw_frames_on_controller_callbacks = {
-            BSController.RHYTHM_SELECTION: [BSApp.FRAME_TRANSPORT],
+            BSController.RHYTHM_SELECTION: [BSApp.FRAME_TRANSPORT, BSApp.FRAME_RHYTHM_COMPARISON_STRIP],
             BSController.RHYTHM_PLAYBACK_START: [BSApp.FRAME_TRANSPORT],
             BSController.RHYTHM_PLAYBACK_STOP: [BSApp.FRAME_TRANSPORT],
             BSController.CORPUS_LOADED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.DISTANCES_TO_TARGET_UPDATED: [BSApp.FRAME_RHYTHM_LIST],
-            BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH],
+            BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH, BSApp.FRAME_RHYTHM_COMPARISON_STRIP],
         }
 
         for action, frames in redraw_frames_on_controller_callbacks.items():
@@ -566,3 +717,36 @@ class ToggleButton(tk.Button):
     def set_enabled(self, enabled=True):
         self._enabled = bool(enabled)
         self.redraw()
+
+
+class HorizontalScrolledFrame(tk.Frame):
+    """https://stackoverflow.com/a/16198198/5508855"""
+
+    def __init__(self, parent, *args, **kw):
+        tk.Frame.__init__(self, parent, *args, **kw)
+
+        # create a canvas object and a vertical scrollbar for scrolling it
+        scrollbar = tk.Scrollbar(self, orient=tk.HORIZONTAL)
+        scrollbar.pack(fill=tk.X, side=tk.BOTTOM, expand=tk.FALSE)
+        canvas = tk.Canvas(self, bd=0, highlightthickness=0, xscrollcommand=scrollbar.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=tk.TRUE)
+        scrollbar.config(command=canvas.xview)
+
+        # reset the view
+        canvas.xview_moveto(0)
+        canvas.yview_moveto(0)
+
+        # create a frame inside the canvas which will be scrolled with it
+        self.interior = interior = tk.Frame(canvas)
+        canvas.create_window(0, 0, window=interior, anchor=tk.NW)
+
+        # track changes to the canvas and frame height and sync them, also updating the scrollbar
+        def configure_interior(_):
+            # update the scrollbars to match the size of the inner frame
+            size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
+            canvas.config(scrollregion="0 0 %s %s" % size)
+            if interior.winfo_reqheight() != canvas.winfo_height():
+                # update the canvas's height to fit the inner frame
+                canvas.config(height=interior.winfo_reqheight())
+
+        interior.bind("<Configure>", configure_interior)

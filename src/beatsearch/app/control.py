@@ -219,6 +219,15 @@ class BSController(object):
         self._distances_to_target_rhythm_are_stale = True
         self._dispatch(self.TARGET_RHYTHM_SET)
 
+    def get_target_rhythm(self):
+        """
+        Returns the current target rhythm or None if there is no target rhythm set.
+
+        :return: target rhythm
+        """
+
+        return self._target_rhythm
+
     def is_target_rhythm_set(self):
         """
         Returns whether or not a target rhythm has been set.
