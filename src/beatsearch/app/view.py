@@ -100,6 +100,8 @@ class BSSearchForm(BSAppFrame):
 
     def redraw(self):
         controller = self.controller
+        q_combo = self._combo_boxes[self.COMBO_QUANTIZE]
+        q_combo.config(state=tk.NORMAL if controller.is_current_distance_measure_quantizable() else tk.DISABLED)
         self._btn_search.config(state=tk.NORMAL if controller.is_target_rhythm_set() else tk.DISABLED)
 
     @property
@@ -179,6 +181,8 @@ class BSRhythmList(BSAppFrame):
         self.bind_all("<MouseWheel>", self._on_mousewheel)
 
         self._tree_view.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._tree_view.bind("<Double-Button-1>", self._on_double_click)
+
         self._tree_view.configure(
             xscrollcommand=scrollbars[tk.X].set,
             yscrollcommand=scrollbars[tk.Y].set
@@ -300,6 +304,11 @@ class BSRhythmList(BSAppFrame):
         selected_rhythms = self._get_selected_rhythm_indices()
         controller.set_rhythm_selection(selected_rhythms)
 
+    def _on_double_click(self, _):
+        selected_rhythms = self._get_selected_rhythm_indices()
+        assert len(selected_rhythms) == 1
+        self.on_request_target_rhythm(selected_rhythms[0])
+
     def _sort_tree_view(self, column, descending):  # sorts the rhythms by the given column
         tv = self._tree_view
         data_type = BSController.RHYTHM_DATA_TYPES[column]
@@ -319,10 +328,10 @@ class BSRhythmList(BSAppFrame):
 
 
 class BSTransportControls(BSAppFrame, object):
-    def __init__(self, controller, **kwargs):
-        BSAppFrame.__init__(self, controller, **kwargs)
-        self._btn_toggle_play = ToggleButton(self, text=("Play", "Stop"), width=20)
-        self._btn_toggle_play.pack(side=tk.LEFT, padx=6)
+    def __init__(self, controller, background="#37474F", **kwargs):
+        BSAppFrame.__init__(self, controller, background=background, **kwargs)
+        self._btn_toggle_play = ToggleButton(self, text=("Play", "Stop"), width=8)
+        self._btn_toggle_play.pack(side=tk.LEFT, padx=6, pady=6)
         self._play_command = None
 
     def redraw(self):
@@ -345,7 +354,7 @@ class BSTransportControls(BSAppFrame, object):
 
 
 class BSRhythmComparisonStrip(BSAppTtkFrame):
-    def __init__(self, app, background_left="gray", background_right="white", **kwargs):
+    def __init__(self, app, background_left="#E0E0E0", background_right="#EEEEEE", **kwargs):
         super().__init__(app, **kwargs)
         self.rhythm_plotter = RhythmPlotter()
         self._rhythm_plot_function = self.rhythm_plotter.polygon
@@ -366,7 +375,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             self, n_boxes=19, dpi=self.dpi, background=background_right)
 
         # left panel (target rhythm)
-        label_target.grid(row=0, column=0, sticky="ew", ipadx=3)
+        label_target.grid(row=0, column=0, sticky="ew", ipadx=6)
         frame_target.grid(row=1, column=0, sticky="nsew")
 
         # right panel (selection rhythms)
@@ -456,7 +465,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             container.grid_rowconfigure(0, weight=1)
             container.grid_columnconfigure(0, weight=1)
 
-            self._screen_no_target = tk.Label(container, text="No target rhythm set", bg="gray")
+            self._screen_no_target = tk.Label(container, text="No target rhythm set", bg=background)
             self._screen_main = tk.Frame(container, bg=background)
 
             plot_canvas = BSRhythmComparisonStrip.RhythmPlottingCanvas(self._screen_main, dpi, background)
@@ -586,6 +595,7 @@ class BSApp(tk.Tk, object):
         signal.signal(signal.SIGINT, eat_args(self.close))
 
         self.wm_title(BSApp.WINDOW_TITLE)
+        self.config(bg="#EEEEEE")
         self.controller = self._controller = controller
         self.rhythm_plotter = RhythmPlotter()
 
@@ -593,13 +603,13 @@ class BSApp(tk.Tk, object):
         self.frames = OrderedDict()
 
         frame_info = (
-            (BSApp.FRAME_SEARCH, search_frame_cls, dict(expand=False, fill=tk.X)),
-            (BSApp.FRAME_RHYTHM_LIST, rhythms_frame_cls, dict(expand=True, fill=tk.BOTH)),
-            (BSApp.FRAME_RHYTHM_COMPARISON_STRIP, rhythm_comparison_strip_frame, dict(expand=False, fill=tk.X)),
-            (BSApp.FRAME_TRANSPORT, transport_frame_cls, dict(expand=False, fill=tk.X)),
+            (BSApp.FRAME_SEARCH, search_frame_cls, dict(expand=False, fill=tk.X, pady=3)),
+            (BSApp.FRAME_RHYTHM_LIST, rhythms_frame_cls, dict(expand=True, fill=tk.BOTH, pady=(3, 0))),
+            (BSApp.FRAME_RHYTHM_COMPARISON_STRIP, rhythm_comparison_strip_frame, dict(expand=False, fill=tk.X, pady=0)),
+            (BSApp.FRAME_TRANSPORT, transport_frame_cls, dict(expand=False, fill=tk.X, pady=(3, 0))),
         )
 
-        pady = BSApp.STYLES['inner-pad-y'] / 2.0
+        # pady = BSApp.STYLES['inner-pad-y'] / 2.0
         padx = BSApp.STYLES['inner-pad-x']
 
         for is_first, is_last, [frame_name, frame_cls, pack_args] in head_trail_iter(frame_info):
@@ -607,12 +617,11 @@ class BSApp(tk.Tk, object):
                 continue
             frame = frame_cls(self)
             self.frames[frame_name] = frame
-            frame.pack(
-                side=tk.TOP,
-                padx=padx,
-                pady=(pady * 2 if is_first else pady, pady * 2 if is_last else pady),
+            frame.pack(**{
+                'side': tk.TOP,
+                'padx': padx,
                 **pack_args
-            )
+            })
 
         self._setup_menubar()
         self._setup_frames()
@@ -624,6 +633,7 @@ class BSApp(tk.Tk, object):
             BSController.CORPUS_LOADED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.DISTANCES_TO_TARGET_UPDATED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH, BSApp.FRAME_RHYTHM_COMPARISON_STRIP],
+            BSController.DISTANCE_MEASURE_SET: [BSApp.FRAME_SEARCH]
         }
 
         for action, frames in redraw_frames_on_controller_callbacks.items():
@@ -647,7 +657,8 @@ class BSApp(tk.Tk, object):
             return
         if not isinstance(controller, BSController):
             raise TypeError("Expected a BSController but got \"%s\"" % str(controller))
-        self.bind("<space>", eat_args(self._toggle_rhythm_playback))
+        if controller.is_rhythm_player_set():
+            self.bind("<space>", eat_args(self._toggle_rhythm_playback))
         self._controller = controller
 
     def redraw_frames(self, *frame_names):
@@ -674,6 +685,12 @@ class BSApp(tk.Tk, object):
         search_frame.search_command = self.controller.calculate_distances_to_target_rhythm
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
+
+        def on_new_quantize_unit(unit_name, controller):  # type: (str, BSController) -> None
+            unit = Unit.get_unit_by_name(unit_name)
+            controller.set_measure_quantization_unit(unit)
+
+        search_frame.on_new_quantize = partial(on_new_quantize_unit, controller=self.controller)
 
         try:
             transport_frame = self.frames[BSApp.FRAME_TRANSPORT]
@@ -718,7 +735,7 @@ class ToggleButton(tk.Button):
             self,
             master,
             text,
-            background=(None, 'green'),
+            background=(None, "#009688"),
             foreground=(None, None),
             **kwargs
     ):

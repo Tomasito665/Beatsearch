@@ -8,8 +8,8 @@ from beatsearch.data.rhythm import (
     create_rumba_rhythm,
     RhythmDistanceMeasure,
     TrackDistanceMeasure,
-    HammingDistanceMeasure
-)
+    HammingDistanceMeasure,
+    Quantizable)
 from beatsearch.config import __USE_NUMPY__
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
@@ -90,6 +90,7 @@ class BSController(object):
     CORPUS_LOADED = "<Corpus-Loaded>"
     DISTANCES_TO_TARGET_UPDATED = "<TargetDistances-Updated>"
     TARGET_RHYTHM_SET = "<TargetRhythm-Set>"
+    DISTANCE_MEASURE_SET = "<DistanceMeasure-Set>"
 
     # description of data returned by get_rhythm_data
     RHYTHM_DATA_TYPES = OrderedDict((
@@ -126,16 +127,17 @@ class BSController(object):
         self._target_rhythm_prev_update = None
         self._lock = threading.Lock()
         self._rhythm_player = None
-        self.set_distance_measure(distance_measure)
-        self.set_rhythm_player(rhythm_player)
         self._callbacks = dict((action, OrderedSet()) for action in [
             BSController.RHYTHM_SELECTION,
             BSController.CORPUS_LOADED,
             BSController.DISTANCES_TO_TARGET_UPDATED,
             BSController.RHYTHM_PLAYBACK_START,
             BSController.RHYTHM_PLAYBACK_STOP,
-            BSController.TARGET_RHYTHM_SET
+            BSController.TARGET_RHYTHM_SET,
+            BSController.DISTANCE_MEASURE_SET
         ])
+        self.set_rhythm_player(rhythm_player)
+        self.set_distance_measure(distance_measure)
 
     def set_corpus(self, corpus):
         """
@@ -347,6 +349,27 @@ class BSController(object):
 
         self._rhythm_measure.track_distance_measure = track_distance_measure
         self._distances_to_target_rhythm_are_stale = True
+        self._dispatch(self.DISTANCE_MEASURE_SET)
+
+    def is_current_distance_measure_quantizable(self):
+        return isinstance(self._rhythm_measure.track_distance_measure, Quantizable)
+
+    def set_measure_quantization_unit(self, unit):
+        """
+        Sets the quantization for the distance measures.
+
+        :param unit: quantization unit
+        :return: None
+        """
+
+        if not self.is_current_distance_measure_quantizable():
+            return False
+
+        track_distance_measure = self._rhythm_measure.track_distance_measure
+        track_distance_measure.internal_unit = unit
+        track_distance_measure.quantize_enabled = True
+        self._distances_to_target_rhythm_are_stale = True
+        return True
 
     def set_tracks_to_compare(self, tracks):
         """

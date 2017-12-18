@@ -12,8 +12,8 @@ from beatsearch.utils import friendly_named_class, inject_numpy
 
 
 class Unit(object):
-    _units = OrderedDict()
-    _unit_names = []
+    _units = OrderedDict()  # units by unit values
+    _unit_names = []  # unit names
 
     def __init__(self, name, value, scale_factor_from_quarter_note):
         self._name = str(name)
@@ -70,6 +70,21 @@ class Unit(object):
         if len(Unit._unit_names) != len(Unit._units):
             Unit._unit_names = tuple(unit.name for unit in Unit._units.values())
         return Unit._unit_names
+
+    @classmethod
+    def get_unit_by_name(cls, unit_name):
+        """
+        Returns a unit given its unit name.
+
+        :param unit_name: unit name
+        :return: Unit object
+        """
+
+        try:
+            unit_ix = cls._unit_names.index(unit_name)
+        except IndexError:
+            raise Unit.UnknownTimeUnit("No time unit named \"%s\"" % unit_name)
+        return tuple(cls._units.values())[unit_ix]
 
 
 Unit.FULL = Unit("Full", "fulls", 0.25)
@@ -1086,6 +1101,19 @@ class TrackDistanceMeasure(DistanceMeasure):
             raise ValueError("No measure with name: '%s'" % measure_name)
 
 
+class Quantizable(object):
+    def __init__(self):
+        self._quantize_enabled = False
+
+    @property
+    def quantize_enabled(self):
+        return self._quantize_enabled
+
+    @quantize_enabled.setter
+    def quantize_enabled(self, quantize_enabled):
+        self._quantize_enabled = bool(quantize_enabled)
+
+
 @friendly_named_class("Hamming distance")
 class HammingDistanceMeasure(TrackDistanceMeasure):
     """
@@ -1110,17 +1138,17 @@ class HammingDistanceMeasure(TrackDistanceMeasure):
 
 
 @friendly_named_class("Euclidean interval vector distance")
-class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure):
+class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure, Quantizable):
     """
     The euclidean interval vector distance is the euclidean distance between the inter-onset vectors of the rhythms.
     """
 
     def __init__(self, unit='ticks', length_policy='exact', quantize=False):
         super(EuclideanIntervalVectorDistanceMeasure, self).__init__(unit, length_policy)
-        self.quantize = quantize
+        self.quantize_enabled = quantize
 
     def __get_iterable__(self, track, unit):
-        return track.get_post_note_inter_onset_intervals(unit, self.quantize)
+        return track.get_post_note_inter_onset_intervals(unit, self.quantize_enabled)
 
     def __compute_distance__(self, n, vx, vy, *cookies):
         sum_squared_dt, i = 0, 0
@@ -1132,18 +1160,18 @@ class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure):
 
 
 @friendly_named_class("Interval difference vector distance")
-class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure):
+class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure, Quantizable):
     """
     The interval difference vector distance is based on the interval difference vectors of the rhythms.
     """
 
     def __init__(self, unit='ticks', length_policy='fill', quantize=False, cyclic=True):
         super(IntervalDifferenceVectorDistanceMeasure, self).__init__(unit, length_policy)
-        self.quantize = quantize
+        self.quantize_enabled = quantize
         self.cyclic = cyclic
 
     def __get_iterable__(self, track, unit):
-        return track.get_interval_difference_vector(self.cyclic, unit, self.quantize)
+        return track.get_interval_difference_vector(self.cyclic, unit, self.quantize_enabled)
 
     def __compute_distance__(self, n, vx, vy, *cookies):
         summed_fractions, i = 0, 0
@@ -1160,7 +1188,7 @@ class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure):
 
 
 @friendly_named_class("Swap distance")
-class SwapDistanceMeasure(TrackDistanceMeasure):
+class SwapDistanceMeasure(TrackDistanceMeasure, Quantizable):
     """
     The swap distance is the minimal number of swap operations required to transform one track to another track. A swap
     is an interchange of a one and a zero that are adjacent to each other in the binary representations of the rhythms.
@@ -1172,10 +1200,10 @@ class SwapDistanceMeasure(TrackDistanceMeasure):
 
     def __init__(self, unit='eighths', length_policy='multiple', quantize=False):
         super(SwapDistanceMeasure, self).__init__(unit, length_policy)
-        self.quantize = quantize
+        self.quantize_enabled = quantize
 
     def __get_iterable__(self, track, unit):
-        return track.get_onset_times(unit, self.quantize)
+        return track.get_onset_times(unit, self.quantize_enabled)
 
     def __get_cookie__(self, track, unit):
         return int(math.ceil(track.rhythm.get_duration(unit)))
@@ -1296,7 +1324,7 @@ class RhythmDistanceMeasure(DistanceMeasure):
         self.normalize = normalize
 
     @property
-    def track_distance_measure(self):
+    def track_distance_measure(self):  # type: () -> TrackDistanceMeasure
         """
         The distance measure used to compute the distance between the rhythm tracks; an instance of TrackDistanceMeasure.
         """
