@@ -359,9 +359,11 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         self.rhythm_plotter = RhythmPlotter()
         self._rhythm_plot_function = self.rhythm_plotter.polygon
 
+        # left panel (target rhythm box)
         label_target = tk.Label(self, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_left)
         frame_target = self.TargetRhythmBox(self, self.dpi, background=background_left)
 
+        # right panel (selected rhythm plots)
         header_selection = tk.Frame(self, bg=background_right)
         label_selection = tk.Label(
             header_selection, text="Selected Rhythms", anchor=tk.W, font=BSApp.FONT['header'], bg=background_right)
@@ -374,11 +376,11 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         frame_selection = BSRhythmComparisonStrip.SelectedRhythmsFrame(
             self, n_boxes=19, dpi=self.dpi, background=background_right)
 
-        # left panel (target rhythm)
+        # lay out left panel
         label_target.grid(row=0, column=0, sticky="ew", ipadx=6)
         frame_target.grid(row=1, column=0, sticky="nsew")
 
-        # right panel (selection rhythms)
+        # lay out right panel
         header_selection.grid(row=0, column=1, sticky="ew")
         frame_selection.grid(row=1, column=1, sticky="nsew")
         self.grid_columnconfigure(1, weight=1)  # expand horizontally
@@ -445,6 +447,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
         def redraw(self, rhythms: tp.Iterable[Rhythm], plot_function: tp.Callable):
             n_boxes = len(self._boxes)
+            is_first = True
 
             for i, [box, rhythm] in enumerate(zip_longest(self._boxes, rhythms)):
                 if i >= n_boxes:
@@ -452,10 +455,14 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
                 box.redraw(rhythm, plot_function)
 
-                if rhythm is None:
-                    box.pack_forget()
-                else:
+                # Pack at least one box in order to stretch the parent's y
+                # to the correct size
+                if is_first or rhythm is not None:
                     box.pack(side=tk.LEFT)
+                else:
+                    box.pack_forget()
+
+                is_first = False
 
     class TargetRhythmBox(tk.Frame):
         def __init__(self, master, dpi, background=None, **kwargs):
