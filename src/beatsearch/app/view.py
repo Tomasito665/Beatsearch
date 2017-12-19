@@ -229,6 +229,8 @@ class BSRhythmList(BSAppFrame):
             rhythm_ix = self._get_rhythm_index(item_iid)
             tv.item(item_iid, values=rhythm_data[rhythm_ix])
 
+        self._sort_tree_view("Distance to target", 0)
+
     @property
     def on_request_target_rhythm(self):  # type: () -> tp.Callable[int]
         return self._on_request_target_rhythm
