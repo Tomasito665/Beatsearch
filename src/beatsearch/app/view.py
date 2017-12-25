@@ -8,6 +8,7 @@ import tkinter.filedialog
 from contextlib import contextmanager
 from itertools import zip_longest, repeat
 from tkinter import ttk
+from tkinter import filedialog
 import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib import pyplot as plt
@@ -27,9 +28,10 @@ from beatsearch.utils import (
     eat_args,
     color_variant
 )
-from beatsearch.app.control import BSController
+from beatsearch.app.control import BSController, BSRhythmLoader
 from beatsearch.graphics.plot import RhythmPlotter
 from beatsearch.data.rhythm import Rhythm
+import midi  # after beatsearch imports!
 
 
 class BSAppFrame(tk.Frame):
@@ -52,6 +54,31 @@ class BSAppTtkFrame(ttk.Frame):
         ttk.Frame.__init__(self, app, **kwargs)
         self.controller = app.controller
         self.dpi = app.winfo_fpixels("1i")
+
+
+class BSMidiRhythmLoader(BSRhythmLoader):
+    SOURCE_NAME = "MIDI file"
+
+    def __init__(self):
+        super().__init__()
+
+    @classmethod
+    def get_source_name(cls):
+        return cls.SOURCE_NAME
+
+    def is_available(self):
+        return True
+
+    def __load__(self, **kwargs):
+        fpath = filedialog.askopenfilename(
+            title="Load rhythm from MIDI file",
+            filetypes=(("MIDI files", "*.mid"), ("All files", "*"))
+        )
+        if not os.path.isfile(fpath):
+            return None
+        pattern = midi.read_midifile(fpath)
+        rhythm = Rhythm.create_from_midi(pattern, fpath)
+        return rhythm
 
 
 class BSSearchForm(BSAppFrame):
@@ -262,7 +289,7 @@ class BSRhythmList(BSAppFrame):
 
     def _on_set_as_target_rhythm(self):
         selected_rhythms = self._get_selected_rhythm_indices()
-        assert len(selected_rhythms) == 1
+        assert len(selected_rhythms) >= 1
         self.on_request_target_rhythm(selected_rhythms[0])
 
     def _on_plot_rhythms(self, plot_type_name):
@@ -371,7 +398,13 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         self._rhythm_plot_function = self.rhythm_plotter.polygon
 
         # left panel (target rhythm box)
-        label_target = tk.Label(self, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_left)
+        header_target = tk.Frame(self, bg=background_left)
+        label_target = tk.Label(
+            header_target, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_left)
+        target_rhythm_menu_button = tk.Menubutton(header_target, text="Load", relief=tk.RAISED)
+        target_rhythm_menu_button.bind("<Button-1>", eat_args(self.redraw_target_rhythm_menu))
+        label_target.pack(side=tk.LEFT, padx=3)
+        target_rhythm_menu_button.pack(side=tk.RIGHT, padx=3)
         frame_target = self.TargetRhythmBox(self, self.dpi, background=background_left)
 
         # right panel (selected rhythm plots)
@@ -388,13 +421,18 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             self, n_boxes=19, dpi=self.dpi, background=background_right)
 
         # lay out left panel
-        label_target.grid(row=0, column=0, sticky="ew", ipadx=6)
+        header_target.grid(row=0, column=0, sticky="ew")
         frame_target.grid(row=1, column=0, sticky="nsew")
 
         # lay out right panel
         header_selection.grid(row=0, column=1, sticky="ew")
         frame_selection.grid(row=1, column=1, sticky="nsew")
         self.grid_columnconfigure(1, weight=1)  # expand horizontally
+
+        # setup target rhythm menu
+        self._target_rhythm_menu = tk.Menu(target_rhythm_menu_button, tearoff=0)
+        self._target_rhythm_menu_item_count = 0
+        target_rhythm_menu_button['menu'] = self._target_rhythm_menu
 
         self._frame_target = frame_target
         self._frame_selection = frame_selection
@@ -538,6 +576,14 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                     self._screen_no_target.tkraise()
 
     def redraw(self):
+        self.redraw_rhythm_plots()
+        self.redraw_target_rhythm_menu()
+
+    def set_rhythm_plot_function(self, plot_function_name):
+        self._rhythm_plot_function = getattr(self.rhythm_plotter, plot_function_name)
+        self.redraw_rhythm_plots()
+
+    def redraw_rhythm_plots(self):
         controller = self.controller
         plot_function = self._rhythm_plot_function
 
@@ -552,9 +598,30 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             plot_function
         )
 
-    def set_rhythm_plot_function(self, plot_function_name):
-        self._rhythm_plot_function = getattr(self.rhythm_plotter, plot_function_name)
-        self.redraw()
+    def _on_rhythm_load(self, source_type):
+        controller = self.controller
+        loader = controller.get_rhythm_loader(source_type)
+        rhythm = loader.load()
+        if rhythm is not None:
+            controller.set_target_rhythm(rhythm)
+
+    def redraw_target_rhythm_menu(self):
+        controller = self.controller
+        menu = self._target_rhythm_menu
+
+        # reset menu
+        menu.delete(0, self._target_rhythm_menu_item_count)
+        self._target_rhythm_menu_item_count = 0
+
+        for rhythm_loader_type, rhythm_loader in controller.get_rhythm_loader_iterator():
+            rhythm_source_name = rhythm_loader.get_source_name()
+            label = "From %s..." % rhythm_source_name
+            menu.add_command(
+                label=label,
+                command=partial(self._on_rhythm_load, rhythm_loader_type),
+                state=tk.NORMAL if rhythm_loader.is_available() else tk.DISABLED
+            )
+            self._target_rhythm_menu_item_count += 1
 
 
 class BSMainMenu(tk.Menu, object):
@@ -647,6 +714,7 @@ class BSApp(tk.Tk, object):
 
         self.wm_title(BSApp.WINDOW_TITLE)
         self.config(bg=background)
+        self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoader()
         self.controller = self._controller = controller
         self.rhythm_plotter = RhythmPlotter()
 
@@ -707,7 +775,8 @@ class BSApp(tk.Tk, object):
             BSController.CORPUS_LOADED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.DISTANCES_TO_TARGET_UPDATED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH, BSApp.FRAME_RHYTHM_COMPARISON_STRIP],
-            BSController.DISTANCE_MEASURE_SET: [BSApp.FRAME_SEARCH]
+            BSController.DISTANCE_MEASURE_SET: [BSApp.FRAME_SEARCH],
+            BSController.RHYTHM_LOADER_REGISTERED: [BSApp.FRAME_RHYTHM_COMPARISON_STRIP]
         }
 
         for action, frames in redraw_frames_on_controller_callbacks.items():
@@ -734,6 +803,7 @@ class BSApp(tk.Tk, object):
         if controller.is_rhythm_player_set():
             # bind space for whole application
             self.bind_all("<space>", eat_args(self._toggle_rhythm_playback))
+        controller.register_rhythm_loader(self._midi_rhythm_loader_by_dialog)
         self._controller = controller
 
     def redraw_frames(self, *frame_names):

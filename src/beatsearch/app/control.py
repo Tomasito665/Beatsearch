@@ -13,6 +13,7 @@ from beatsearch.data.rhythm import (
 from beatsearch.config import __USE_NUMPY__
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
+import midi  # after beatsearch imports!
 if __USE_NUMPY__:
     import numpy
 
@@ -80,6 +81,50 @@ class BSFakeRhythmPlayer(BSRhythmPlayer):
         return self._repeat
 
 
+class BSRhythmLoader(object):
+    def __init__(self):
+        pass
+
+    def load(self, **kwargs):  # type: (tp.Any) -> tp.Union[None, Rhythm]
+        if not self.is_available():
+            return None
+        return self.__load__(**kwargs)
+
+    def is_available(self):  # type: () -> bool
+        raise NotImplementedError
+
+    def __load__(self, **kwargs):  # type: (tp.Any) -> Rhythm
+        raise NotImplementedError
+
+    @classmethod
+    def get_source_name(cls):
+        raise NotImplementedError
+
+
+class BSSelectedRhythmLoader(BSRhythmLoader):
+    SOURCE_NAME = "selected rhythm"
+
+    def __init__(self, controller):  # type: (BSController) -> None
+        super().__init__()
+        self.controller = controller
+
+    @classmethod
+    def get_source_name(cls):
+        return cls.SOURCE_NAME
+
+    def is_available(self):
+        controller = self.controller
+        rhythm_selection = controller.get_rhythm_selection()
+        return len(rhythm_selection) >= 1
+
+    def __load__(self, **kwargs):
+        controller = self.controller
+        rhythm_selection = controller.get_rhythm_selection()
+        rhythm_ix = rhythm_selection[0]
+        rhythm = controller.get_rhythm_by_index(rhythm_ix)
+        return rhythm
+
+
 class BSController(object):
     _rhythm_info_types = None
 
@@ -91,6 +136,7 @@ class BSController(object):
     DISTANCES_TO_TARGET_UPDATED = "<TargetDistances-Updated>"
     TARGET_RHYTHM_SET = "<TargetRhythm-Set>"
     DISTANCE_MEASURE_SET = "<DistanceMeasure-Set>"
+    RHYTHM_LOADER_REGISTERED = "<RhythmLoader-Registered>"
 
     # description of data returned by get_rhythm_data
     RHYTHM_DATA_TYPES = OrderedDict((
@@ -134,10 +180,14 @@ class BSController(object):
             BSController.RHYTHM_PLAYBACK_START,
             BSController.RHYTHM_PLAYBACK_STOP,
             BSController.TARGET_RHYTHM_SET,
-            BSController.DISTANCE_MEASURE_SET
+            BSController.DISTANCE_MEASURE_SET,
+            BSController.RHYTHM_LOADER_REGISTERED
         ])
+        self._rhythm_loaders = OrderedDict()  # rhythm loaders by loader source name
         self.set_rhythm_player(rhythm_player)
         self.set_distance_measure(distance_measure)
+        # automatically register a loader for the currently selected rhythm
+        self.register_rhythm_loader(BSSelectedRhythmLoader(self))
 
     def set_corpus(self, corpus):
         """
@@ -447,6 +497,63 @@ class BSController(object):
         """
 
         return tuple(self._rhythm_selection)
+
+    def register_rhythm_loader(self, loader: BSRhythmLoader):
+        """
+        Register a new rhythm loader.
+
+        :param loader: rhythm loader
+        :return: None
+        """
+
+        loader_class = loader.__class__
+        if loader_class in self._rhythm_loaders:
+            raise ValueError("Already registered a rhythm loader for loader type: \"%s\"" % loader_class)
+        self._rhythm_loaders[loader.__class__] = loader
+        self._dispatch(self.RHYTHM_LOADER_REGISTERED)
+
+    def get_rhythm_loader_source_names(self):
+        """
+        Returns a tuple with the rhythm source names of the currently registered rhythm loaders. See the
+        BSRhythmLoader.source_name property.
+
+        :return: tuple containing the source names of the currently registered rhythm loaders
+        """
+
+        return tuple(loader.get_source_name() for loader in self._rhythm_loaders.values())
+
+    def get_rhythm_loader_count(self):
+        """
+        Returns the number of currently registered rhythm loaders.
+
+        :return: number of currently registered rhythm loaders
+        """
+
+        return len(self._rhythm_loaders)
+
+    def get_rhythm_loader_iterator(self):  # type: () -> tp.Iterator[tp.Tuple[tp.Type[BSRhythmLoader], BSRhythmLoader]]
+        """
+        Returns an iterator over the currently registered rhythm loaders.
+
+        :return: iterator over the currently registered rhythm loaders
+        """
+
+        return iter(self._rhythm_loaders.items())
+
+    def get_rhythm_loader(self, loader_type: tp.Type[BSRhythmLoader]):  # type: (str) -> BSRhythmLoader
+        """
+        Returns the rhythm loader, given the loader type.
+
+        :param loader_type: source name
+        :return: loader
+        """
+
+        try:
+            loader = self._rhythm_loaders[loader_type]
+        except KeyError:
+            raise ValueError("No rhythm loader registered of type \"%s\"" % loader_type)
+
+        return loader
 
     def bind(self, action, callback):
         """
