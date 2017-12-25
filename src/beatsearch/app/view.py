@@ -9,7 +9,6 @@ from contextlib import contextmanager
 from itertools import zip_longest, repeat
 from tkinter import ttk
 import matplotlib
-
 matplotlib.use("TkAgg")
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -178,7 +177,7 @@ class BSRhythmList(BSAppFrame):
             tk.Y: tkinter.ttk.Scrollbar(orient="vertical", command=self._tree_view.yview)
         }
 
-        self.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.bind("<MouseWheel>", self._on_mousewheel)
 
         self._tree_view.bind("<<TreeviewSelect>>", self._on_tree_select)
         self._tree_view.bind("<Double-Button-1>", self._on_double_click)
@@ -398,7 +397,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         combo_selection.current(0)  # select first option
         combo_selection.bind("<<ComboboxSelected>>", on_plot_type_combobox)
 
-    class RhythmPlottingCanvas(FigureCanvasTkAgg):
+    class RhythmPlottingCanvas(FigureCanvasTkAgg, object):
         def __init__(self, master, dpi, background="white", figsize=(3, 3), **kwargs):
             figure = plt.Figure(dpi=dpi, figsize=figsize, facecolor=background)
             self.background = background
@@ -426,14 +425,20 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             scrolled_frame = HorizontalScrolledFrame(self, bg=background)
             self._boxes = tuple(box(scrolled_frame.interior, dpi, background=background)
                                 for box in repeat(self.SelectedRhythmBox, n_boxes))
-            scrolled_frame.pack(expand=True, fill=tk.BOTH)
+            for box in self._boxes:
+                box.on_mousewheel = self._handle_canvas_mousewheel
 
-        class SelectedRhythmBox(tk.Frame):
+            scrolled_frame.pack(expand=True, fill=tk.BOTH)
+            self._scrolled_frame = scrolled_frame
+
+        class SelectedRhythmBox(tk.Frame, object):
             def __init__(self, master, dpi, background="white", **kwargs):
                 super().__init__(master, background=background, **kwargs)
                 self._plot = BSRhythmComparisonStrip.RhythmPlottingCanvas(self, dpi, background)
                 self._prev_redraw_args = ()
                 self._plot.widget.pack(expand=True, fill=tk.BOTH)
+                self._mousewheel_callback = None
+                self._mousewheel_callback_id = None
 
             def redraw(self, rhythm: Rhythm, plot_function: tp.Callable):
                 # plot function should be a @plot decorated RhythmPlotter method
@@ -446,6 +451,27 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                         figure.suptitle(rhythm.name, fontsize="small", y=0.13)
 
                 self._prev_redraw_args = (rhythm, plot_function)
+
+            @property
+            def on_mousewheel(self):
+                return self._mousewheel_callback
+
+            @on_mousewheel.setter
+            def on_mousewheel(self, callback):
+                canvas = self._plot.figure.canvas
+
+                if callback is None and self._mousewheel_callback_id is not None:
+                    canvas.mpl_disconnect(self._mousewheel_callback_id)
+                    self._mousewheel_callback_id = None
+                    self._mousewheel_callback = None
+                    return
+
+                if not callable(callback):
+                    raise TypeError("Expected callable but got \"%s\"" % callback)
+
+                self._mousewheel_callback = callback
+                cid = canvas.mpl_connect("scroll_event", callback)
+                self._mousewheel_callback_id = cid
 
         def redraw(self, rhythms: tp.Iterable[Rhythm], plot_function: tp.Callable):
             n_boxes = len(self._boxes)
@@ -465,6 +491,11 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                     box.pack_forget()
 
                 is_first = False
+
+        def _handle_canvas_mousewheel(self, event):
+            scrolled_frame = self._scrolled_frame
+            right = event.button == "up"
+            scrolled_frame.xview_scroll(1 if right else -1, tk.UNITS)
 
     class TargetRhythmBox(tk.Frame):
         def __init__(self, master, dpi, background=None, **kwargs):
@@ -667,7 +698,8 @@ class BSApp(tk.Tk, object):
         if not isinstance(controller, BSController):
             raise TypeError("Expected a BSController but got \"%s\"" % str(controller))
         if controller.is_rhythm_player_set():
-            self.bind("<space>", eat_args(self._toggle_rhythm_playback))
+            # bind space for whole application
+            self.bind_all("<space>", eat_args(self._toggle_rhythm_playback))
         self._controller = controller
 
     def redraw_frames(self, *frame_names):
@@ -785,7 +817,7 @@ class ToggleButton(tk.Button):
         self.redraw()
 
 
-class HorizontalScrolledFrame(tk.Frame):
+class HorizontalScrolledFrame(tk.Frame, object):
     """https://stackoverflow.com/a/16198198/5508855"""
 
     def __init__(self, parent, *args, **kw):
@@ -797,6 +829,7 @@ class HorizontalScrolledFrame(tk.Frame):
         canvas = tk.Canvas(self, bd=0, highlightthickness=0, xscrollcommand=scrollbar.set, bg=self.cget("bg"))
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=tk.TRUE)
         scrollbar.config(command=canvas.xview)
+        self._canvas = canvas
 
         # reset the view
         canvas.xview_moveto(0)
@@ -816,3 +849,13 @@ class HorizontalScrolledFrame(tk.Frame):
                 canvas.config(height=interior.winfo_reqheight())
 
         interior.bind("<Configure>", configure_interior)
+
+    def xview_scroll(self, number, what):
+        canvas = self._canvas
+        interior_width = self.interior.winfo_width()
+        canvas_width = canvas.winfo_width()
+        # reset if interior is smaller than canvas
+        if interior_width < canvas_width:
+            canvas.xview_moveto(0)
+            return
+        canvas.xview_scroll(number, what)
