@@ -6,6 +6,7 @@ from time import time
 from inspect import isclass
 from functools import wraps
 from beatsearch.config import __USE_NUMPY__
+from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
 
 if __USE_NUMPY__:
     import numpy as np
@@ -192,3 +193,32 @@ def eat_args(func):
     def wrapper(*_, **__):
         return func()
     return wrapper
+
+
+def color_variant(color, brightness_offset=0):
+    """
+    Takes a color and produces a lighter or darker variant.
+
+    :param color: color to convert (either as a rgb array or as a hexadecimal string)
+    :param brightness_offset: brightness offset between -1 and 1
+    :return: new color (either hexadecimal or rgb depending on whether the input is a hexadecimal color)
+    """
+
+    try:
+        is_hexadecimal = color.startswith("#")
+    except TypeError:
+        is_hexadecimal = False
+
+    rgb = to_rgb(color)
+    hsv = rgb_to_hsv(rgb)
+
+    curr_brightness = hsv[2]
+    new_brightness = max(-1.0, min(curr_brightness + brightness_offset, 1.0))  # clamp to [-1.0, 1.0]
+
+    new_hsv = (hsv[0], hsv[1], new_brightness)
+    new_rgb = hsv_to_rgb(new_hsv)
+
+    if is_hexadecimal:
+        return to_hex(new_rgb)
+
+    return new_rgb

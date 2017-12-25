@@ -20,7 +20,13 @@ from beatsearch.data.rhythm import (
     TRACK_WILDCARDS,
     Unit
 )
-from beatsearch.utils import head_trail_iter, no_callback, type_check_and_instantiate_if_necessary, eat_args
+from beatsearch.utils import (
+    head_trail_iter,
+    no_callback,
+    type_check_and_instantiate_if_necessary,
+    eat_args,
+    color_variant
+)
 from beatsearch.app.control import BSController
 from beatsearch.graphics.plot import RhythmPlotter
 from beatsearch.data.rhythm import Rhythm
@@ -55,8 +61,8 @@ class BSSearchForm(BSAppFrame):
     COMBO_TRACKS = "<Combo-Tracks>"
     COMBO_QUANTIZE = "<Combo-Quantize>"
 
-    def __init__(self, controller, **kwargs):
-        BSAppFrame.__init__(self, controller, **kwargs)
+    def __init__(self, controller, background=None, **kwargs):
+        BSAppFrame.__init__(self, controller, background=background, **kwargs)
 
         combobox_info = [
             (self.COMBO_DISTANCE_MEASURE, "Distance measure", TrackDistanceMeasure.get_measure_names()),
@@ -77,7 +83,7 @@ class BSSearchForm(BSAppFrame):
             self._combo_boxes[name] = combobox
 
             # setup label
-            box_label = tk.Label(box_container, text=text, anchor=tk.W)
+            box_label = tk.Label(box_container, text=text, anchor=tk.W, bg=background)
             box_label.pack(side=tk.TOP, fill=tk.X, expand=True)
 
             widgets.append(box_container)
@@ -167,10 +173,14 @@ class ContextMenu(tk.Menu):
 
 class BSRhythmList(BSAppFrame):
 
-    def __init__(self, app, h_scroll=False, v_scroll=True, **kwargs):
+    def __init__(self, app, h_scroll=False, v_scroll=True, background="white", **kwargs):
         BSAppFrame.__init__(self, app, **kwargs)
         column_headers = BSController.get_rhythm_data_attr_names()
         self._tree_view = tkinter.ttk.Treeview(columns=column_headers, show="headings")
+
+        # set treeview background
+        style = ttk.Style(self)
+        style.configure("Treeview", background=background)
 
         scrollbars = {
             tk.X: tkinter.ttk.Scrollbar(orient="horizontal", command=self._tree_view.xview),
@@ -624,8 +634,9 @@ class BSApp(tk.Tk, object):
             search_frame_cls: tp.Type[BSSearchForm] = BSSearchForm,
             rhythms_frame_cls: tp.Type[BSRhythmList] = BSRhythmList,
             transport_frame_cls: tp.Union[tp.Type[BSTransportControls], None] = BSTransportControls,
-            rhythm_comparison_strip_frame: tp.Type[BSRhythmComparisonStrip] = BSRhythmComparisonStrip,
+            rhythm_comparison_strip_frame_cls: tp.Type[BSRhythmComparisonStrip] = BSRhythmComparisonStrip,
             main_menu: tp.Union[BSMainMenu, tp.Type[BSMainMenu], None] = BSMainMenu,
+            background="#EEEEEE",
             **kwargs
     ):
         tk.Tk.__init__(self, **kwargs)
@@ -635,27 +646,50 @@ class BSApp(tk.Tk, object):
         signal.signal(signal.SIGINT, eat_args(self.close))
 
         self.wm_title(BSApp.WINDOW_TITLE)
-        self.config(bg="#EEEEEE")
+        self.config(bg=background)
         self.controller = self._controller = controller
         self.rhythm_plotter = RhythmPlotter()
 
         self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
 
+        # frame name, frame class, instantiation args, pack args
         frame_info = (
-            (BSApp.FRAME_SEARCH, search_frame_cls, dict(expand=False, fill=tk.X, pady=3)),
-            (BSApp.FRAME_RHYTHM_LIST, rhythms_frame_cls, dict(expand=True, fill=tk.BOTH, pady=(3, 0))),
-            (BSApp.FRAME_RHYTHM_COMPARISON_STRIP, rhythm_comparison_strip_frame, dict(expand=False, fill=tk.X, pady=0)),
-            (BSApp.FRAME_TRANSPORT, transport_frame_cls, dict(expand=False, fill=tk.X, pady=(3, 0))),
+            (
+                BSApp.FRAME_SEARCH,
+                search_frame_cls,
+                dict(background=background),
+                dict(expand=False, fill=tk.X, pady=3)
+            ),
+
+            (
+                BSApp.FRAME_RHYTHM_LIST,
+                rhythms_frame_cls,
+                dict(background=color_variant(background, 1)),
+                dict(expand=True, fill=tk.BOTH, pady=(3, 0))
+            ),
+
+            (
+                BSApp.FRAME_RHYTHM_COMPARISON_STRIP,
+                rhythm_comparison_strip_frame_cls,
+                dict(background_left=color_variant(background, -0.055), background_right=background),
+                dict(expand=False, fill=tk.X, pady=0),
+            ),
+
+            (
+                BSApp.FRAME_TRANSPORT,
+                transport_frame_cls,
+                dict(),
+                dict(expand=False, fill=tk.X, pady=(3, 0))
+            ),
         )
 
-        # pady = BSApp.STYLES['inner-pad-y'] / 2.0
         padx = BSApp.STYLES['inner-pad-x']
 
-        for is_first, is_last, [frame_name, frame_cls, pack_args] in head_trail_iter(frame_info):
+        for frame_name, frame_cls, frame_args, pack_args in frame_info:
             if frame_cls is None:
                 continue
-            frame = frame_cls(self)
+            frame = frame_cls(self, **frame_args)
             self.frames[frame_name] = frame
             frame.pack(**{
                 'side': tk.TOP,
