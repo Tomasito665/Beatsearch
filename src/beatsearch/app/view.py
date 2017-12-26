@@ -5,6 +5,7 @@ import tkinter.ttk
 import tkinter as tk
 import tkinter.font
 import tkinter.filedialog
+from tkinter import messagebox
 from contextlib import contextmanager
 from itertools import zip_longest, repeat
 from tkinter import ttk
@@ -74,9 +75,15 @@ class BSMidiRhythmLoader(BSRhythmLoader):
             title="Load rhythm from MIDI file",
             filetypes=(("MIDI files", "*.mid"), ("All files", "*"))
         )
-        if not os.path.isfile(fpath):
+        if not fpath:
             return None
-        pattern = midi.read_midifile(fpath)
+        if not os.path.isfile(fpath):
+            raise self.LoadingError("No such file: %s" % fpath)
+        try:
+            pattern = midi.read_midifile(fpath)
+        except TypeError as e:
+            fname = os.path.basename(fpath)
+            raise self.LoadingError("Error loading\"%s\": %s" % (fname, str(e)))
         rhythm = Rhythm.create_from_midi(pattern, fpath)
         return rhythm
 
@@ -775,8 +782,7 @@ class BSApp(tk.Tk, object):
             BSController.CORPUS_LOADED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.DISTANCES_TO_TARGET_UPDATED: [BSApp.FRAME_RHYTHM_LIST],
             BSController.TARGET_RHYTHM_SET: [BSApp.FRAME_SEARCH, BSApp.FRAME_RHYTHM_COMPARISON_STRIP],
-            BSController.DISTANCE_MEASURE_SET: [BSApp.FRAME_SEARCH],
-            BSController.RHYTHM_LOADER_REGISTERED: [BSApp.FRAME_RHYTHM_COMPARISON_STRIP]
+            BSController.DISTANCE_MEASURE_SET: [BSApp.FRAME_SEARCH]
         }
 
         for action, frames in redraw_frames_on_controller_callbacks.items():
@@ -786,6 +792,12 @@ class BSApp(tk.Tk, object):
                 return callback
             self.controller.bind(action, get_callback(frames))
 
+        # set loading error handler on new rhythm loaders
+        self.controller.bind(
+            BSController.RHYTHM_LOADER_REGISTERED,
+            lambda loader: setattr(loader, "on_loading_error", self._on_loading_error)
+        )
+
         self.redraw_frames()
 
     @property
@@ -793,17 +805,31 @@ class BSApp(tk.Tk, object):
         return self._controller
 
     @controller.setter
-    def controller(self, controller):  # type: (tp.Union[BSController, None]) -> None
+    def controller(self, controller: tp.Union[BSController, None]):
         self.unbind_all("<space>")
+
+        # reset rhythm loading error handlers
+        for _, loader in controller.get_rhythm_loader_iterator():
+            if loader.on_loading_error == self._on_loading_error:
+                loader.on_loading_error = no_callback
+
         if controller is None:
             self._controller = None
             return
+
         if not isinstance(controller, BSController):
             raise TypeError("Expected a BSController but got \"%s\"" % str(controller))
-        if controller.is_rhythm_player_set():
-            # bind space for whole application
+
+        if controller.is_rhythm_player_set():  # bind space for whole application
             self.bind_all("<space>", eat_args(self._toggle_rhythm_playback))
+
+        # add rhythm loader from MIDI file with dialog
         controller.register_rhythm_loader(self._midi_rhythm_loader_by_dialog)
+
+        # set rhythm loading error handlers
+        for _, loader in controller.get_rhythm_loader_iterator():
+            loader.on_loading_error = self._on_loading_error
+
         self._controller = controller
 
     def redraw_frames(self, *frame_names):
@@ -873,6 +899,13 @@ class BSApp(tk.Tk, object):
             plot_function(rhythm)
             plt.draw()
         plt.show()
+
+    @staticmethod
+    def _on_loading_error(loading_error: BSRhythmLoader.LoadingError):
+        messagebox.showerror(
+            title="Rhythm loading error",
+            message=str(loading_error)
+        )
 
 
 class ToggleButton(tk.Button):

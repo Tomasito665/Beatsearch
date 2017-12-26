@@ -83,12 +83,21 @@ class BSFakeRhythmPlayer(BSRhythmPlayer):
 
 class BSRhythmLoader(object):
     def __init__(self):
+        self._on_loading_error = no_callback
+
+    class LoadingError(Exception):
         pass
 
     def load(self, **kwargs):  # type: (tp.Any) -> tp.Union[None, Rhythm]
         if not self.is_available():
             return None
-        return self.__load__(**kwargs)
+        try:
+            return self.__load__(**kwargs)
+        except self.LoadingError as e:
+            if self.on_loading_error is no_callback:
+                raise e
+            self.on_loading_error(e)
+            return None
 
     def is_available(self):  # type: () -> bool
         raise NotImplementedError
@@ -99,6 +108,16 @@ class BSRhythmLoader(object):
     @classmethod
     def get_source_name(cls):
         raise NotImplementedError
+
+    @property
+    def on_loading_error(self):
+        return self._on_loading_error
+
+    @on_loading_error.setter
+    def on_loading_error(self, callback):
+        if not callable(callback):
+            raise TypeError("Expected callable but got \"%s\"" % callback)
+        self._on_loading_error = callback
 
 
 class BSSelectedRhythmLoader(BSRhythmLoader):
@@ -510,7 +529,7 @@ class BSController(object):
         if loader_class in self._rhythm_loaders:
             raise ValueError("Already registered a rhythm loader for loader type: \"%s\"" % loader_class)
         self._rhythm_loaders[loader.__class__] = loader
-        self._dispatch(self.RHYTHM_LOADER_REGISTERED)
+        self._dispatch(self.RHYTHM_LOADER_REGISTERED, loader)
 
     def get_rhythm_loader_source_names(self):
         """
