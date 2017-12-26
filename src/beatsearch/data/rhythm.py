@@ -795,12 +795,13 @@ class Rhythm(object):
         )
 
     @staticmethod
-    def create_from_midi(pattern, path=None, resolution=240, end_on_eot_event=False):
+    def create_from_midi(pattern, path=None, name=None, resolution=240, end_on_eot_event=False):
         """
         Constructs a new rhythm from a MIDI file.
 
         :param pattern: midi pattern
         :param path: midi source file or None
+        :param name: rhythm name or None (defaults to file basename without extension or an empty string)
         :param resolution: resolution to the rescale the rhythm to in pulses per quarter note
         :param end_on_eot_event: when true, the duration of the rhythms is set according to the last EOT (End Of Track)
                                  MIDI event, otherwise it is set based on the last note.
@@ -817,8 +818,14 @@ class Rhythm(object):
         track = list(itertools.chain(*pattern))  # merge all tracks into one
         track = midi.Track(sorted(track, key=lambda event: event.tick))  # sort in chronological order
 
+        if name is None:
+            if path is not None:
+                name = os.path.splitext(os.path.basename(path))[0]
+            else:
+                name = ""
+
         args = {
-            'name': os.path.splitext(os.path.basename(path))[0],
+            'name': name,
             'bpm': 120,
             'time_signature': None,
             'midi_metronome': None,
@@ -826,7 +833,7 @@ class Rhythm(object):
             'duration': 0,
             'data_ppq': pattern.resolution,
             'rescale_to_ppq': resolution,
-            'midi_file_path': path
+            'midi_file_path': path or ""
         }
 
         ts_midi_event = None  # time signature MIDI event

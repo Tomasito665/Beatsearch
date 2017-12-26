@@ -1,6 +1,7 @@
 import os
 import socket
 import threading
+from collections import namedtuple
 
 try:
     # noinspection PyUnresolvedReferences
@@ -13,7 +14,8 @@ from tempfile import TemporaryFile
 # noinspection PyUnresolvedReferences
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
-from beatsearch.app.control import BSController, BSRhythmPlayer
+from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoader
+from beatsearch.data.rhythm import Rhythm
 from beatsearch.app.view import BSApp
 # noinspection PyUnresolvedReferences
 import midi
@@ -21,18 +23,28 @@ import midi
 ReaperApi = Reaper
 
 
-def main():
+def main(input_track_name, output_track_name):
     player = ReaperRhythmPlayer()
+    rhythm_loader = ReaperRhythmLoader()
 
     def find_reaper_thread_target():
         try:
             with ReaperApi as api:
                 print("Connected to Reaper")
+
                 try:
-                    bs_input_track = ReaperUtils.find_track_by_name(api, "BS_Output")
+                    bs_input_track = ReaperUtils.find_track_by_name(api, input_track_name)
                 except ValueError:
-                    bs_input_track = ReaperUtils.insert_track(api, 0, "BS_Output")
-            player.set_output_track(bs_input_track)
+                    bs_input_track = ReaperUtils.insert_track(api, 0, input_track_name)
+
+                try:
+                    bs_output_track = ReaperUtils.find_track_by_name(api, output_track_name)
+                except ValueError:
+                    bs_output_track = ReaperUtils.insert_track(api, 0, output_track_name)
+
+            rhythm_loader.set_input_track(bs_input_track)
+            player.set_output_track(bs_output_track)
+
         except socket.timeout:
             app.destroy()
 
@@ -42,6 +54,7 @@ def main():
     print("Initializing controller...")
     controller = BSController(rhythm_player=player)
     controller.set_corpus(os.path.join(BS_ROOT, "data", "rhythms.pkl"))
+    controller.register_rhythm_loader(rhythm_loader)
 
     print("Initializing view...")
     app = BSApp(controller, baseName="beatsearch-reaper-plugin")
@@ -135,6 +148,82 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         return fpath
 
 
+class ReaperRhythmLoader(BSRhythmLoader):
+    SOURCE_NAME = "Reaper MIDI media item"
+
+    def __init__(self, input_track=None):
+        super().__init__()
+        self._input_track = input_track
+
+    def set_input_track(self, track_id):
+        self._input_track = track_id
+
+    def is_available(self):
+        return self._input_track is not None
+
+    # noinspection PyUnboundLocalVariable
+    def __load__(self, **kwargs):
+        track = self._input_track
+
+        with ReaperApi as api:
+            track_name = ReaperUtils.get_track_name(api, track)
+
+            try:
+                first_selected_item = next(ReaperUtils.selected_items_on_track_iter(api, track))
+            except StopIteration:
+                first_selected_item = None
+
+            if first_selected_item is not None:
+                media_take = api.GetMediaItemTake(first_selected_item, 0)
+                media_take_name = api.GetSetMediaItemTakeInfo_String(media_take, "P_NAME", 0, False)[3]
+
+                midi_resolution = ReaperUtils.get_midi_resolution(api, media_take)
+                midi_notes = tuple(ReaperUtils.midi_note_iter(api, media_take))
+                _, bpm, ts_numerator = api.RPR_GetProjectTimeSignature2(0, 0, 0)
+
+        # Note: raise outside ReaperApi context, otherwise it will be caught by beyond.Reaper
+        if first_selected_item is None:
+            raise self.LoadingError("Please select a media item on track \"%s\"" % track_name)
+
+        midi_track = midi.Track(tick_relative=False)  # create track and add metadata events
+
+        # add meta data
+        midi_track.append(midi.TrackNameEvent(text=media_take_name))
+        midi_track.append(midi.SetTempoEvent(bpm=bpm))
+        midi_track.append(midi.TimeSignatureEvent(
+            numerator=ts_numerator,
+            denominator=4,  # TODO Get actual denominator
+            metronome=24,  # TODO Get actual metronome
+            thirtyseconds=8  # TODO Get actual thirty-seconds
+        ))
+
+        # add note on/off events
+        for note in midi_notes:
+            if note.muted:
+                continue
+            midi_track.extend(note.to_midi_event_pair())
+
+        # sort the events in chronological order and convert to relative delta-time
+        midi_track = midi.Track(sorted(midi_track, key=lambda event: event.tick), tick_relative=False)
+        midi_track.make_ticks_rel()
+
+        # add end of track event
+        midi_track.append(midi.EndOfTrackEvent())
+
+        # create midi pattern
+        midi_pattern = midi.Pattern(
+            [midi_track],
+            format=0,
+            resolution=midi_resolution
+        )
+
+        return Rhythm.create_from_midi(midi_pattern, name=media_take_name)
+
+    @classmethod
+    def get_source_name(cls):
+        return cls.SOURCE_NAME
+
+
 class ReaperUtils:
 
     @staticmethod
@@ -219,10 +308,23 @@ class ReaperUtils:
         """
 
         for track_id in cls.track_iter(reaper_api):
-            current_track_name = reaper_api.GetTrackName(track_id, 0, 64)[2]
+            current_track_name = cls.get_track_name(reaper_api, track_id)
             if current_track_name == track_name:
                 return track_id
         raise ValueError("No track named '%s'" % track_name)
+
+    @staticmethod
+    def get_track_name(reaper_api: ReaperApi, track_id, max_name_length=64):
+        """
+        Returns the name of the given track.
+
+        :param reaper_api: reaper api
+        :param track_id: track id
+        :param max_name_length: string buffer size for track name
+        :return: track name of given track
+        """
+
+        return reaper_api.GetTrackName(track_id, 0, max_name_length)[2]
 
     @classmethod
     def set_selected_tracks(cls, reaper_api: ReaperApi, *tracks_to_select):
@@ -253,6 +355,119 @@ class ReaperUtils:
             reaper_api.GetSetMediaTrackInfo_String(track_id, "P_NAME", name, 1)
         return track_id
 
+    class MIDINote(namedtuple("MIDINote", [
+        "selected", "muted", "startppqpos",
+        "endppqpos", "channel", "pitch", "velocity"
+    ])):
+        def to_midi_event_pair(self):
+            """
+            Converts this Reaper MIDI note to a midi.NoteOn/midi.NoteOff event pair. Note that timing is absolute.
+
+            :return: tuple containing the note on and note off midi events for this note
+            """
+
+            channel = self.channel
+            pitch = self.pitch
+            t_start, t_end = self.startppqpos, self.endppqpos
+
+            note_on = midi.NoteOnEvent(tick=t_start, pitch=pitch, velocity=self.velocity, channel=channel)
+            note_off = midi.NoteOffEvent(tick=t_end, pitch=pitch, channel=channel)
+
+            return note_on, note_off
+
+    @classmethod
+    def midi_note_iter(cls, reaper_api: ReaperApi, media_take):
+        """
+        Returns an iterator over the MIDI notes of the given MIDI media take. The iterator yields a MIDINote.
+
+        :param reaper_api: reaper api
+        :param media_take: MIDI media take
+        :return: iterator over MIDI notes in given MIDI media take yielding a MIDINote namedtuple
+        """
+
+        if not reaper_api.TakeIsMIDI(media_take):
+            raise ValueError("Given media take \"%s\" is not a MIDI take" % media_take)
+
+        n_notes = reaper_api.RPR_MIDI_CountEvts(media_take, 0, 0, 0)[2]
+
+        for i in range(n_notes):
+            result, _take, _note_ix, *note_info = reaper_api.RPR_MIDI_GetNote(media_take, i, 0, 0, 0, 0, 0, 0, 0)
+            if not result:
+                raise Exception("Something went wrong while retrieving the "
+                                "%ith MIDI note from MIDI take \"%s\"" % (i, media_take))
+            yield cls.MIDINote(*note_info)
+
+    @classmethod
+    def midi_event_iter(cls, reaper_api: ReaperApi, media_take):
+        """
+        Returns an iterator over all MIDI events in the given MIDI media take. The iterator yields a string.
+
+        :param reaper_api:
+        :param media_take:
+        :return:
+        """
+
+        if True:
+            raise Exception("Sorry, this method is currently broken. See to-do in loop")
+
+        if not reaper_api.TakeIsMIDI(media_take):
+            raise ValueError("Given media take \"%s\" is not a MIDI take" % media_take)
+
+        n_events = reaper_api.RPR_MIDI_CountEvts(media_take, 0, 0, 0)[0]
+
+        for i in range(n_events):
+            # TODO fix utf-8 decode error
+            event_info = reaper_api.RPR_MIDI_GetEvt(media_take, i, 0, 0, 0, "", 256)
+            print(event_info)
+
+    @staticmethod
+    def get_midi_resolution(reaper_api: ReaperApi, media_take):
+        """
+        Returns the MIDI resolution in ticks per quarter note (PPQN) for the given MIDI media take.
+
+        :param reaper_api: reaper api
+        :param media_take: MIDI media take
+        :return: the MIDI resolution in PPQN of the given MIDI media take
+        """
+
+        if not reaper_api.TakeIsMIDI(media_take):
+            raise ValueError("Given media take \"%s\" is not a MIDI take" % media_take)
+
+        t_start_take = reaper_api.RPR_MIDI_GetProjTimeFromPPQPos(media_take, 0)
+        res = reaper_api.RPR_MIDI_GetPPQPosFromProjQN(media_take, 1.0)
+        res_offset = reaper_api.RPR_MIDI_GetPPQPosFromProjTime(media_take, t_start_take * 2)
+
+        return res + res_offset
+
+    @classmethod
+    def selected_items_on_track_iter(cls, reaper_api: ReaperApi, track_id):
+        """
+        Returns an iterator over the selected media items on the given track.
+
+        :param reaper_api: reaper api
+        :param track_id: track id
+        :return: an iterator over the selected media items on the given track
+        """
+
+        for media_item in cls.items_on_track_iter(reaper_api, track_id):
+            if reaper_api.IsMediaItemSelected(media_item):
+                yield media_item
+
+    @staticmethod
+    def items_on_track_iter(reaper_api: ReaperApi, track_id):
+        """
+        Returns an iterator over the media items on the given track.
+
+        :param reaper_api: reaper api
+        :param track_id: track id
+        :return: an iterator over the media items on the given track
+        """
+
+        n_items = reaper_api.CountTrackMediaItems(track_id)
+
+        for item_ix in range(n_items):
+            yield reaper_api.GetTrackMediaItem(track_id, item_ix)
+
 
 if __name__ == "__main__":
-    main()
+    main("BS_Input", "BS_Output")
