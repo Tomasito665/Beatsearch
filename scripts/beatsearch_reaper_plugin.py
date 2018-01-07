@@ -15,7 +15,7 @@ from tempfile import TemporaryFile
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoader
-from beatsearch.data.rhythm import Rhythm
+from beatsearch.data.rhythm import Rhythm, TimeSignature, Unit
 from beatsearch.app.view import BSApp
 # noinspection PyUnresolvedReferences
 import midi
@@ -101,12 +101,18 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
             api.OnPauseButton()
             self.populate_track(api, rhythms)
             ReaperUtils.set_time_selection(api, self._start_pos, self._end_pos)
+            ReaperUtils.enable_metronome(api, False)
+            api.RPR_CSurf_OnMuteChange(self.output_track, False)  # unmute output track
+            api.RPR_CSurf_OnSoloChange(self.output_track, True)  # solo output track
             api.OnPlayButton()
         self._is_playing = True
 
     def stop_playback(self):
         with ReaperApi as api:
             api.OnStopButton()
+            api.RPR_CSurf_OnMuteChange(self.output_track, True)  # mute output track
+            api.RPR_CSurf_OnSoloChange(self.output_track, False)  # un-solo output track
+            ReaperUtils.enable_metronome(api, True)
         self._is_playing = False
 
     def is_playing(self):
@@ -127,7 +133,11 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
             return
 
         ReaperUtils.clear_track(api, self._output_track)
-        api.SetEditCurPos(1, False, False)
+        measure_duration = ReaperUtils.get_measure_duration(api)
+
+        # Reaper freaks out when we try to time select starting from 0 so
+        # we place the rhythms at the start of the second measure
+        api.SetEditCurPos(measure_duration, False, False)
         self._start_pos = api.GetCursorPosition()
 
         for rhythm in rhythms:
@@ -467,6 +477,61 @@ class ReaperUtils:
 
         for item_ix in range(n_items):
             yield reaper_api.GetTrackMediaItem(track_id, item_ix)
+
+    @staticmethod
+    def get_time_signature(reaper_api: ReaperApi, time=0, project=-1):
+        """
+        Returns the time signature of a reaper project at the given time.
+
+        :param reaper_api: reaper api
+        :param time: time
+        :param project: reaper project id (-1 for current project)
+        :return: a TimeSignature object representing the time signature of a Reaper project and the given time
+        """
+
+        numerator, denominator = reaper_api.RPR_TimeMap_GetTimeSigAtTime(project, time, 0, 0, 0)[2:4]
+        return TimeSignature(numerator, denominator)
+
+    @classmethod
+    def get_measure_duration(cls, reaper_api: ReaperApi, time=0, project=-1):
+        """
+        Returns the duration of a measure of a Reaper project at a given time.
+
+        :param reaper_api: reaper api
+        :param time: time
+        :param project: reaper project id (-1 for current project)
+        :return: the duration of one measure at the given time for the given Reaper project
+        """
+
+        time_signature = cls.get_time_signature(reaper_api, time, project)
+        beat_unit = time_signature.get_beat_unit()
+
+        if beat_unit == Unit.QUARTER:
+            n_quarter_notes_per_measure = time_signature.numerator
+        else:
+            assert beat_unit == Unit.EIGHTH
+            n_quarter_notes_per_measure = time_signature.numerator / 2.0
+
+        return reaper_api.RPR_TimeMap_QNToTime(n_quarter_notes_per_measure)
+
+    RPR_COMMAND_ENABLE_METRONOME = 41745
+    """Reaper action id for the metronome enable command"""
+
+    RPR_COMMAND_DISABLE_METRONOME = 41746
+    """Reaper action id for the metronome disable command"""
+
+    @classmethod
+    def enable_metronome(cls, reaper_api: ReaperApi, enabled=True):
+        """
+        Enables or disables the Reaper metronome.
+
+        :param reaper_api:
+        :param enabled: true for enabling the metronome, false for disabling
+        :return: None
+        """
+
+        action_id = cls.RPR_COMMAND_ENABLE_METRONOME if enabled else cls.RPR_COMMAND_DISABLE_METRONOME
+        reaper_api.RPR_Main_OnCommand(action_id, 0)
 
 
 if __name__ == "__main__":
