@@ -4,16 +4,16 @@ import typing as tp
 import threading
 from sortedcollections import OrderedSet
 from beatsearch.data.rhythm import (
-    Rhythm,
+    RhythmLoop,
+    PolyphonicRhythm,
     create_rumba_rhythm,
-    RhythmDistanceMeasure,
-    TrackDistanceMeasure,
+    SummedMonophonicRhythmDistance,
+    MonophonicRhythmDistanceMeasure,
     HammingDistanceMeasure,
     Quantizable)
 from beatsearch.config import __USE_NUMPY__
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
-import midi  # after beatsearch imports!
 if __USE_NUMPY__:
     import numpy
 
@@ -22,40 +22,40 @@ class BSRhythmPlayer(object):
     def __init__(self):
         self._on_playback_ended_callback = no_callback
 
-    def playback_rhythms(self, rhythms):  # type: ([Rhythm]) -> None
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
         raise NotImplementedError
 
     def stop_playback(self):  # type: () -> None
         raise NotImplementedError
 
-    def is_playing(self):  # type: () -> bool
+    def is_playing(self) -> bool:
         raise NotImplementedError
 
-    def set_repeat(self, enabled):  # type: (bool) -> None
+    def set_repeat(self, enabled: bool) -> None:
         raise NotImplementedError
 
-    def get_repeat(self):
+    def get_repeat(self) -> bool:
         raise NotImplementedError
 
     @property
-    def on_playback_ended(self):  # type: () -> tp.Callable
+    def on_playback_ended(self) -> tp.Union[tp.Callable, None]:
         return self._on_playback_ended_callback
 
     @on_playback_ended.setter
-    def on_playback_ended(self, callback):  # type: (tp.Callable) -> None
+    def on_playback_ended(self, callback: tp.Union[tp.Callable, None]) -> None:
         self._on_playback_ended_callback = callback
 
 
 class BSFakeRhythmPlayer(BSRhythmPlayer):
 
-    def __init__(self, playback_duration=2.0, rhythm=create_rumba_rhythm(track=36)):
+    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythm = create_rumba_rhythm(track=36)):
         super(BSFakeRhythmPlayer, self).__init__()
-        self._playback_duration = playback_duration
-        self._timer = None
-        self._rhythm = rhythm
-        self._repeat = False
+        self._playback_duration = playback_duration  # type: float
+        self._timer = None                           # type: tp.Union[threading.Timer, None]
+        self._rhythm = rhythm                        # type: PolyphonicRhythm
+        self._repeat = False                         # type: bool
 
-    def playback_rhythms(self, rhythms):
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
         @wraps(self.on_playback_ended)
         def on_playback_ended():
             if self.get_repeat():
@@ -66,29 +66,29 @@ class BSFakeRhythmPlayer(BSRhythmPlayer):
         self._timer = threading.Timer(self._playback_duration, on_playback_ended)
         self._timer.start()
 
-    def stop_playback(self):
+    def stop_playback(self) -> None:
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
 
-    def is_playing(self):
+    def is_playing(self) -> bool:
         return self._timer is not None
 
-    def set_repeat(self, enabled):
+    def set_repeat(self, enabled: bool) -> None:
         self._repeat = enabled
 
-    def get_repeat(self):
+    def get_repeat(self) -> bool:
         return self._repeat
 
 
-class BSRhythmLoader(object):
+class BSRhythmLoopLoader(object):
     def __init__(self):
         self._on_loading_error = no_callback
 
     class LoadingError(Exception):
         pass
 
-    def load(self, **kwargs):  # type: (tp.Any) -> tp.Union[None, Rhythm]
+    def load(self, **kwargs):  # type: (tp.Any) -> tp.Union[None, RhythmLoop]
         if not self.is_available():
             return None
         try:
@@ -102,7 +102,7 @@ class BSRhythmLoader(object):
     def is_available(self):  # type: () -> bool
         raise NotImplementedError
 
-    def __load__(self, **kwargs):  # type: (tp.Any) -> Rhythm
+    def __load__(self, **kwargs):  # type: (tp.Any) -> RhythmLoop
         raise NotImplementedError
 
     @classmethod
@@ -120,7 +120,7 @@ class BSRhythmLoader(object):
         self._on_loading_error = callback
 
 
-class BSSelectedRhythmLoader(BSRhythmLoader):
+class BSSelectedRhythmLoopLoader(BSRhythmLoopLoader):
     SOURCE_NAME = "selected rhythm"
 
     def __init__(self, controller):  # type: (BSController) -> None
@@ -177,16 +177,17 @@ class BSController(object):
         structure = BSController.RHYTHM_DATA_TYPES
         return tuple(structure.values())  # TODO Avoid re-allocation
 
-    def __init__(self, distance_measure=HammingDistanceMeasure, rhythm_player=None):
-        # type: (tp.Type[TrackDistanceMeasure], tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None]) -> None
-
+    def __init__(
+            self, distance_measure: MonophonicRhythmDistanceMeasure = HammingDistanceMeasure,
+            rhythm_player: tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None] = None
+    ):
         self._corpus = None
         if __USE_NUMPY__:
             self._distances_to_target = numpy.empty(0)
         else:
             self._distances_to_target = []
         self._distances_to_target_rhythm_are_stale = False
-        self._rhythm_measure = RhythmDistanceMeasure()
+        self._rhythm_measure = SummedMonophonicRhythmDistance()  # type: SummedMonophonicRhythmDistance
         self._rhythm_selection = OrderedSet()
         self._target_rhythm = None
         self._target_rhythm_prev_update = None
@@ -206,7 +207,7 @@ class BSController(object):
         self.set_rhythm_player(rhythm_player)
         self.set_distance_measure(distance_measure)
         # automatically register a loader for the currently selected rhythm
-        self.register_rhythm_loader(BSSelectedRhythmLoader(self))
+        self.register_rhythm_loader(BSSelectedRhythmLoopLoader(self))
 
     def set_corpus(self, corpus):
         """
@@ -272,7 +273,7 @@ class BSController(object):
         self._precondition_check_rhythm_index(rhythm_ix)
         return self._corpus[rhythm_ix]
 
-    def set_target_rhythm(self, target_rhythm):  # type: (tp.Union[Rhythm, None]) -> None
+    def set_target_rhythm(self, target_rhythm):  # type: (tp.Union[RhythmLoop, None]) -> None
         """
         Sets the target rhythm.
 
@@ -283,8 +284,8 @@ class BSController(object):
             self._target_rhythm = target_rhythm
             return
 
-        if not isinstance(target_rhythm, Rhythm):
-            raise TypeError("Expected a Rhythm but got \"%s\"" % str(target_rhythm))
+        if not isinstance(target_rhythm, RhythmLoop):
+            raise TypeError("Expected a RhythmLoop but got \"%s\"" % str(target_rhythm))
 
         self._target_rhythm = target_rhythm
         self._distances_to_target_rhythm_are_stale = True
@@ -330,7 +331,7 @@ class BSController(object):
                     rhythm.name,
                     rhythm.bpm,
                     str(rhythm.time_signature),
-                    rhythm.track_count()
+                    rhythm.get_track_count()
                 )
 
     def set_rhythm_player(self, rhythm_player):  # type: (tp.Union[BSRhythmPlayer, None]) -> None
@@ -404,24 +405,25 @@ class BSController(object):
         Sets the measure use to get the distance between individual rhythm tracks.
 
         :param track_distance_measure: the distance measure, one of:
-            TrackDistanceMeasure - the track distance measure itself
-            Type[TrackDistanceMeasure] - the track distance class, must be a subclass of TrackDistanceMeasure
-            str - the name of the TrackDistanceMeasure class (cls.__friendly_name__)
+            MonophonicRhythmDistanceMeasure - the track distance measure itself
+            Type[MonophonicRhythmDistanceMeasure] - the track distance class, must be a subclass of
+                                                    MonophonicRhythmDistanceMeasure
+            str - the name of the MonophonicRhythmDistanceMeasure class (cls.__friendly_name__)
         """
-        # type: (tp.Union[str, TrackDistanceMeasure, tp.Type[TrackDistanceMeasure]]) -> None
+        # type: (tp.Union[str, MonophonicRhythmDistanceMeasure, tp.Type[MonophonicRhythmDistanceMeasure]]) -> None
 
         if isinstance(track_distance_measure, str):
             try:
-                track_distance_measure = TrackDistanceMeasure.get_measure_by_name(track_distance_measure)
+                track_distance_measure = MonophonicRhythmDistanceMeasure.get_measure_by_name(track_distance_measure)
             except KeyError:
                 raise ValueError("Unknown distance measure: \"%s\"" % str(track_distance_measure))
 
-        self._rhythm_measure.track_distance_measure = track_distance_measure
+        self._rhythm_measure.monophonic_measure = track_distance_measure
         self._distances_to_target_rhythm_are_stale = True
         self._dispatch(self.DISTANCE_MEASURE_SET)
 
     def is_current_distance_measure_quantizable(self):
-        return isinstance(self._rhythm_measure.track_distance_measure, Quantizable)
+        return isinstance(self._rhythm_measure.monophonic_measure, Quantizable)
 
     def set_measure_quantization_unit(self, unit):
         """
@@ -434,7 +436,7 @@ class BSController(object):
         if not self.is_current_distance_measure_quantizable():
             return False
 
-        track_distance_measure = self._rhythm_measure.track_distance_measure
+        track_distance_measure = self._rhythm_measure.monophonic_measure
         track_distance_measure.internal_unit = unit
         track_distance_measure.quantize_enabled = True
         self._distances_to_target_rhythm_are_stale = True
@@ -517,7 +519,7 @@ class BSController(object):
 
         return tuple(self._rhythm_selection)
 
-    def register_rhythm_loader(self, loader: BSRhythmLoader):
+    def register_rhythm_loader(self, loader: BSRhythmLoopLoader):
         """
         Register a new rhythm loader.
 
@@ -534,7 +536,7 @@ class BSController(object):
     def get_rhythm_loader_source_names(self):
         """
         Returns a tuple with the rhythm source names of the currently registered rhythm loaders. See the
-        BSRhythmLoader.source_name property.
+        BSRhythmLoopLoader.source_name property.
 
         :return: tuple containing the source names of the currently registered rhythm loaders
         """
@@ -550,7 +552,7 @@ class BSController(object):
 
         return len(self._rhythm_loaders)
 
-    def get_rhythm_loader_iterator(self):  # type: () -> tp.Iterator[tp.Tuple[tp.Type[BSRhythmLoader], BSRhythmLoader]]
+    def get_rhythm_loader_iterator(self) -> (tp.Iterator[tp.Tuple[tp.Type[BSRhythmLoopLoader], BSRhythmLoopLoader]]):
         """
         Returns an iterator over the currently registered rhythm loaders.
 
@@ -559,7 +561,7 @@ class BSController(object):
 
         return iter(self._rhythm_loaders.items())
 
-    def get_rhythm_loader(self, loader_type: tp.Type[BSRhythmLoader]):  # type: (str) -> BSRhythmLoader
+    def get_rhythm_loader(self, loader_type: tp.Type[BSRhythmLoopLoader]):  # type: (str) -> BSRhythmLoopLoader
         """
         Returns the rhythm loader, given the loader type.
 

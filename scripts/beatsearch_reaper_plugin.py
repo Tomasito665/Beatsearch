@@ -9,13 +9,14 @@ try:
 except ModuleNotFoundError:
     raise ModuleNotFoundError("beyond.Reaper not found. Download it here: "
                               "https://forum.cockos.com/showthread.php?t=129696")
+import typing as tp
 from tkinter import *
 from tempfile import TemporaryFile
 # noinspection PyUnresolvedReferences
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
-from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoader
-from beatsearch.data.rhythm import Rhythm, TimeSignature, Unit
+from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoopLoader
+from beatsearch.data.rhythm import Rhythm, DrumLoop, PolyphonicRhythm, TimeSignature, Unit
 from beatsearch.app.view import BSApp
 # noinspection PyUnresolvedReferences
 import midi
@@ -25,7 +26,7 @@ ReaperApi = Reaper
 
 def main(input_track_name, output_track_name):
     player = ReaperRhythmPlayer()
-    rhythm_loader = ReaperRhythmLoader()
+    rhythm_loader = ReaperRhythmLoopLoader()
 
     def find_reaper_thread_target():
         try:
@@ -64,28 +65,28 @@ def main(input_track_name, output_track_name):
 class ReaperRhythmPlayer(BSRhythmPlayer):
     """Implementation of BSRhythmPlayer that uses Reaper as MIDI output for the rhythms"""
 
-    def __init__(self, output_track=None):
+    def __init__(self, output_track: str = None):
         super(ReaperRhythmPlayer, self).__init__()
-        self._tmp_files = set()
-        self._start_pos = -1
-        self._end_pos = -1
-        self._prev_pos = -1
-        self._output_track = output_track
-        self._current_rhythms = []
-        self._is_playing = False
+        self._tmp_files = set()              # type: tp.Set[str]
+        self._start_pos = -1                 # type: float
+        self._end_pos = -1                   # type: float
+        self._prev_pos = -1                  # type: float
+        self._output_track = output_track    # type: str
+        self._current_rhythms = []           # type: tp.List[PolyphonicRhythm]
+        self._is_playing = False             # type: bool
 
         if output_track is not None:
             self.set_output_track(output_track)
 
     @property
-    def output_track(self):
+    def output_track(self) -> str:
         return self._output_track
 
     @output_track.setter
-    def output_track(self, output_track):
+    def output_track(self, output_track: str) -> None:
         self.set_output_track(output_track)
 
-    def set_output_track(self, output_track, reaper_api=None):
+    def set_output_track(self, output_track: str, reaper_api: ReaperApi = None):
         if reaper_api is None:
             with ReaperApi as api:
                 self.set_output_track(output_track, api)
@@ -96,7 +97,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         ReaperUtils.clear_track(reaper_api, self._output_track)
         self._output_track = output_track
 
-    def playback_rhythms(self, rhythms):
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
         with ReaperApi as api:
             api.OnPauseButton()
             self.populate_track(api, rhythms)
@@ -107,7 +108,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
             api.OnPlayButton()
         self._is_playing = True
 
-    def stop_playback(self):
+    def stop_playback(self) -> None:
         with ReaperApi as api:
             api.OnStopButton()
             api.RPR_CSurf_OnMuteChange(self.output_track, True)  # mute output track
@@ -115,20 +116,20 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
             ReaperUtils.enable_metronome(api, True)
         self._is_playing = False
 
-    def is_playing(self):
+    def is_playing(self) -> bool:
         return self._is_playing
 
-    def set_repeat(self, enabled):
+    def set_repeat(self, enabled: bool) -> None:
         print("ReaperRhythmPlayer.set_repeat() not available. Repeat is always enabled.", file=sys.stderr)
 
-    def get_repeat(self):
+    def get_repeat(self) -> bool:
         return True
 
-    def clean_temp_files(self):
+    def clean_temp_files(self) -> None:
         for fpath in self._tmp_files:
             os.remove(fpath)
 
-    def populate_track(self, api, rhythms):
+    def populate_track(self, api, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
         if rhythms == self._current_rhythms:
             return
 
@@ -148,7 +149,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         self._current_rhythms = rhythms
 
     @staticmethod
-    def render_rhythm_and_insert_to_track(output_track, rhythm, reaper_api):
+    def render_rhythm_and_insert_to_track(output_track, rhythm: PolyphonicRhythm, reaper_api):
         ReaperUtils.set_selected_tracks(reaper_api, output_track)
         with TemporaryFile(prefix="beatsearch-reaper", suffix=rhythm.name + ".mid", delete=False) as f:
             pattern = rhythm.to_midi()
@@ -158,7 +159,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         return fpath
 
 
-class ReaperRhythmLoader(BSRhythmLoader):
+class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
     SOURCE_NAME = "Reaper MIDI media item"
 
     def __init__(self, input_track=None):

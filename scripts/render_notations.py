@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.data.rhythm import Unit
-from beatsearch.graphics.plot import RhythmPlotter
+from beatsearch.graphics.plot import RhythmLoopPlotter
 from beatsearch.utils import print_progress_bar
 
 
@@ -52,7 +52,7 @@ if __name__ == '__main__':
         '32': Unit.THIRTYSECOND
     }
 
-    plotter = RhythmPlotter()
+    plotter = RhythmLoopPlotter()
     n_steps = \
         n_rhythms * len(single_unit_plots) + \
         n_rhythms * len(multi_units) * len(multi_unit_plots) + \

@@ -1,14 +1,15 @@
 import os
 import inspect
 import itertools
+from abc import abstractmethod, ABCMeta
+from io import IOBase
 from functools import wraps
-from typing import Union, Iterable, Tuple, Any
-from collections import OrderedDict
-# noinspection PyUnresolvedReferences
-import midi
+import typing as tp
+from collections import OrderedDict, namedtuple
 import math
-from beatsearch.config import __USE_NUMPY__
-from beatsearch.utils import friendly_named_class, inject_numpy
+import numpy as np
+from beatsearch.utils import friendly_named_class
+import midi
 
 
 class Unit(object):
@@ -41,7 +42,7 @@ class Unit(object):
         return unit_value in Unit._units
 
     @staticmethod
-    def get(unit):  # type: (Union[str, Unit]) -> Unit
+    def get(unit):  # type: (tp.Union[str, Unit]) -> Unit
         """
         Returns the Unit object for the given unit value, e.g. "quarters" or "eighths". If the given unit is already
         a Unit object, this method will return that.
@@ -142,7 +143,7 @@ def concretize_unit(f_get_res=lambda *args, **kwargs: args[0].get_resolution()):
     """
 
     def concretize_unit_decorator(func):
-        arg_spec = inspect.getargspec(func)
+        arg_spec = inspect.getfullargspec(func)
 
         try:
             unit_arg_index = arg_spec.args.index("unit")
@@ -173,6 +174,8 @@ def concretize_unit(f_get_res=lambda *args, **kwargs: args[0].get_resolution()):
             # Concretize the unit to the rhythm's resolution for tick unit
             if unit == 'ticks':
                 unit = f_get_res(*args, **kwargs)
+                if unit <= 0:
+                    raise ValueError("Requested unit is \"ticks\", but resolution %i <= 0" % unit)
 
             # Replace unit by concretized unit
             if unit_in_kwargs:
@@ -265,7 +268,7 @@ class TimeSignature(object):
         return "%i/%i" % (self.numerator, self.denominator)
 
     @staticmethod
-    def from_midi_event(midi_event):
+    def from_midi_event(midi_event: midi.TimeSignatureEvent):
         if not isinstance(midi_event, midi.TimeSignatureEvent):
             raise ValueError("Expected midi.TimeSignatureEvent")
         numerator = midi_event.get_numerator()
@@ -273,438 +276,977 @@ class TimeSignature(object):
         return TimeSignature(numerator, denominator)
 
 
-class Rhythm(object):
-    """
-    Represents a rhythm, containing onset times and velocities per instrument. Holds meta data about the rhythm like
-    name, bpm and time signature.
-    """
+class IRhythm(object, metaclass=ABCMeta):
+    """Rhythm interface"""
 
-    def __init__(self, name, bpm, time_signature, data, data_ppq, duration=None,
-                 ceil_duration_to_measure=True, rescale_to_ppq=None, midi_file_path="", midi_metronome=None):
+    class Precondition(object):
+        """Preconditions for IRhythm methods"""
+
+        class ResolutionNotSet(Exception):
+            pass
+
+        class TimeSignatureNotSet(Exception):
+            pass
+
+        @classmethod
+        def needs_resolution(cls, f):
+            @wraps(f)
+            def wrapper(rhythm, *args, **kwargs):
+                if rhythm.get_resolution() == 0:
+                    raise cls.ResolutionNotSet
+                return f(rhythm, *args, **kwargs)
+
+            return wrapper
+
+        @classmethod
+        def needs_time_signature(cls, f):
+            @wraps(f)
+            def wrapper(rhythm, *args, **kwargs):
+                if not rhythm.get_time_signature():
+                    raise cls.TimeSignatureNotSet
+                return f(rhythm, *args, **kwargs)
+
+            return wrapper
+
+    @abstractmethod
+    def get_resolution(self) -> int:
         """
-        Constructs a new rhythm.
+        Returns the tick resolution of this rhythm in pulses-per-quarter-note.
 
-        :param name:               The name of the rhythm
-        :param bpm:                Beats per minute; tempo of the rhythm
-        :param time_signature:     Time signature of the rhythm
-        :param data:               The onset data; dictionary holding onsets by MIDI key where each onset is an
-                                   (absolute tick, velocity) tuple
-        :param data_ppq:           Resolution of the onset data and the length in PPQ (pulses per quarter note)
-        :param duration:           The duration of the rhythm in ticks. When given None, the duration will be set to
-                                   first downbeat after the last note in the rhythm.
-        :param rescale_to_ppq:     Resolution to rescale the onset data (and the length) to in pulses per quarter note
-                                   or None for no rescaling
-        :param midi_file_path:     The path to the midi file or an empty string if this rhythm is not
-                                   attached to a MIDI file
-        :param midi_metronome:     Midi TimeSignature event metronome
-        """
-
-        if not isinstance(time_signature, TimeSignature):
-            raise ValueError("Time signature should be a Rhythm.TimeSignature instance")
-
-        self._name = str(name)
-        self._bpm = float(bpm)
-        self._time_signature = time_signature
-        self._tracks = {}
-        self._duration = -1
-        self._ppq = data_ppq
-        self._midi_file_path = str(midi_file_path) if midi_file_path else None
-        self._midi_metronome = midi_metronome
-
-        # add tracks
-        for pitch, onsets in data.items():
-            self._tracks[pitch] = Rhythm.Track(onsets, self)
-
-        # default the duration to the timestamp of the last note
-        if duration is None:
-            duration = self.get_last_onset_time('ticks')
-
-        if ceil_duration_to_measure:
-            measure_duration = self.get_measure_duration('ticks')
-            n_measures = int(math.ceil(duration / measure_duration))
-            duration = n_measures * measure_duration
-
-        self.set_duration(duration)
-
-        if rescale_to_ppq is not None:
-            self.set_resolution(rescale_to_ppq)
-
-    class Track(object):
-        """
-        Contains the actual onset data for one instrument.
+        :return: tick resolution of this rhythm in PPQN
         """
 
-        def __init__(self, data, rhythm=None):
-            """
-            Creates a new rhythm track.
+        raise NotImplementedError
 
-            :param data: An iterable returning an (absolute tick, velocity) tuple for each iteration.
-            :param rhythm: The rhythm object which this track is belongs to.
-            """
-
-            self._data = tuple(data)
-            self._rhythm = rhythm
-
-        @property
-        def rhythm(self):
-            """
-            The rhythm object which this track belongs to.
-            """
-
-            return self._rhythm
-
-        @rhythm.setter
-        def rhythm(self, rhythm):
-            self._rhythm = rhythm
-
-        @property
-        def onsets(self):
-            """
-            The onsets of this rhythm track where each onset is an (absolute tick, velocity) tuple pair. This is a
-            read-only property.
-            """
-
-            return self._data
-
-        @concretize_unit()
-        def get_binary(self, unit='eighths'):
-            """
-            Returns the binary representation of the note onsets of this track where each step where a note onset
-            happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
-            quarter note) of the binary vector.
-
-            :param unit:
-            :return: the binary representation of the note onsets of the given pitch
-            """
-
-            resolution = self.get_resolution()
-            duration = self.rhythm.get_duration(unit)
-            binary_string = [0] * int(math.ceil(duration))
-
-            for onset in self._data:
-                tick = onset[0]
-                pulse = convert_time(tick, resolution, unit, quantize=True)
-                try:
-                    binary_string[pulse] = 1
-                except IndexError:
-                    pass  # when quantization pushes note after end of rhythm
-
-            return binary_string
-
-        @concretize_unit()
-        def get_pre_note_inter_onset_intervals(self, unit='ticks'):
-            """
-            Returns the time difference between the current note and the previous note for all notes of this track in
-            eighths. The first note will return the time difference with the start of the rhythm.
-
-            For example, given the Rumba Clave rhythm:
-              X--X---X--X-X---
-              0  3   4  3 2
-
-            :return: pre note inter-onset interval vector
-            """
-
-            resolution = self.get_resolution()
-            current_tick = 0
-            intervals = []
-
-            for onset in self._data:
-                onset_tick = onset[0]
-                delta_tick = onset_tick - current_tick
-                intervals.append(convert_time(delta_tick, resolution, unit))
-                current_tick = onset_tick
-
-            return intervals
-
-        # TODO Add cyclic option to include the offset in the last onset's interval
-        @concretize_unit()
-        def get_post_note_inter_onset_intervals(self, unit='ticks', quantize=False):
-            """
-            Returns the time difference between the current note and the next note for all notes in this rhythm track
-            in eighths. The last note will return the time difference with the end (duration) of the rhythm.
-
-            For example, given the Rumba Clave rhythm:
-              X--X---X--X-X---
-              3  4   3  2 4
-
-            :return: post note inter-onset interval vector
-            """
-
-            intervals = []
-            onset_ticks = [onset[0] for onset in self._data] + [self.rhythm.get_duration()]
-            last_onset_tick = -1
-
-            for onset_tick in onset_ticks:
-                if last_onset_tick < 0:
-                    last_onset_tick = onset_tick
-                    continue
-
-                delta_in_ticks = onset_tick - last_onset_tick
-                delta_in_units = convert_time(delta_in_ticks, self.get_resolution(), unit, quantize=quantize)
-
-                intervals.append(delta_in_units)
-                last_onset_tick = onset_tick
-
-            return intervals
-
-        @inject_numpy
-        def get_interval_histogram(self, unit='eighths', numpy=None):
-            """
-            Returns the number of occurrences of all the inter-onset intervals from the smallest to the biggest
-            interval. The inter onset intervals are retrieved with get_post_note_inter_onset_intervals().
-
-            For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]:
-                (
-                    [1, 2, 2],  # occurrences
-                    [2, 3, 4]   # bins (interval durations)
-                )
-
-
-            :return: an (occurrences, bins) tuple
-            """
-
-            intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-            histogram = numpy.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
-            occurrences = histogram[0].tolist()
-            bins = histogram[1].tolist()[:-1]
-            return occurrences, bins
-
-        def get_binary_schillinger_chain(self, unit='ticks', values=(0, 1)):
-            """
-            Returns the Schillinger notation of this rhythm track where each onset is a change of a "binary note".
-
-            For example, given the Rumba Clave rhythm and with values (0, 1):
-              X--X---X--X-X---
-              0001111000110000
-
-            :param unit: the unit to quantize on ('ticks' is no quantization)
-            :param values: binary vector to be used in the schillinger chain. E.g. when given ('a', 'b'), the returned
-                           schillinger chain will consist of 'a' and 'b'.
-            :return: Schillinger rhythm vector as a list
-            """
-
-            chain, i = self.get_binary(unit), 0
-            value_i = 0
-            while i < len(chain):
-                if chain[i] == 1:
-                    value_i = 1 - value_i
-                chain[i] = values[value_i]
-                i += 1
-            return chain
-
-        def get_chronotonic_chain(self, unit='ticks'):
-            """
-            Returns the chronotonic chain representation of this rhythm track.
-
-            For example, given the Rumba Clave rhythm:
-              X--X---X--X-X---
-              3334444333224444
-
-            :param unit: unit
-            :return: the chronotonic chain as a list
-            """
-
-            chain, i, delta = self.get_binary(unit), 0, 0
-            while i < len(chain):
-                if chain[i] == 1:
-                    j = i + 1
-                    while j < len(chain) and chain[j] == 0:
-                        j += 1
-                    delta = j - i
-                chain[i] = delta
-                i += 1
-            return chain
-
-        def get_interval_difference_vector(self, cyclic=True, unit='ticks', quantize=False):
-            """
-            Returns the interval difference vector (aka difference of rhythm vector). For each
-            note, this is the difference between the current onset interval and the next onset
-            interval. So, if N is the number of onsets, the returned vector will have a length
-            of N - 1. This is different with cyclic rhythms, where the last onset's interval is
-            compared with the first onset's interval. In this case, the length will be N.
-
-            For example, given the post-note inter-onset interval vector for the Rumba clave:
-              [3, 4, 3, 2, 4]
-
-            The interval difference vector would be:
-               With cyclic set to False: [4/3, 3/4, 2/3, 4/2]
-               With cyclic set to True:  [4/3, 3/4, 2/3, 4/2, 3/4]
-
-            :param cyclic: whether or not to treat this rhythm as a cyclic rhythm or not
-            :param unit: time unit
-            :param quantize: whether or not the inter onset interval vector should be quantized
-            :return: interval difference vector
-            """
-
-            vector = self.get_post_note_inter_onset_intervals(unit, quantize)
-            if cyclic:
-                vector.append(vector[0])
-            i = 0
-            while i < len(vector) - 1:
-                try:
-                    vector[i] = vector[i + 1] / float(vector[i])
-                except ZeroDivisionError:
-                    vector[i] = float('inf')
-                i += 1
-            vector.pop()
-            return vector
-
-        @concretize_unit()
-        def get_onset_times(self, unit='ticks', quantize=False):
-            """
-            Returns the onset times in the given unit.
-
-            :param unit: the unit of the onset times
-            :param quantize: whether or not the onset times must be quantized to the given unit
-            :return: a list with the onset times of this rhythm track
-            """
-
-            return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
-
-        def get_resolution(self):
-            """
-            Returns the resolution of this rhythm in PPQ (pulses per quarter note).
-
-            :return: the resolution in PPQ
-            """
-
-            return self.rhythm.get_resolution()
-
-        # used internally by rhythm.set_resolution to rescale
-        # the onsets to a new resolution
-        def __set_resolution__(self, new_resolution):
-            old_resolution = self.get_resolution()
-
-            def scale_onset(onset):
-                tick, velocity = onset
-                scaled_tick = convert_time(tick, old_resolution, new_resolution, quantize=True)
-                return scaled_tick, velocity
-
-            rescaled_onsets = map(scale_onset, self._data)
-            self._data = tuple(rescaled_onsets)
-
-    @property
-    def name(self):
+    @abstractmethod
+    def set_resolution(self, resolution: int):
         """
-        The name of the rhythm.
+        Sets this rhythm's tick resolution.
+
+        :param resolution: new tick resolution in PPQN
+        :return: None
         """
 
-        return self._name
+        raise NotImplementedError
 
-    @name.setter
-    def name(self, name):
-        self._name = str(name)
-
-    @property
-    def bpm(self):
+    @abstractmethod
+    def get_bpm(self) -> float:
         """
-        The tempo of this rhythm in beats per minute.
+        Returns the tempo of this rhythm in beats per minute.
+
+        :return: tempo of this rhythm in beats per minute
         """
 
-        return self._bpm
+        raise NotImplementedError
 
-    @bpm.setter
-    def bpm(self, bpm):
-        bpm = float(bpm)
-        if bpm <= 0:
-            raise ValueError("Expected a BPM greater than zero but got %s" % bpm)
-        self._bpm = bpm
-
-    @property
-    def time_signature(self):
+    @abstractmethod
+    def set_bpm(self, bpm: tp.Union[float, int]) -> None:
         """
-        The time signature of this rhythm. This is a read-only property.
+        Sets this rhythm's tempo in beats per minute.
+
+        :param bpm: new tempo in beats per minute
+        :return: None
         """
 
-        return self._time_signature
+        raise NotImplementedError
 
-    def get_resolution(self):
+    @abstractmethod
+    def get_time_signature(self) -> tp.Union[TimeSignature, None]:
         """
-        Returns the resolution of this rhythm in PPQ (pulses per quarter note).
+        Returns the time signature of this rhythm.
 
-        :return: resolution in PPQ
-        """
-
-        return self._ppq
-
-    def set_resolution(self, ppq):
-        """
-        Rescales this rhythm to the given resolution in PPQ (pulses per quarter note).
-
-        :param ppq: resolution to rescale this rhythm to in PPQ
+        :return: the time signature of this rhythm as a TimeSignature object
         """
 
-        if ppq <= 0:
-            raise ValueError("Expected a number greater than zero but got %s" % str(ppq))
+        raise NotImplementedError
 
-        ppq = int(ppq)
-        old_ppq = self._ppq
+    @abstractmethod
+    def set_time_signature(self, time_signature: tp.Union[TimeSignature,
+                                                          tp.Tuple[int, int],
+                                                          tp.Sequence[int], None]) -> None:
+        """
+        Sets the time signature of this rhythm. None to remove the time signature.
 
-        if old_ppq == ppq:
-            return
+        :param time_signature: new time signature either as an iterable (numerator, denominator) or as a TimeSignature
+                               or None to remove the time signature
+        :return: None
+        """
 
-        for track in self._tracks.values():
-            track.__set_resolution__(ppq)
+        raise NotImplementedError
 
-        self._duration = convert_time(self._duration, old_ppq, ppq, quantize=True)
-        self._ppq = ppq
+    @abstractmethod
+    def get_duration_in_ticks(self) -> int:
+        """
+        Returns the duration of this rhythm in ticks.
+
+        :return: duration of this rhythm in ticks
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_duration_in_ticks(self, requested_duration: int) -> None:
+        """
+        Sets the duration of the rhythm to the closest duration possible to the requested duration and returns the
+        actual new duration.
+
+        :param requested_duration: requested new duration
+        :return: actual new duration
+        """
+
+        raise NotImplementedError
 
     @concretize_unit()
-    def get_duration(self, unit='ticks'):
+    def get_duration(self, unit="ticks") -> float:
         """
-        Returns the duration of the rhythm in the given time unit.
+        Returns the duration of this rhythm in the given time unit.
 
-        :param unit: the unit of the returned duration
-        :return: the duration in the given time unit
+        :param unit: time unit
+        :return: duration of this rhythm in the given time unit
         """
 
-        return convert_time(self._duration, self._ppq, unit)
+        duration_in_ticks = self.get_duration_in_ticks()
+        resolution = self.get_resolution()
+        return convert_time(duration_in_ticks, resolution, unit, quantize=False)
 
     @concretize_unit()
-    def set_duration(self, duration, unit='ticks'):
+    def set_duration(self, duration: tp.Union[int, float], unit="ticks") -> None:
         """
-        Sets the duration of the rhythm in the given time unit.
+        Sets the duration of this rhythm in the given time unit.
 
-        :param duration: new duration of the rhythm
-        :param unit: unit of the given duration
+        :param duration: new duration
+        :param unit: time unit of the given duration
+        :return: None
         """
 
-        duration_in_ticks = convert_time(duration, unit, self._ppq)
-        last_onset_tick = self.get_last_onset_time()
+        resolution = self.get_resolution()
+        duration_in_ticks = convert_time(duration, unit, resolution)
+        self.set_duration_in_ticks(round(duration_in_ticks))
 
-        if duration_in_ticks < last_onset_tick:
-            last_onset_in_given_unit = self.get_last_onset_time(unit)
-            raise ValueError("Expected a duration of at least %s but got %s" % (last_onset_in_given_unit, duration))
+    @abstractmethod
+    def get_last_onset_tick(self) -> int:
+        """
+        Returns the position of the last onset of this rhythm in ticks or -1 if this rhythm is empty.
 
-        self._duration = duration_in_ticks
+        :return: position of last onset in ticks or -1 if this rhythm is empty
+        """
 
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_onset_count(self) -> int:
+        """
+        Returns the number of onsets in this rhythm.
+
+        :return: number of onsets in this rhythm
+        """
+
+        raise NotImplementedError
+
+    @Precondition.needs_time_signature
     @concretize_unit()
-    def get_beat_duration(self, unit='ticks'):
+    def get_beat_duration(self, unit="ticks") -> float:
         """
         Returns the duration of one musical beat, based on the time signature.
 
         :param unit: unit of the returned duration
         :return: the duration of one beat in the given unit
+        :raises TimeSignatureNotSet: if no time signature has been set
         """
 
-        beat_unit = self.time_signature.get_beat_unit()
-        return convert_time(1.0, beat_unit, unit)
+        time_signature = self.get_time_signature()
+        beat_unit = time_signature.get_beat_unit()
+        return convert_time(1.0, beat_unit, unit, quantize=False)
 
+    @Precondition.needs_time_signature
     @concretize_unit()
-    def get_measure_duration(self, unit='ticks'):
+    def get_measure_duration(self, unit="ticks") -> float:
         """
         Returns the duration of one musical measure, based on the time signature.
 
         :param unit: unit of the returned duration
         :return: the duration of one measure in the given unit
+        :raises TimeSignatureNotSet: if no time signature has been set
         """
 
-        numerator = self.time_signature.numerator
-        beat_unit = self.time_signature.get_beat_unit()
-        return convert_time(numerator, beat_unit, unit)
+        time_signature = self.get_time_signature()
+        numerator = time_signature.numerator
+        beat_unit = time_signature.get_beat_unit()
+        return convert_time(numerator, beat_unit, unit, quantize=False)
 
-    @inject_numpy
-    def get_interval_histogram(self, unit='ticks', numpy=None):
+    @property
+    def resolution(self) -> int:
+        """See IRhythm.set_resolution and IRhythm.get_resolution"""
+        return self.get_resolution()
+
+    @resolution.setter
+    def resolution(self, resolution: tp.Union[float, int]):  # setter
+        self.set_resolution(resolution)
+
+    @property
+    def bpm(self) -> float:
+        """See IRhythm.set_bpm and IRhythm.get_bpm"""
+        return self.get_bpm()
+
+    @bpm.setter
+    def bpm(self, bpm: tp.Union[float, int]):  # setter
+        self.set_bpm(bpm)
+
+    @property
+    def time_signature(self) -> tp.Union[TimeSignature, None]:
+        """See IRhythm.set_time_signature and IRhythm.get_time_signature"""
+        return self.get_time_signature()
+
+    @time_signature.setter
+    def time_signature(self, time_signature: tp.Union[TimeSignature,
+                                                      tp.Tuple[int, int],
+                                                      tp.Sequence[int], None]) -> None:  # setter
+        self.set_time_signature(time_signature)
+
+    @property
+    def duration_in_ticks(self) -> int:
+        """See IRhythm.set_duration_in_ticks and IRhythm.get_duration_in_ticks"""
+        return self.get_duration_in_ticks()
+
+    @duration_in_ticks.setter
+    def duration_in_ticks(self, duration: int) -> None:  # setter
+        self.set_duration_in_ticks(duration)
+
+
+class RhythmBase(IRhythm, metaclass=ABCMeta):
+    """Rhythm abstract base class implementing the IRhythm interface"""
+
+    def __init__(self):
+        """
+        Creates a rhythm base object containing generic meta-data. As this is an abstract base class, this constructor
+        should only be called by subclass constructors.
+        """
+
+        self._resolution = 0              # type: int
+        self._bpm = 0                     # type: int
+        self._time_signature = None       # type: tp.Union[TimeSignature, None]
+        self._duration_in_ticks = 0       # type: int
+
+        # Note: we don't call any setters because subclasses might not be finished initializing
+
+    def post_init(self, **kwargs) -> None:
+        """
+        Multi-setter that can be used in RhythmBase subclass constructors to make sure that these are initialised after
+        specific subclass initialization. Only the properties will be set that are given.
+
+        :param kwargs
+            resolution: sets IRhythm.resolution
+            bpm: sets IRhythm.bpm
+            time_signature: sets IRhythm.time_signature
+            duration_in_ticks: sets IRhythm.duration_in_ticks
+            duration: also sets IRhythm.duration_in_ticks
+
+        :return: None
+        """
+
+        if "resolution" in kwargs:
+            self.set_resolution(kwargs['resolution'])
+        if "bpm" in kwargs:
+            self.set_bpm(kwargs['bpm'])
+        if "time_signature" in kwargs:
+            self.set_time_signature(kwargs['time_signature'])
+        if "duration_in_ticks" in kwargs:
+            self.set_duration_in_ticks(kwargs['duration_in_ticks'])
+        elif "duration" in kwargs:
+            self.set_duration_in_ticks(kwargs['duration'])
+
+    class TimeSignatureNotSet(Exception):
+        pass
+
+    def get_resolution(self) -> int:
+        """
+        Returns the tick resolution of this rhythm in PPQN.
+
+        :return: tick resolution of this rhythm in PPQN
+        """
+
+        return self._resolution
+
+    def set_resolution(self, resolution: int):
+        """
+        Sets this rhythm's tick resolution and updates the duration, which is in ticks and will change according to the
+        resolution.
+
+        :param resolution: new tick resolution in PPQN
+        :return: None
+        """
+
+        if not isinstance(resolution, int) or resolution < 0:
+            raise ValueError("Resolution should be a positive integer or "
+                             "zero for no resolution but got %s" % str(resolution))
+
+        prev_resolution = self.resolution
+        prev_duration = self.duration_in_ticks
+
+        if prev_duration != 0.0:
+            rescaled_duration = convert_time(prev_duration, prev_resolution, resolution, quantize=True)
+        else:
+            rescaled_duration = 0
+
+        self._resolution = resolution
+        self.set_duration_in_ticks(rescaled_duration)
+
+    def get_bpm(self) -> float:
+        """
+        Returns the tempo of this rhythm in beats per minute.
+
+        :return: tempo of this rhythm in beats per minute
+        """
+
+        return self._bpm
+
+    def set_bpm(self, bpm: tp.Union[float, int]) -> None:
+        """
+        Sets this rhythm's tempo in beats per minute.
+
+        :param bpm: new tempo in beats per minute
+        :return: None
+        """
+
+        self._bpm = float(bpm)
+
+    def get_time_signature(self) -> tp.Union[TimeSignature, None]:
+        """
+        Returns the time signature of this rhythm.
+
+        :return: the time signature of this rhythm as a TimeSignature object
+        """
+
+        return self._time_signature
+
+    def set_time_signature(self, time_signature: tp.Union[TimeSignature,
+                                                          tp.Tuple[int, int],
+                                                          tp.Sequence[int], None]) -> None:
+        """
+        Sets the time signature of this rhythm. None to remove the time signature.
+
+        :param time_signature: new time signature either as an iterable (numerator, denominator) or as a TimeSignature
+                               or None to remove the time signature
+        :return: None
+        """
+
+        if not time_signature:
+            self._time_signature = None
+            return
+
+        try:
+            # if given an iterable
+            numerator, denominator = time_signature
+        except TypeError:
+            # if given a TimeSignature object
+            numerator = time_signature.numerator
+            denominator = time_signature.denominator
+
+        self._time_signature = TimeSignature(numerator, denominator)
+
+    def get_duration_in_ticks(self) -> int:
+        """
+        Returns the duration of this rhythm in ticks.
+
+        :return: duration of this rhythm in ticks
+        """
+
+        return self._duration_in_ticks
+
+    def set_duration_in_ticks(self, requested_duration: int) -> int:
+        """
+        Tries to set the duration of this rhythm to the requested duration and returns the actual new duration. The
+        duration of the rhythm can't be less than the position of the last note in this rhythm. If a duration is
+        requested that is less than the last note's position, the duration will be set to that last note's position.
+
+        :param requested_duration: new duration in ticks
+        :return: the new duration
+        """
+
+        last_onset_position = self.get_last_onset_tick()
+        self._duration_in_ticks = max(last_onset_position, int(requested_duration))
+        return self._duration_in_ticks
+
+
+class Onset(namedtuple("Onset", ["tick", "velocity"])):
+    """Onset in a rhythm
+
+    Each onset represents a note within rhythm and has the following (read-only) properties:
+       tick      - the absolute tick position of this onset within the rhythm as an integer
+       velocity  - the MIDI velocity of this note with a range of [0, 127] as an integer
+    """
+
+    def scale(self, resolution_from: tp.Union[int, float], resolution_to: tp.Union[int, float]):
+        """
+        Returns a new Onset object with a scaled position.
+
+        :param resolution_from: original resolution of the onset tick position in PPQ
+        :param resolution_to: resolution of the new onset's tick position in PPQN
+        :return: new Onset object with the given new resolution
+        """
+
+        scaled_tick = convert_time(self.tick, resolution_from, resolution_to, quantize=True)
+        return Onset(scaled_tick, self.velocity)
+
+
+class IMonophonicRhythm(IRhythm, metaclass=ABCMeta):
+    """Monophonic rhythm interface
+
+    Interface for monophonic rhythms.
+    """
+
+    @abstractmethod
+    def get_onsets(self) -> tp.Tuple[Onset, ...]:
+        """
+        Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of
+        MonophonicRhythm.Onset.
+
+        :return: the onsets within this rhythm as a tuple of MonophonicRhythm.Onset objects
+        """
+
+        raise NotImplementedError
+
+    @property
+    def onsets(self) -> tp.Tuple[Onset, ...]:
+        """See IMonophonicRhythm.get_onsets. This property is read-only."""
+        return self.get_onsets()
+
+    def get_last_onset_tick(self) -> int:  # implements IRhythm.get_last_onset_tick
+        try:
+            return self.onsets[-1].tick
+        except IndexError:
+            return -1
+
+    def get_onset_count(self) -> int:  # implements IRhythm.get_onset_count
+        return len(self.onsets)
+
+    #####################################
+    # Monophonic rhythm representations #
+    #####################################
+
+    @IRhythm.Precondition.needs_resolution
+    @concretize_unit()
+    def get_binary(self, unit="eighths"):
+        """
+        Returns the binary representation of the note onsets of this rhythm where each step where a note onset
+        happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
+        quarter note) of the binary vector.
+
+        :param unit:
+        :return: the binary representation of the note onsets of the given pitch
+        """
+
+        resolution = self.get_resolution()
+        duration = self.get_duration(unit)
+        binary_string = [0] * int(math.ceil(duration))
+
+        for onset in self.onsets:
+            pulse = convert_time(onset.tick, resolution, unit, quantize=True)
+            try:
+                binary_string[pulse] = 1
+            except IndexError:
+                pass  # when quantization pushes note after end of rhythm
+
+        return binary_string
+
+    @IRhythm.Precondition.needs_resolution
+    @concretize_unit()
+    def get_pre_note_inter_onset_intervals(self, unit="ticks"):
+        """
+        Returns the time difference between the current note and the previous note for all notes of this rhythm in
+        eighths. The first note will return the time difference with the start of the rhythm.
+
+        For example, given the Rumba Clave rhythm:
+          X--X---X--X-X---
+          0  3   4  3 2
+
+        :return: pre note inter-onset interval vector
+        """
+
+        resolution = self.get_resolution()
+        current_tick = 0
+        intervals = []
+
+        for onset in self.onsets:
+            delta_tick = onset.tick - current_tick
+            intervals.append(convert_time(delta_tick, resolution, unit))
+            current_tick = onset.tick
+
+        return intervals
+
+    @IRhythm.Precondition.needs_resolution
+    @concretize_unit()  # TODO Add cyclic option to include the offset in the last onset's interval
+    def get_post_note_inter_onset_intervals(self, unit="ticks", quantize=False):
+        """
+        Returns the time difference between the current note and the next note for all notes in this rhythm in eighths.
+        The last note will return the time difference with the end (duration) of the rhythm.
+
+        For example, given the Rumba Clave rhythm:
+          X--X---X--X-X---
+          3  4   3  2 4
+
+        :return: post note inter-onset interval vector
+        """
+
+        intervals = []
+        onset_positions = itertools.chain((onset.tick for onset in self.onsets), [self.duration_in_ticks])
+        last_onset_tick = -1
+
+        for onset_tick in onset_positions:
+            if last_onset_tick < 0:
+                last_onset_tick = onset_tick
+                continue
+
+            delta_in_ticks = onset_tick - last_onset_tick
+            delta_in_units = convert_time(delta_in_ticks, self.get_resolution(), unit, quantize=quantize)
+
+            intervals.append(delta_in_units)
+            last_onset_tick = onset_tick
+
+        return intervals
+
+    def get_interval_histogram(self, unit="eighths"):
+        """
+        Returns the number of occurrences of all the inter-onset intervals from the smallest to the biggest
+        interval. The inter onset intervals are retrieved with get_post_note_inter_onset_intervals().
+
+        For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]:
+            (
+                [1, 2, 2],  # occurrences
+                [2, 3, 4]   # bins (interval durations)
+            )
+
+
+        :return: an (occurrences, bins) tuple
+        """
+
+        intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
+        histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
+        occurrences = histogram[0].tolist()
+        bins = histogram[1].tolist()[:-1]
+        return occurrences, bins
+
+    def get_binary_schillinger_chain(self, unit='ticks', values=(0, 1)):
+        """
+        Returns the Schillinger notation of this rhythm where each onset is a change of a "binary note".
+
+        For example, given the Rumba Clave rhythm and with values (0, 1):
+          X--X---X--X-X---
+          0001111000110000
+
+        :param unit: the unit to quantize on ('ticks' is no quantization)
+        :param values: binary vector to be used in the schillinger chain. E.g. when given ('a', 'b'), the returned
+                       schillinger chain will consist of 'a' and 'b'.
+        :return: Schillinger rhythm vector as a list
+        """
+
+        chain, i = self.get_binary(unit), 0
+        value_i = 0
+        while i < len(chain):
+            if chain[i] == 1:
+                value_i = 1 - value_i
+            chain[i] = values[value_i]
+            i += 1
+        return chain
+
+    def get_chronotonic_chain(self, unit="ticks"):
+        """
+        Returns the chronotonic chain representation of this rhythm.
+
+        For example, given the Rumba Clave rhythm:
+          X--X---X--X-X---
+          3334444333224444
+
+        :param unit: unit
+        :return: the chronotonic chain as a list
+        """
+
+        chain, i, delta = self.get_binary(unit), 0, 0
+        while i < len(chain):
+            if chain[i] == 1:
+                j = i + 1
+                while j < len(chain) and chain[j] == 0:
+                    j += 1
+                delta = j - i
+            chain[i] = delta
+            i += 1
+        return chain
+
+    def get_interval_difference_vector(self, cyclic=True, unit="ticks", quantize=False):
+        """
+        Returns the interval difference vector (aka difference of rhythm vector). For each
+        note, this is the difference between the current onset interval and the next onset
+        interval. So, if N is the number of onsets, the returned vector will have a length
+        of N - 1. This is different with cyclic rhythms, where the last onset's interval is
+        compared with the first onset's interval. In this case, the length will be N.
+
+        For example, given the post-note inter-onset interval vector for the Rumba clave:
+          [3, 4, 3, 2, 4]
+
+        The interval difference vector would be:
+           With cyclic set to False: [4/3, 3/4, 2/3, 4/2]
+           With cyclic set to True:  [4/3, 3/4, 2/3, 4/2, 3/4]
+
+        :param cyclic: whether or not to treat this rhythm as a cyclic rhythm or not
+        :param unit: time unit
+        :param quantize: whether or not the inter onset interval vector should be quantized
+        :return: interval difference vector
+        """
+
+        vector = self.get_post_note_inter_onset_intervals(unit, quantize)
+        if cyclic:
+            vector.append(vector[0])
+        i = 0
+        while i < len(vector) - 1:
+            try:
+                vector[i] = vector[i + 1] / float(vector[i])
+            except ZeroDivisionError:
+                vector[i] = float('inf')
+            i += 1
+        vector.pop()
+        return vector
+
+    @IRhythm.Precondition.needs_resolution
+    @concretize_unit()
+    def get_onset_times(self, unit="ticks", quantize=False):
+        """
+        Returns the absolute onset times of the notes in this rhythm.
+
+        :param unit: the unit of the onset times
+        :param quantize: whether or not the onset times must be quantized to the given unit
+        :return: a list with the onset times of this rhythm
+        """
+
+        return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
+
+
+class MonophonicRhythmBase(IMonophonicRhythm, metaclass=ABCMeta):
+    """Monophonic rhythm base class implementing IMonophonicRhythm
+
+    Abstract base class for monophonic rhythms. This class implements IMonophonicRhythm.get_onsets, adding onset state
+    to subclasses. Note that this class does not extend RhythmBase and therefore does NOT add rhythm base state like
+    bpm, resolution, time signature, etc.
+    """
+
+    class OnsetsNotInChronologicalOrder(Exception):
+        """Exception thrown when two adjacent onsets are not in chronological order"""
+        def __init__(self, tick_a: int, tick_b: int):
+            msg = "<..., %i, %i <--!, ...>" % (tick_a, tick_b)
+            super().__init__(msg)
+
+    def __init__(
+            self,
+            onsets: tp.Union[tp.Iterable[Onset],
+                             tp.Iterable[tp.Tuple[int, int]],
+                             tp.Iterable[tp.Sequence[int]]]
+    ):
+        """
+        Creates a new monophonic rhythm from the given onsets. The onsets will be stored as MonophonicOnset.Onset
+        named tuples.
+
+        :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The tick
+                       resolution should equal the parent's resolution. The onsets should be given in chronological
+                       order.
+        :raises OnsetsNotInChronologicalOrder
+        """
+
+        def validate_onsets_gen():
+            prev_tick = -1
+            for [tick, velocity] in onsets:
+                if tick < prev_tick:
+                    raise self.OnsetsNotInChronologicalOrder(prev_tick, tick)
+                yield Onset(tick, velocity)
+                prev_tick = tick
+
+        self._onsets = tuple(validate_onsets_gen())  # type: (tp.Tuple[Onset, ...])
+
+    def get_onsets(self) -> tp.Tuple[Onset, ...]:
+        """
+        Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of
+        MonophonicRhythm.Onset.
+
+        :return: the onsets within this rhythm as a tuple of MonophonicRhythm.Onset objects
+        """
+
+        return self._onsets
+
+
+class MonophonicRhythm(RhythmBase, MonophonicRhythmBase):
+    """Implements both rhythm base and monophonic rhythm base"""
+
+    def __init__(
+            self,
+            onsets: tp.Union[tp.Iterable[Onset],
+                             tp.Iterable[tp.Tuple[int, int]],
+                             tp.Iterable[tp.Sequence[int]]],
+            **kwargs
+    ):
+        """
+        Creates a new monophonic rhythm with the given onsets.
+
+        :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The tick
+                       resolution should equal the parent's resolution. The onsets should be given in chronological
+                       order.
+        :param kwargs: Post-init keyword arguments. See RhythmBase.post_init.
+        """
+
+        RhythmBase.__init__(self)
+        MonophonicRhythmBase.__init__(self, onsets)
+        self.post_init(**kwargs)
+
+
+class IPolyphonicRhythm(IRhythm, metaclass=ABCMeta):
+
+    class TrackNameError(Exception):
+        """Thrown if there's something wrong with a track name"""
+        pass
+
+    class EquallyNamedTracksError(TrackNameError):
+        """Thrown by set_tracks when given multiple tracks with same name"""
+        pass
+
+    class IllegalTrackName(TrackNameError):
+        """Thrown by set_tracks if __validate_track_name__ returns False"""
+        pass
+
+    class Track(MonophonicRhythmBase):
+        """Represents one track of a polyphonic rhythm
+
+        A polyphonic rhythm consists of multiple monophonic rhythms; tracks. Each of those tracks is represented by one
+        instance of this class. Note that -- although this class does implement IRhythm through MonophonicRhythmBase --
+        it does not inherit the rhythm base state, because it does not extend RhythmBase. It is not necessary for Track
+        to have base rhythm state, because this meta-data is already stored in the parent of the tracks; the
+        PolyphonicRhythm. Base rhythm getters redirect to the polyphonic parent, setters will raise an exception when
+        used.
+        """
+
+        def __init__(
+                self,
+                onsets: tp.Union[tp.Iterable[Onset],
+                                 tp.Iterable[tp.Tuple[int, int]],
+                                 tp.Iterable[tp.Sequence[int]]],
+                track_name: str,
+                parent: IRhythm = None
+        ):
+            """
+            Creates a new rhythm track.
+
+            :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The tick
+                           resolution should equal the parent's resolution. The onsets should be given in chronological
+                           order.
+            :param track_name: The name of this track. This can't be changed after instantiation.
+            :param parent: The polyphonic rhythm which this track belongs to
+            """
+
+            super().__init__(onsets)
+            self._track_name = str(track_name)           # type: str
+            self._parent = parent                        # type: PolyphonicRhythm
+
+        class ParentNotSetError(Exception):
+            pass
+
+        def get_parent(self):  # type: () -> PolyphonicRhythm
+            """
+            Returns the parent of this track. The parent is a polyphonic rhythm.
+
+            :return: polyphonic rhythm which this track is parented to or None
+            """
+
+            return self._parent
+
+        def set_parent(self, parent):  # type: (PolyphonicRhythm) -> None
+            """
+            Parents this track to the given polyphonic rhythm. Note that the tick resolution of the given parent will
+            reflect the resolution of this track's onsets.
+
+            :param parent: polyphonic rhythm
+            :return: None
+            """
+
+            self._parent = parent
+
+        def get_name(self):  # type: () -> str
+            """
+            Returns the name of this track. Note that there is a getter but not a setter for a track's name. The name of
+            a track can not be changed after initialization.
+
+            :return: track name
+            """
+
+            return self._track_name
+
+        @property
+        def parent(self):  # type: () -> PolyphonicRhythm
+            """See Track.set_parent and Track.get_parent"""
+            return self.get_parent()
+
+        @parent.setter
+        def parent(self, rhythm):  # type: (PolyphonicRhythm) -> None
+            self.set_parent(rhythm)
+
+        @property
+        def name(self):
+            """See Track.get_name. This property is read-only"""
+            return self.get_name()
+
+        def get_resolution(self):
+            """
+            Returns the resolution of parent in PPQN.
+
+            :return: resolution of parent in PPQN and therefore
+            :raises Track.ParentNotSetError
+            """
+
+            self._precondition_parent_set()
+            return self._parent.get_resolution()
+
+        def get_bpm(self):
+            """
+            Returns the tempo of parent in beats per minute.
+
+            :return: bpm of parent
+            :raises Track.ParentNotSetError
+            """
+
+            self._precondition_parent_set()
+            return self._parent.get_bpm()
+
+        def get_time_signature(self):
+            """
+            Returns the time signature of parent.
+
+            :return: time signature of parent as a TimeSignature object
+            :raises Track.ParentNotSetError
+            """
+
+            self._precondition_parent_set()
+            return self._parent.get_time_signature()
+
+        def get_duration_in_ticks(self):
+            """
+            Returns the duration of parent.
+
+            :return: duration of parent in ticks
+            :raises Track.ParentNotSetError
+            """
+
+            self._precondition_parent_set()
+            return self._parent.get_duration_in_ticks()
+
+        def set_resolution(self, resolution: int):
+            """
+            Can't set resolution for a single track. To set the resolution for all tracks, call parent.set_resolution.
+
+            :param resolution: unused
+            :return: None
+            :raises Exception: always
+            """
+
+            raise Exception("Can't set resolution for single track, call parent.")
+
+        def set_bpm(self, bpm: tp.Union[float, int]) -> None:
+            """
+            Can't set the bpm for a single track. To set the bpm for all tracks, call parent.set_bpm.
+
+            :param bpm: unused
+            :return: None
+            :raises Exception: always
+            """
+
+            raise Exception("Can't set BPM of a single track, call parent.")
+
+        def set_time_signature(self, time_signature: tp.Union[TimeSignature,
+                                                              tp.Tuple[int, int],
+                                                              tp.Sequence[int], None]) -> None:
+            """
+            Can't set the time signature for a single track. To set the time signature for all tracks, call
+            parent.set_time_signature.
+
+            :param time_signature: unused
+            :return: None
+            :raises Exception: always
+            """
+
+            raise Exception("Can't set time signature of a single track, call parent.")
+
+        def set_duration_in_ticks(self, requested_duration: int) -> None:
+            """
+            Can't set the duration for a single track. To set the duration for all tracks, call
+            parent.set_duration_in_ticks or parent.set_duration.
+
+            :param requested_duration: unused
+            :return: None
+            :raises Exception: always
+            """
+
+            raise Exception("Can't set duration of a single track, call parent.")
+
+        def _precondition_parent_set(self):
+            if self._parent is None:
+                raise self.ParentNotSetError
+
+        # used internally by PolyphonicRhythm.set_resolution to rescale the onsets of this track
+        def __rescale__(self, old_res: tp.Union[float, int], new_res: tp.Union[float, int]):
+            self._onsets = tuple(onset.scale(old_res, new_res) for onset in self._onsets)
+
+    @abstractmethod
+    def set_tracks(self, tracks: tp.Iterable[Track], resolution: int) -> None:
+        """
+        Sets the tracks and updates the resolution of this rhythm. The given tracks will automatically be parented to
+        this polyphonic rhythm. This method also resets the duration of the rhythm to the position of the last onset
+        in the given tracks.
+
+        :param tracks: iterator yielding PolyphonicRhythm.Track objects
+        :param resolution: resolution of the onsets in the given tracks
+        :return: None
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_track_iterator(self) -> tp.Iterator[Track]:
+        """
+        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a PolyphonicRhythm.Track
+        object.
+
+        :return: iterator over this rhythm's tracks yielding PolyphonicRhythm.Track objects
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_track_by_name(self, track_name: str):
+        """
+        Returns the track with the given name or None if this rhythm has no track with the given name.
+
+        :param track_name: track name
+        :return: Track object or None
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_track_count(self):
+        """
+        Returns the number of tracks within this rhythm.
+
+        :return: number of tracks
+        """
+
+        raise NotImplementedError
+
+    @classmethod
+    def create_tracks(cls, **onsets_by_track_name: tp.Iterable[tp.Tuple[int, int]]) -> tp.Generator[Track, None, None]:
+        # TODO add docstring
+        for name, onsets in onsets_by_track_name.items():
+            yield cls.Track(onsets=onsets, track_name=name)
+
+    #####################################
+    # Polyphonic rhythm representations #
+    #####################################
+
+    # TODO remove duplicate functionality (see IMonophonicRhythm.get_interval_histogram)
+    def get_interval_histogram(self, unit="ticks") -> (int, int):
         """
         Returns the interval histogram of all the tracks combined.
 
@@ -713,51 +1255,462 @@ class Rhythm(object):
 
         intervals = []
 
-        for _, track in self.track_iter():
-            track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=unit)
+        for track in self.get_track_iterator():
+            track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=True)
             intervals.extend(track_intervals)
 
-        histogram = numpy.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
+        histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
         occurrences = histogram[0].tolist()
         bins = histogram[1].tolist()[:-1]
         return occurrences, bins
 
-    def get_track(self, pitch):
+
+class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
+
+    def __init__(
+            self, tracks: tp.Iterable[IPolyphonicRhythm.Track] = tuple(),
+            resolution: int = 0,
+            **kwargs,
+    ):
         """
-        Returns the rhythm track of the instrument on the given pitch or None if there is no track for the given pitch.
+        Creates a new polyphonic rhythm with the given tracks.
 
-        :param pitch: pitch number
-        :return: rhythm track
-        """
-
-        try:
-            return self._tracks[pitch]
-        except KeyError:
-            return None
-
-    def track_iter(self):
-        """
-        Returns an iterator over the tracks, returning both the pitch and the track on each iteration.
-
-        :return: track iterator
+        :param tracks: sequence of tracks
+        :param resolution: the resolution of the given tracks, this parameter is unused if no tracks were given
+        :param kwargs: Post-init keyword arguments. See RhythmBase.post_init.
         """
 
-        return iter(self._tracks.items())
+        super().__init__()
+        self._tracks = OrderedDict()  # type: tp.Dict[str, PolyphonicRhythm.Track]
 
-    def track_count(self):
+        if tracks:
+            if resolution is None:
+                raise TypeError("given tracks without resolution")
+            self.set_tracks(tracks, resolution)
+
+        self.post_init(**kwargs)
+
+    def set_tracks(self, tracks: tp.Iterable[IPolyphonicRhythm.Track], resolution: int) -> None:
         """
-        Returns the number of tracks in this rhythm
+        Sets the tracks and updates the resolution of this rhythm. The given tracks will automatically be parented to
+        this polyphonic rhythm. This method also resets the duration of the rhythm to the position of the last onset
+        in the given tracks.
+
+        :param tracks: iterator yielding PolyphonicRhythm.Track objects
+        :param resolution: resolution of the onsets in the given tracks
+        :return: None
+        """
+
+        tracks_by_name = {}
+
+        for t in tracks:
+            name = t.get_name()
+            if name in tracks_by_name:
+                raise self.EquallyNamedTracksError(name)
+            naming_error = self.__get_track_naming_error__(name)
+            if naming_error:
+                raise self.IllegalTrackName(naming_error)
+            tracks_by_name[name] = t
+            t.set_parent(self)
+
+        # by clearing the old tracks we prevent .set_resolution of rescaling
+        # the onsets of the previous tracks, that we don't need anymore
+        self._tracks.clear()
+        self.set_resolution(resolution)
+        self._tracks = tracks_by_name
+
+        # update duration to position of last note, this works because RhythmBase.set_duration_in_ticks ensures that
+        # the duration is at least the position of the last note
+        self.set_duration_in_ticks(0)
+
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
+    def __get_track_naming_error__(self, track_name: str) -> str:
+        """
+        Override this method for custom track name validation. If this method returns a non-empty string, an
+        IllegalTrackName exception will be thrown while trying to set tracks in set_tracks. The message of the exception
+        will be set to the result of this method.
+
+        :param track_name: track name
+        :return: error message or empty string if the track name is ok
+        """
+
+        return ""
+
+    def get_track_iterator(self) -> tp.Iterator[IPolyphonicRhythm.Track]:
+        """
+        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a PolyphonicRhythm.Track
+        object.
+
+        :return: iterator over this rhythm's tracks yielding PolyphonicRhythm.Track objects
+        """
+
+        return iter(self._tracks.values())
+
+    def get_track_by_name(self, track_name: str) -> tp.Union[IPolyphonicRhythm.Track, None]:
+        """
+        Returns the track with the given name or None if this rhythm has no track with the given name.
+
+        :param track_name: track name
+        :return: Track object or None
+        """
+
+        return self._tracks.get(str(track_name), None)
+
+    def get_track_count(self) -> int:
+        """
+        Returns the number of tracks within this rhythm.
 
         :return: number of tracks
         """
 
         return len(self._tracks)
 
-    def to_midi(self, note_duration=0):  # type: (int) -> midi.Pattern
+    def set_resolution(self, res: int):
         """
-        Convert this rhythm to a MIDI.
+        Sets the resolution of this rhythm and rescales all onsets of all tracks.
 
-        :param note_duration: note duration in ticks
+        :param res: new resolution in ppqn
+        :return: None
+        """
+
+        old_res = self.get_resolution()
+
+        if old_res == res:
+            return
+
+        if res <= 0:
+            raise ValueError("Expected resolution greater than zero but got %i" % res)
+
+        if old_res <= 0:
+            assert self.get_track_count() == 0, "tracks set without resolution"
+
+        # rescale onsets to new resolution
+        for track in self.get_track_iterator():
+            track.__rescale__(old_res, res)
+
+        # updates res property and duration (depends on rescaled onsets)
+        super().set_resolution(res)
+
+    def get_last_onset_tick(self):
+        """
+        Returns the absolute position of the last note in this rhythm or -1 if this rhythm has no tracks or if the
+        tracks are empty.
+
+        :return: tick position of last note or -1 if no tracks or tracks empty
+        """
+
+        try:
+            return max(track.get_last_onset_tick() for track in self.get_track_iterator())
+        except ValueError:
+            return -1
+
+    def get_onset_count(self) -> int:
+        """
+        Returns the combined onset count in all tracks.
+
+        :return: sum of onset count in all tracks
+        """
+
+        return sum(track.get_onset_count() for track in self.get_track_iterator())
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['_tracks']
+        state['__track_onsets_by_name__'] = {}
+        for track in self.get_track_iterator():
+            state['__track_onsets_by_name__'][track.name] = track.onsets
+        return state
+
+    def __setstate__(self, state):
+        state['_tracks'] = {}
+        for track_name, onsets in state['__track_onsets_by_name__'].items():
+            track = PolyphonicRhythm.Track(onsets, track_name, self)
+            state['_tracks'][track.name] = track
+        del state['__track_onsets_by_name__']
+        self.__dict__.update(state)
+
+
+MidiKey = namedtuple("MidiKey", [
+    "pitch",
+    "name",
+    "abbreviation"
+])
+
+
+class MidiMapping(object):
+    """Midi mapping base class"""
+
+    def __init__(self, name: str, keys: tp.Iterable[tp.Union[MidiKey, tp.Tuple[int, str, str]]]):
+        keys = tuple(MidiKey(pitch, name, abbr.lower()) for [pitch, name, abbr] in keys)
+        keys_by_pitch = dict((key.pitch, key) for key in keys)
+        keys_by_name = dict((key.name, key) for key in keys)
+        keys_by_abbreviation = dict((key.abbreviation, key) for key in keys)
+
+        if len(keys_by_pitch) < len(keys):
+            raise ValueError("Keys should have unique pitch values")
+        if len(keys_by_name) < len(keys):
+            raise ValueError("Keys should have unique names")
+        if len(keys_by_abbreviation) < len(keys):
+            raise ValueError("Keys should have unique abbreviations")
+
+        self._name = name
+        self._keys = keys
+        self._keys_by_pitch = keys_by_pitch
+        self._keys_by_name = keys_by_name
+        self._keys_by_abbreviation = keys_by_abbreviation
+
+    def find(self, query: tp.Union[str, int]) -> tp.Union[MidiKey, None]:
+        """
+        Finds a Midi key by either its midi pitch, name or abbreviation.
+
+        :param query: MIDI pitch, name or abbreviation
+        :return: MidiKey namedtuple or None if not found
+        """
+
+        return self.find_by_pitch(query) or self.find_by_name(query) or self.find_by_abbreviation(query)
+
+    def find_by_pitch(self, pitch: int) -> tp.Union[MidiKey, None]:
+        """
+        Finds a Midi key by its pitch.
+
+        :param pitch: midi pitch as an integer
+        :return: MidiKey namedtuple or None if not found
+        """
+
+        return self._keys_by_pitch.get(pitch, None)
+
+    def find_by_name(self, name: str) -> tp.Union[MidiKey, None]:
+        """
+        Finds a Midi key by its name.
+
+        :param name: key name
+        :return: MidiKey namedtuple or None if not found
+        """
+
+        return self._keys_by_name.get(name, None)
+
+    def find_by_abbreviation(self, abbreviation: str) -> tp.Union[MidiKey, None]:
+        """
+        Finds a Midi key by its abbreviation.
+
+        :param abbreviation: key abbreviation
+        :return: MidiKey namedtuple or None if not found
+        """
+
+        return self._keys_by_abbreviation.get(abbreviation.lower(), None)
+
+    @property
+    def keys(self) -> tp.Tuple[MidiKey, ...]:
+        """
+        A tuple containing all the Midi keys of this mapping. This property is read-only.
+
+        :return: tuple containing all the Midi keys of this mapping
+        """
+
+        return self._keys
+
+    @property
+    def name(self) -> str:
+        """
+        The name of this mapping. This property is read-only.
+
+        :return: name of this mapping
+        """
+
+        return self._name
+
+
+GMDrumMapping = MidiMapping("GMDrumMapping", [
+    (35, "Acoustic bass drum", "abd"),
+    (36, "Bass drum 1", "bd1"),
+    (37, "Side stick", "sst"),
+    (38, "Acoustic snare", "asn"),
+    (39, "Hand clap", "hcl"),
+    (40, "Electric snare", "esn"),
+    (41, "Low floor tom", "lft"),
+    (42, "Closed hi-hat", "chh"),
+    (43, "High floor tom", "hft"),
+    (44, "Pedal hi-hat", "phh"),
+    (45, "Low tom", "ltm"),
+    (46, "Open hi-hat", "ohh"),
+    (47, "Low mid tom", "lmt"),
+    (48, "High mid tom", "hmt"),
+    (49, "Crash cymbal 1", "cr1"),
+    (50, "High tom", "htm"),
+    (51, "Ride cymbal 1", "rc1"),
+    (52, "Chinese cymbal", "chc"),
+    (53, "Ride bell", "rbl"),
+    (54, "Tambourine", "tmb"),
+    (55, "Splash cymbal", "spl"),
+    (56, "Cowbell", "cwb"),
+    (57, "Crash cymbal 2", "cr2"),
+    (58, "Vibraslap", "vbs"),
+    (59, "Ride cymbal 2", "rc2"),
+    (60, "Hi bongo", "hbg"),
+    (61, "Low bongo", "lbg"),
+    (62, "Muted high conga", "mhc"),
+    (63, "Open high conga", "ohc"),
+    (64, "Low conga", "lcn"),
+    (65, "High timbale", "htb"),
+    (66, "Low timbale", "ltb"),
+    (67, "High agogo", "hgo"),
+    (68, "Low agogo", "lgo"),
+    (69, "Cabasa", "cbs"),
+    (70, "Maracas", "mcs"),
+    (71, "Short whistle", "swh"),
+    (72, "Long whistle", "lwh"),
+    (73, "Short guiro", "sgr"),
+    (74, "Long guiro", "lgr"),
+    (75, "Claves", "clv"),
+    (76, "Hi wood block", "hwb"),
+    (77, "Low wood block", "lwb"),
+    (78, "Muted cuica", "mcu"),
+    (79, "Open cuica", "ocu"),
+    (80, "Muted triangle", "mtr"),
+    (81, "Open triangle", "otr")
+])
+
+
+class RhythmLoop(PolyphonicRhythm):
+    """Rhythm loop with a name and duration always snapped to a downbeat"""
+
+    def __init__(self, name: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self._name = ""
+        self.set_name(name)
+
+    def set_duration_in_ticks(self, requested_duration):
+        """
+        Sets the duration in ticks to the first downbeat after the given duration position. The actual duration will
+        be always greater than the requested duration unless the requested duration lays exactly on a downbeat or if
+        the requested duration is less than the position of the last note within this rhythm.
+
+        Note: If no time signature has been set, this method has no clue where the downbeat is and the requested
+        duration will be set without snapping to the downbeat. As soon as the time signature is set, the duration will
+        be updated.
+
+        :param requested_duration: requested duration
+        :return: the actual new duration. Unless the requested duration lays exactly on a downbeat and it lays behind
+                 the position of the last note, this will always be greater than the requested duration
+        """
+
+        if self.get_track_count() == 0:
+            return
+
+        if not self.get_time_signature():
+            # set duration freely if there is no time signature set (duration will be updated as soon as the time
+            # signature is set)
+            return super().set_duration_in_ticks(requested_duration)
+
+        measure_duration = self.get_measure_duration("ticks")
+        n_measures = int(math.ceil(requested_duration / measure_duration))
+        t_next_downbeat = n_measures * measure_duration
+        assert t_next_downbeat >= requested_duration
+
+        # adjust the duration and check if it was a success
+        actual_duration = super().set_duration_in_ticks(round(n_measures * measure_duration))
+
+        # If the actual duration was not the requested one this means that the requested duration was less than the
+        # position of the last onset in this rhythm. We know that the actual duration is legal, that all durations
+        # greater than that will also be legal and that this method only rounds measures up (not down). So, try again,
+        # effectively setting the duration to the first downbeat after the last note
+        if actual_duration != t_next_downbeat:
+            return self.set_duration_in_ticks(actual_duration)
+
+        return actual_duration
+
+    @IRhythm.Precondition.needs_time_signature
+    def set_tracks(self, tracks: tp.Iterable[PolyphonicRhythm.Track], resolution: int) -> None:
+        super().set_tracks(tracks, resolution)
+
+    def set_time_signature(self, time_signature: tp.Union[TimeSignature,
+                                                          tp.Tuple[int, int],
+                                                          tp.Sequence[int], None]) -> None:
+        """
+        Sets the time signature of this rhythm loop and updates the duration if necessary to set the duration to a
+        downbeat.
+
+        :param time_signature: new time signature
+        :return: None
+        """
+
+        if self.get_track_count() and not time_signature:
+            raise Exception("Can't remove time signature from non-empty rhythm loop")
+
+        super().set_time_signature(time_signature)
+
+        if self.get_track_count():
+            # update duration (snap to downbeat) if tracks have already been set
+            self.set_duration_in_ticks(self.get_duration_in_ticks())
+
+    def set_name(self, name: str) -> None:
+        """
+        Sets the name of this loop.
+
+        :param name: name of the loop
+        :return: None
+        """
+
+        self._name = str(name)
+
+    def get_name(self) -> str:
+        """
+        Returns the name of this loop.
+
+        :return: name of the loop
+        """
+
+        return self._name
+
+    @property
+    def name(self) -> str:
+        """See RhythmLoop.set_name and RhythmLoop.get_name"""
+        return self.get_name()
+
+    @name.setter
+    def name(self, name: str) -> None:
+        self.set_name(name)
+
+
+class MidiRhythm(RhythmLoop):
+    def __init__(self, midi_file: tp.Union[IOBase, str] = "",
+                 midi_pattern: midi.Pattern = None,
+                 midi_mapping: MidiMapping = GMDrumMapping,
+                 name: str = "", preserve_midi_duration: bool = False, **kwargs):
+        super().__init__(**kwargs)
+
+        if all(a for a in [midi_file, midi_pattern]):
+            raise Exception("Given both midi file and midi pattern. Please provide one max one.")
+
+        if midi_file:
+            try:
+                if isinstance(midi_file, str):
+                    midi_file = open(midi_file, "rb")
+                midi_pattern = midi.read_midifile(midi_file)
+            finally:
+                midi_file.close()
+            name = name or os.path.splitext(os.path.basename(midi_file.name))[0]
+
+        self.set_name(name)
+        self._midi_mapping = midi_mapping  # type: MidiMapping
+        self._midi_metronome = -1  # type: int
+
+        # loads the tracks and sets the bpm, time signature, midi metronome and resolution
+        if midi_pattern:
+            self._load(midi_pattern, preserve_midi_duration)
+
+    @property
+    def midi_mapping(self):
+        return self._midi_mapping
+
+    def as_midi_pattern(self, note_length: int = 0, midi_channel: int = 9,
+                        midi_format: int = 0) -> midi.Pattern:
+        """
+        Converts this rhythm to a MIDI pattern.
+
+        :param note_length: note duration in ticks
+        :param midi_channel: NoteOn/NoteOff events channel (defaults to 9, which is the default for drum sounds)
+        :param midi_format: midi format
         :return: MIDI pattern
         """
 
@@ -769,15 +1722,17 @@ class Rhythm(object):
         midi_track.append(midi.SetTempoEvent(bpm=self._bpm))  # tempo
 
         # add note events
-        for pitch, track in self._tracks.items():
-            pitch = int(pitch)
+        for track in self.get_track_iterator():
+            midi_note = self._midi_mapping.find_by_abbreviation(track.name)
+            assert midi_note is not None  # if track has invalid midi note abbreviation set_track would have failed
+            pitch = midi_note.pitch
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]
                 velocity = onset[1]
                 # channel 9 for drums
-                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch, velocity=velocity, channel=9)
-                note_off = midi.NoteOffEvent(tick=note_abs_tick + note_duration, pitch=pitch, channel=9)
+                note_on = midi.NoteOnEvent(tick=note_abs_tick, pitch=pitch, velocity=velocity, channel=midi_channel)
+                note_off = midi.NoteOffEvent(tick=note_abs_tick + note_length, pitch=pitch, channel=midi_channel)
                 midi_track.extend([note_on, note_off])
 
         # sort the events in chronological order and convert to relative delta-time
@@ -790,61 +1745,66 @@ class Rhythm(object):
         # save the midi file
         return midi.Pattern(
             [midi_track],
-            format=0,
+            format=midi_format,
             resolution=self.get_resolution()
         )
 
-    @staticmethod
-    def create_from_midi(pattern, path=None, name=None, resolution=240, end_on_eot_event=False):
+    def write_midi_out(self, midi_file: tp.Union[str, IOBase], **kwargs):
         """
-        Constructs a new rhythm from a MIDI file.
+        Writes this rhythm loop as a MIDI file.
 
-        :param pattern: midi pattern
-        :param path: midi source file or None
-        :param name: rhythm name or None (defaults to file basename without extension or an empty string)
-        :param resolution: resolution to the rescale the rhythm to in pulses per quarter note
-        :param end_on_eot_event: when true, the duration of the rhythms is set according to the last EOT (End Of Track)
-                                 MIDI event, otherwise it is set based on the last note.
-        :return: Rhythm object
+        :param midi_file: midi file or path
+        :param kwargs: arguments passed to as_midi_pattern, see documentation of that method
+        :return: None
         """
 
+        midi_pattern = self.as_midi_pattern(**kwargs)
+        midi.write_midifile(midi_file, midi_pattern)
+
+    def __get_track_naming_error__(self, track_name: str) -> str:
+        """
+        Checks if the given track name is a valid MidiKey abbreviation according to this loop's midi mapping.
+
+        :param track_name: track name to check
+        :return: a message telling that the track name is not a valid abbreviation or an empty string if the track name
+                 is ok
+        """
+
+        mapping = self._midi_mapping
+        if mapping.find_by_abbreviation(track_name):
+            return ""
+        return "No midi key found with abbreviation \"%s\" in %s" % (track_name, mapping.name)
+
+    # TODO somehow expose this functionality so that you can create empty rhythm and afterwards load-in
+    # the tracks from a midi pattern
+    def _load(self, pattern: midi.Pattern, preserve_midi_duration: bool) -> None:
+        mapping = self._midi_mapping
         n_tracks_containing_note_events = sum(any(isinstance(e, midi.NoteEvent) for e in track) for track in pattern)
 
         if n_tracks_containing_note_events > 1:
-            raise ValueError("This MIDI pattern has multiple tracks with note events (%i)",
+            raise ValueError("Given MIDI pattern has multiple tracks with note events (%i)",
                              n_tracks_containing_note_events)
 
         pattern.make_ticks_abs()
         track = list(itertools.chain(*pattern))  # merge all tracks into one
         track = midi.Track(sorted(track, key=lambda event: event.tick))  # sort in chronological order
 
-        if name is None:
-            if path is not None:
-                name = os.path.splitext(os.path.basename(path))[0]
-            else:
-                name = ""
-
-        args = {
-            'name': name,
-            'bpm': 120,
-            'time_signature': None,
-            'midi_metronome': None,
-            'data': {},
-            'duration': 0,
-            'data_ppq': pattern.resolution,
-            'rescale_to_ppq': resolution,
-            'midi_file_path': path or ""
-        }
-
-        ts_midi_event = None  # time signature MIDI event
+        bpm = 0               # type: tp.Union[float]
+        track_data = {}       # type: tp.Dict[MidiKey, tp.List[tp.Tuple[int, int], ...]]
+        ts_midi_event = None  # type: tp.Union[midi.TimeSignatureEvent, None]
+        ts_eot_event = None   # type: tp.Union[midi.EndOfTrackEvent, None]
 
         for msg in track:
             if isinstance(msg, midi.NoteOnEvent):
-                midi_key = str(msg.get_pitch())
-                if midi_key not in args['data']:
-                    args['data'][midi_key] = []
+                midi_pitch = msg.get_pitch()  # type: int
+                midi_key = mapping.find_by_pitch(midi_pitch)
+                if midi_key not in track_data:
+                    if midi_key is None:
+                        print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.name))
+                        continue
+                    track_data[midi_key] = []
                 onset = (msg.tick, msg.get_velocity())
-                args['data'][midi_key].append(onset)
+                track_data[midi_key].append(onset)
             elif isinstance(msg, midi.TimeSignatureEvent):
                 if ts_midi_event is None:
                     ts_midi_event = msg
@@ -852,68 +1812,52 @@ class Rhythm(object):
                     raise ValueError("Time signature changes are "
                                      "not supported (from %s to %s)" % (ts_midi_event, msg))
             elif isinstance(msg, midi.SetTempoEvent):
-                args['bpm'] = msg.get_bpm()
+                bpm = float(msg.get_bpm())
             elif isinstance(msg, midi.EndOfTrackEvent):
-                args['duration'] = max(msg.tick, args['duration'])
+                ts_eot_event = msg
+                break
 
         if ts_midi_event is None:
-            raise ValueError("No time signature found in '%s'" % path)
+            raise ValueError("Given pattern contains no time signature")
 
-        try:
-            args['time_signature'] = TimeSignature.from_midi_event(ts_midi_event)
-            args['midi_metronome'] = ts_midi_event.get_metronome()
-        except ValueError:
-            raise ValueError("No time signature MIDI event")
+        time_signature = TimeSignature.from_midi_event(ts_midi_event)
+        midi_metronome = ts_midi_event.get_metronome()  # type: int
+        track_generator = (self.Track(onsets, key.abbreviation) for key, onsets in track_data.items())
 
-        if not end_on_eot_event:
-            args.pop('duration', 0)
+        self._midi_metronome = midi_metronome
+        self.set_time_signature(time_signature)
+        self.set_bpm(bpm)
+        self.set_tracks(track_generator, pattern.resolution)
 
-        return Rhythm(**args)
-
-    @concretize_unit()
-    def get_last_onset_time(self, unit='ticks'):
-        last_onset_tick = 0
-        for onsets in [track.onsets for track in self._tracks.values()]:
-            last_onset_tick = max(onsets[-1][0], last_onset_tick)
-        return convert_time(last_onset_tick, self._ppq, unit)
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        del state['_tracks']
-        state['__track_onsets__'] = {}
-        for pitch, track in self._tracks.items():
-            state['__track_onsets__'][pitch] = track.onsets
-        return state
-
-    def __setstate__(self, state):
-        state['_tracks'] = {}
-        for pitch, onsets in state['__track_onsets__'].items():
-            state['_tracks'][pitch] = Rhythm.Track(onsets, self)
-        del state['__track_onsets__']
-        self.__dict__.update(state)
+        if preserve_midi_duration:
+            ts_eot_event.tick()
 
 
 class DistanceMeasure(object):
+    """Abstract base class for distance measures"""
+
     def get_distance(self, obj_a, obj_b):
         raise NotImplementedError
 
 
-class TrackDistanceMeasure(DistanceMeasure):
-    """
-    Distance measure for rhythm tracks (a single instrument of a rhythm).
+class MonophonicRhythmDistanceMeasure(DistanceMeasure):
+    """Abstract base class for monophonic rhythm distance measures
+
+    This is an abstract base class for monophonic rhythm distance measures. It measures the distance
+    between two MonophonicRhythm objects.
     """
 
     LENGTH_POLICIES = ['exact', 'multiple', 'fill']
 
     class UnknownLengthPolicy(Exception):
         def __init__(self, given_length_policy):
-            super(TrackDistanceMeasure.UnknownLengthPolicy, self).__init__(
+            super(MonophonicRhythmDistanceMeasure.UnknownLengthPolicy, self).__init__(
                 "Given %s, please choose between: %s" % (
-                    given_length_policy, TrackDistanceMeasure.LENGTH_POLICIES))
+                    given_length_policy, MonophonicRhythmDistanceMeasure.LENGTH_POLICIES))
 
     def __init__(self, unit, length_policy):
         """
-        Creates a new track distance measure.
+        Creates a new monophonic rhythm distance measure.
 
         :param unit: see internal_unit property
         :param length_policy: see documentation on length_policy property
@@ -930,25 +1874,25 @@ class TrackDistanceMeasure(DistanceMeasure):
     @property
     def length_policy(self):
         """
-        The length policy determines how permissive the track similarity measure is with variable sized track vector
-        (N = onset count) or chain (N = duration) representations. Given two track representations X and Y, the length
-        policy should be one of:
+        The length policy determines how permissive the monophonic rhythm similarity measure is with variable sized
+        rhythm vector (N = onset count) or chain (N = duration) representations. Given two rhythm representations X and
+        Y, the length policy should be one of:
 
             'exact': len(X) must equal len(Y)
             'multiple': len(X) must be a multiple of len(Y) or vice-versa
             'fill': len(X) and len(Y) must not be empty
 
-        Implementations of TrackSimilarityMeasure.get_distance will throw a ValueError if the representations of the
-        given track do not meet the requirements according to the length policy.
+        Implementations of MonophonicRhythmDistanceMeasure.get_distance will throw a ValueError if the representations
+        of the given rhythm do not meet the requirements according to the length policy.
         """
 
         return self._len_policy
 
     @length_policy.setter
     def length_policy(self, length_policy):
-        valid_policies = TrackDistanceMeasure.LENGTH_POLICIES
+        valid_policies = MonophonicRhythmDistanceMeasure.LENGTH_POLICIES
         if length_policy not in valid_policies:
-            raise TrackDistanceMeasure.UnknownLengthPolicy(length_policy)
+            raise MonophonicRhythmDistanceMeasure.UnknownLengthPolicy(length_policy)
         self._len_policy = length_policy
 
     @property
@@ -981,69 +1925,69 @@ class TrackDistanceMeasure(DistanceMeasure):
             convert_time(1, 1, output_unit)
         self._output_unit = output_unit
 
-    def get_distance(self, track_a, track_b):
+    def get_distance(self, rhythm_a: IMonophonicRhythm, rhythm_b: IMonophonicRhythm):
         """
         Returns the distance between the given tracks.
 
-        :param track_a: track to compare to track b
-        :param track_b: track to compare to track a
-        :return: distance between the given tracks
+        :param rhythm_a: monophonic rhythm to compare to monophonic rhythm b
+        :param rhythm_b: monophonic rhythm to compare to monophonic rhythm a
+        :return: distance between the given monophonic rhythms
         """
 
         internal_unit_in_ticks = self._internal_unit == 'ticks'
         output_unit_in_ticks = self._output_unit == 'ticks'
-        res_a, res_b = track_a.get_resolution(), track_b.get_resolution()
+        res_a, res_b = rhythm_a.get_resolution(), rhythm_b.get_resolution()
         if (internal_unit_in_ticks or output_unit_in_ticks) and res_a != res_b:
-            raise ValueError("%s unit set to 'ticks', but given tracks have "
+            raise ValueError("%s unit set to 'ticks', but given rhythms have "
                              "different resolutions (%i != %i)" %
                              ("Internal" if internal_unit_in_ticks else "Output", res_a, res_b))
         internal_unit = res_a if internal_unit_in_ticks else self._internal_unit
         output_unit = res_a if output_unit_in_ticks else self._output_unit
 
-        tracks = [track_a, track_b]
-        iterables = [self.__get_iterable__(t, internal_unit) for t in tracks]
-        cookies = [self.__get_cookie__(t, internal_unit) for t in tracks]
+        rhythms = [rhythm_a, rhythm_b]
+        iterables = [self.__get_iterable__(t, internal_unit) for t in rhythms]
+        cookies = [self.__get_cookie__(t, internal_unit) for t in rhythms]
         max_len = self._check_if_iterables_meet_len_policy(*iterables)
         distance = self.__compute_distance__(max_len, *(iterables + cookies))
         return convert_time(distance, internal_unit, output_unit, quantize=False)
 
-    def __get_iterable__(self, track, unit):
+    def __get_iterable__(self, rhythm: IMonophonicRhythm, unit):
         """
-        Should prepare and return the track representation on which the similarity measure is based. The returned
-        vectors will be length policy checked.
+        Should prepare and return the rhythm representation on which the similarity measure is based. The returned
+        vector's will be length policy checked.
 
-        :param track: the track
+        :param rhythm: the monophonic rhythm
         :param unit: the representation should be in the given unit
-        :return: desired track representation to use in __compute_distance__
+        :return: desired rhythm representation to use in __compute_distance__
         """
 
         raise NotImplementedError
 
     # noinspection PyMethodMayBeStatic
-    def __get_cookie__(self, track, unit):
+    def __get_cookie__(self, rhythm: IMonophonicRhythm, unit):
         """
-        The result of this method will be passed to __compute_distance__, both for track a and track b. By default,
-        the cookie is the track itself.
+        The result of this method will be passed to __compute_distance__, both for rhythm a and rhythm b. By default,
+        the cookie is the rhythm itself.
 
-        :param track: the track
+        :param rhythm: the monophonic rhythm
         :param unit: the unit given to __get_iterable__
         :return: cookie to use in __compute_distance__
         """
 
-        return track
+        return rhythm
 
     def __compute_distance__(self, max_len, iterable_a, iterable_b, cookie_a, cookie_b):
         """
-        The result of this method is returned by get_distance. If that method is given two tracks a and b, this method
+        The result of this method is returned by get_distance. If that method is given two rhythms a and b, this method
         is given both the iterables of a and b and the cookies of a and b, returned by respectively __get_iterable__
         and __get_cookie__.
 
         :param max_len: max(len(iterable_a), len(iterable_b))
-        :param iterable_a: the result of __get_iterable__, given track a
-        :param iterable_b: the result of __get_iterable__, given track b
-        :param cookie_a: the result of __get_cookie__, given track a
-        :param cookie_b: the result of __get_cookie__, given track b
-        :return: the distance between track a and b
+        :param iterable_a: the result of __get_iterable__, given rhythm a
+        :param iterable_b: the result of __get_iterable__, given rhythm b
+        :param cookie_a: the result of __get_cookie__, given rhythm a
+        :param cookie_b: the result of __get_cookie__, given rhythm b
+        :return: the distance between rhythm a and b
         """
 
         raise NotImplementedError
@@ -1069,30 +2013,31 @@ class TrackDistanceMeasure(DistanceMeasure):
 
         return max(l)
 
-    __measures__ = {}  # track distance implementations by __friendly_name__
+    __measures__ = {}  # monophonic rhythm distance implementations by __friendly_name__
 
     @classmethod
     def get_measures(cls, friendly_name=True):
         """
-        Returns an ordered dictionary containing implementations of TrackDistanceMeasure by name.
+        Returns an ordered dictionary containing implementations of MonophonicRhythmDistanceMeasure by name.
 
         :param friendly_name: when True, the name will be retrieved with __friendly_name__ instead of __name__
-        :return: an ordered dictionary containing all subclasses of TrackDistanceMeasure by name
+        :return: an ordered dictionary containing all subclasses of MonophonicRhythmDistanceMeasure by name
         """
 
-        if len(TrackDistanceMeasure.__measures__) != TrackDistanceMeasure.__subclasses__():
+        if len(MonophonicRhythmDistanceMeasure.__measures__) != MonophonicRhythmDistanceMeasure.__subclasses__():
             measures = OrderedDict()
             for tdm in cls.__subclasses__():
                 name = tdm.__name__
                 if friendly_name:
                     try:
+                        # noinspection PyUnresolvedReferences
                         name = tdm.__friendly_name__
                     except AttributeError:
                         pass
                 measures[name] = tdm
             cls.__measures__ = measures
 
-        return TrackDistanceMeasure.__measures__
+        return MonophonicRhythmDistanceMeasure.__measures__
 
     @classmethod
     def get_measure_names(cls):
@@ -1122,7 +2067,7 @@ class Quantizable(object):
 
 
 @friendly_named_class("Hamming distance")
-class HammingDistanceMeasure(TrackDistanceMeasure):
+class HammingDistanceMeasure(MonophonicRhythmDistanceMeasure):
     """
     The hamming distance is based on the binary chains of the rhythms. The hamming distance is the sum of indexes
     where the binary rhythm chains do not match. The hamming distance is always an integer.
@@ -1131,8 +2076,8 @@ class HammingDistanceMeasure(TrackDistanceMeasure):
     def __init__(self, unit='eighths', length_policy='multiple'):
         super(HammingDistanceMeasure, self).__init__(unit, length_policy)
 
-    def __get_iterable__(self, track, unit):
-        return track.get_binary(unit)
+    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+        return rhythm.get_binary(unit)
 
     def __compute_distance__(self, n, cx, cy, *cookies):  # cx = (binary) chain x
         hamming_distance, i = 0, 0
@@ -1145,7 +2090,7 @@ class HammingDistanceMeasure(TrackDistanceMeasure):
 
 
 @friendly_named_class("Euclidean interval vector distance")
-class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure, Quantizable):
+class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     """
     The euclidean interval vector distance is the euclidean distance between the inter-onset vectors of the rhythms.
     """
@@ -1154,8 +2099,8 @@ class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure, Quantizable):
         super(EuclideanIntervalVectorDistanceMeasure, self).__init__(unit, length_policy)
         self.quantize_enabled = quantize
 
-    def __get_iterable__(self, track, unit):
-        return track.get_post_note_inter_onset_intervals(unit, self.quantize_enabled)
+    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+        return rhythm.get_post_note_inter_onset_intervals(unit, self.quantize_enabled)
 
     def __compute_distance__(self, n, vx, vy, *cookies):
         sum_squared_dt, i = 0, 0
@@ -1167,7 +2112,7 @@ class EuclideanIntervalVectorDistanceMeasure(TrackDistanceMeasure, Quantizable):
 
 
 @friendly_named_class("Interval difference vector distance")
-class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure, Quantizable):
+class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     """
     The interval difference vector distance is based on the interval difference vectors of the rhythms.
     """
@@ -1177,8 +2122,8 @@ class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure, Quantizable)
         self.quantize_enabled = quantize
         self.cyclic = cyclic
 
-    def __get_iterable__(self, track, unit):
-        return track.get_interval_difference_vector(self.cyclic, unit, self.quantize_enabled)
+    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+        return rhythm.get_interval_difference_vector(self.cyclic, unit, self.quantize_enabled)
 
     def __compute_distance__(self, n, vx, vy, *cookies):
         summed_fractions, i = 0, 0
@@ -1195,10 +2140,10 @@ class IntervalDifferenceVectorDistanceMeasure(TrackDistanceMeasure, Quantizable)
 
 
 @friendly_named_class("Swap distance")
-class SwapDistanceMeasure(TrackDistanceMeasure, Quantizable):
+class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     """
-    The swap distance is the minimal number of swap operations required to transform one track to another track. A swap
-    is an interchange of a one and a zero that are adjacent to each other in the binary representations of the rhythms.
+    The swap distance is the minimal number of swap operations required to transform one rhythm to another. A swap is an
+    interchange of a one and a zero that are adjacent to each other in the binary representations of the rhythms.
 
     Although the concept of the swap distance is based on the rhythm's binary chain, this implementation uses the
     absolute onset times of the onsets. This makes it possible to work with floating point swap operations (0.x swap
@@ -1209,11 +2154,11 @@ class SwapDistanceMeasure(TrackDistanceMeasure, Quantizable):
         super(SwapDistanceMeasure, self).__init__(unit, length_policy)
         self.quantize_enabled = quantize
 
-    def __get_iterable__(self, track, unit):
-        return track.get_onset_times(unit, self.quantize_enabled)
+    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+        return rhythm.get_onset_times(unit, self.quantize_enabled)
 
-    def __get_cookie__(self, track, unit):
-        return int(math.ceil(track.rhythm.get_duration(unit)))
+    def __get_cookie__(self, rhythm: MonophonicRhythm, unit):
+        return int(math.ceil(rhythm.get_duration(unit)))
 
     def __compute_distance__(self, n, vx, vy, dur_x, dur_y):
         swap_distance, i, x_offset, y_offset = 0, 0, 0, 0
@@ -1228,7 +2173,7 @@ class SwapDistanceMeasure(TrackDistanceMeasure, Quantizable):
 
 
 @friendly_named_class("Chronotonic distance")
-class ChronotonicDistanceMeasure(TrackDistanceMeasure):
+class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
     """
     The chronotonic distance is the area difference (aka measure K) of the rhythm's chronotonic chains.
     """
@@ -1236,8 +2181,8 @@ class ChronotonicDistanceMeasure(TrackDistanceMeasure):
     def __init__(self, unit='eighths', length_policy='multiple'):
         super(ChronotonicDistanceMeasure, self).__init__(unit, length_policy)
 
-    def __get_iterable__(self, track, unit):
-        return track.get_chronotonic_chain(unit)
+    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+        return rhythm.get_chronotonic_chain(unit)
 
     def __compute_distance__(self, n, cx, cy, *args):
         chronotonic_distance, i = 0, 0
@@ -1253,9 +2198,9 @@ class ChronotonicDistanceMeasure(TrackDistanceMeasure):
 TRACK_WILDCARDS = ["*", "a*", "b*"]  # NOTE: Don't change the wildcard order or the code will break
 
 
-def rhythm_pair_track_iterator(rhythm_a, rhythm_b, tracks):
-    # type: (Rhythm, Rhythm, Union[str, Iterable[Any]]) -> Tuple[Any, Tuple[Rhythm.Track, Rhythm.Track]]
-
+def rhythm_pair_track_iterator(rhythm_a: IPolyphonicRhythm,
+                               rhythm_b: IPolyphonicRhythm,
+                               tracks: tp.Union[str, tp.Iterable[tp.Any]]):
     """
     Returns an iterator over the tracks of the given rhythms. Each iteration yields a track name and a pair of tracks
     with that track name; rhythm_a.get_track(name) and rhythm_b.get_track(name). This is yielded as a tuple:
@@ -1286,70 +2231,89 @@ def rhythm_pair_track_iterator(rhythm_a, rhythm_b, tracks):
             raise ValueError("Excepted an iterable or "
                              "one of %s but got %s" % (TRACK_WILDCARDS, tracks))
 
-    it_a, it_b = rhythm_a.track_iter(), rhythm_b.track_iter()
+    it_a, it_b = rhythm_a.get_track_iterator(), rhythm_b.get_track_iterator()
 
     if wildcard_index == -1:  # if given specific tracks
         for track_name in tracks:
-            track_a = rhythm_a.get_track(track_name)
-            track_b = rhythm_b.get_track(track_name)
+            track_a = rhythm_a.get_track_by_name(track_name)
+            track_b = rhythm_b.get_track_by_name(track_name)
             yield (track_name, (track_a, track_b))
 
     elif wildcard_index == 0:  # if '*' wildcard
         names = set()
-        for name, track_a in it_a:
+        for track_a in it_a:
+            name = track_a.name
             names.add(name)
-            track_b = rhythm_b.get_track(name)
+            track_b = rhythm_b.get_track_by_name(name)
             names.add(name)
             yield (name, (track_a, track_b))
-        for name, track_b in it_b:
+        for track_b in it_b:
+            name = track_b.name
             if name in names:
                 continue
-            track_a = rhythm_a.get_track(name)
+            track_a = rhythm_a.get_track_by_name(name)
             yield (name, (track_a, track_b))
 
     elif wildcard_index == 1:  # if wildcard 'a*'
-        for name, track_a in it_a:
-            track_b = rhythm_b.get_track(name)
+        for track_a in it_a:
+            name = track_a.name
+            track_b = rhythm_b.get_track_by_name(name)
             yield (name, (track_a, track_b))
 
     elif wildcard_index == 2:  # if wildcard 'b*'
-        for name, track_b in it_b:
-            track_a = rhythm_a.get_track(name)
+        for track_b in it_b:
+            name = track_b.name
+            track_a = rhythm_a.get_track_by_name(name)
             yield (name, (track_a, track_b))
 
     else:
         assert False
 
 
-class RhythmDistanceMeasure(DistanceMeasure):
+class PolyphonicRhythmDistanceMeasure(DistanceMeasure):
+    """Abstract base class for polyphonic rhythm distance measures
+
+    This is an abstract base class for polyphonic rhythm distance measures. It measures the distance
+    between two Rhythm objects.
+    """
+
+    def get_distance(self, rhythm_a: IPolyphonicRhythm, rhythm_b: IPolyphonicRhythm) -> tp.Union[float, int]:
+        raise NotImplementedError
+
+
+class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
     def __init__(self, track_distance_measure=HammingDistanceMeasure, tracks='a*', normalize=True):
-        # type: (Union[TrackDistanceMeasure, type], Union[str, Iterable[Any]]) -> None
+        # type: (tp.Union[MonophonicRhythmDistanceMeasure, type], tp.Union[str, tp.Iterable[tp.Any]]) -> None
         self._tracks = []
         self.tracks = tracks
         self._track_distance_measure = None
-        self.track_distance_measure = track_distance_measure
+        self.monophonic_measure = track_distance_measure
         self.normalize = normalize
 
     @property
-    def track_distance_measure(self):  # type: () -> TrackDistanceMeasure
+    def monophonic_measure(self):  # type: () -> MonophonicRhythmDistanceMeasure
         """
-        The distance measure used to compute the distance between the rhythm tracks; an instance of TrackDistanceMeasure.
+        The distance measure used to compute the distance between the rhythm tracks; an instance of
+        MonophonicRhythmDistanceMeasure.
         """
 
         return self._track_distance_measure
 
-    @track_distance_measure.setter
-    def track_distance_measure(self, track_distance_measure):
+    @monophonic_measure.setter
+    def monophonic_measure(
+            self,
+            track_distance_measure: tp.Union[MonophonicRhythmDistanceMeasure, tp.Type[MonophonicRhythmDistanceMeasure]]
+    ):
         """
-        Setter for the track distance measure. This should be either a TrackDistanceMeasure subclass or instance. When
-        given a class, the measure will be initialized with no arguments.
+        Setter for the track distance measure. This should be either a MonophonicRhythmDistanceMeasure subclass or
+        instance. When given a class, the measure will be initialized with no arguments.
         """
 
         if inspect.isclass(track_distance_measure) and \
-                issubclass(track_distance_measure, TrackDistanceMeasure):
+                issubclass(track_distance_measure, MonophonicRhythmDistanceMeasure):
             track_distance_measure = track_distance_measure()
-        elif not isinstance(track_distance_measure, TrackDistanceMeasure):
-            raise ValueError("Expected a TrackDistanceMeasure subclass or "
+        elif not isinstance(track_distance_measure, MonophonicRhythmDistanceMeasure):
+            raise ValueError("Expected a MonophonicRhythmDistanceMeasure subclass or "
                              "instance, but got '%s'" % track_distance_measure)
         self._track_distance_measure = track_distance_measure
 
@@ -1379,7 +2343,7 @@ class RhythmDistanceMeasure(DistanceMeasure):
         :return: the average track distance of the two rhythms
         """
 
-        measure = self.track_distance_measure
+        measure = self.monophonic_measure
         unit = measure.output_unit
         duration = max(rhythm_a.get_duration(unit), rhythm_b.get_duration(unit))
         n_tracks, total_distance = 0, 0
@@ -1398,17 +2362,15 @@ class RhythmDistanceMeasure(DistanceMeasure):
         return average_distance / duration if self.normalize else average_distance
 
 
-def create_rumba_rhythm(resolution=240, track=38, bpm=120):
+def create_rumba_rhythm(resolution=240):
     """
     Utility function that creates a one-bar rumba rhythm.
 
     :param resolution: rhythm resolution
-    :param track: which track to place the rumba pattern on
-    :param bpm: rhythm tempo in beats per minute
     :return: rumba rhythm
     """
 
-    onset_data = {track: ((0, 127), (3, 127), (7, 127), (10, 127), (12, 127))}
-    rhythm = Rhythm("<Dummy: Rumba>", bpm, TimeSignature(4, 4), onset_data, 4, 16)
+    track = PolyphonicRhythm.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)), "main_track")
+    rhythm = PolyphonicRhythm([track], 4, time_signature=(4, 4))
     rhythm.set_resolution(resolution)
     return rhythm

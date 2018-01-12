@@ -1,8 +1,11 @@
 import math
+from functools import wraps
+
 import matplotlib.pyplot as plt
 from matplotlib import colors
 import numpy as np
-from beatsearch.data.rhythm import concretize_unit, Unit, Rhythm
+import typing as tp
+from beatsearch.data.rhythm import concretize_unit, Unit, RhythmLoop, PolyphonicRhythm, IRhythm as Rhythm
 from beatsearch.utils import merge_dicts
 from itertools import cycle
 
@@ -14,7 +17,7 @@ rcParams.update({'figure.autolayout': True})
 # noinspection PyPep8Naming
 class plot(object):
     """
-    Decorator for RhythmPlotter plotting methods.
+    Decorator for RhythmLoopPlotter plotting methods.
     """
 
     # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
@@ -28,10 +31,11 @@ class plot(object):
         self._f_fill_subplot = None
         self._f_setup_subplot = None
         self._rhythm_plotter = None
+        self.draw = None  # type: tp.Union[tp.Callable, None]
 
     class Descriptor(object):
         """
-        This class provides the 'plot' decorator of a handle to the RhythmPlotter instance and it enables sets the
+        This class provides the 'plot' decorator of a handle to the RhythmLoopPlotter instance and it enables sets the
         function pointer to the subplot setup function for methods decorated with @foo.setup. This enables the following
         syntax:
 
@@ -51,39 +55,58 @@ class plot(object):
             return self
 
         def __get__(self, obj, obj_type):
-            if obj_type != RhythmPlotter:
-                raise ValueError("Expected a RhythmPlotter object but got a '%s'" % str(obj))
+            if obj_type != RhythmLoopPlotter:
+                raise ValueError("Expected a RhythmLoopPlotter object but got a '%s'" % str(obj))
             self.obj_decorator._rhythm_plotter = obj
-            return self.obj_decorator.create_plot_figure
+            return self.obj_decorator.draw
 
     def __call__(self, f_fill_subplot, *args, **kwargs):
         self._f_fill_subplot = f_fill_subplot
+
+        @wraps(self._draw)
+        def draw_f_wrapper(*args_, **kwargs_):
+            self._draw(*args_, **kwargs_)
+
+        # noinspection PyUnresolvedReferences
+        draw_f_wrapper.__doc__ = self._draw.__doc__.format(self._title)
+        self.draw = draw_f_wrapper
+
         return plot.Descriptor(obj_decorator=self)
 
-    def create_plot_figure(self, obj, figure=None, figure_kwargs=None, legend_kwargs=None, *args, **kwargs):
-        if isinstance(obj, Rhythm):
-            rhythm = obj
-            track_iter = rhythm.track_iter()
-        elif isinstance(obj, Rhythm.Track):
-            rhythm = obj.rhythm
-            track_iter = iter({'Track': obj}.items())
-        else:
-            raise ValueError("Expected either a Rhythm or a Rhythm.Track "
-                             "object but got a '%s' instead" % obj)
+    def _draw(
+            self,
+            rhythm_loop: RhythmLoop,
+            figure: tp.Union[plt.Figure, None] = None,
+            figure_kwargs: tp.Dict[str, tp.Any] = None,
+            legend_kwargs: tp.Dict[str, tp.Any] = None,
+            *args, **kwargs
+    ):
+        """
+        Plots the {0} of the given drum loop on a matplotlib figure and returns the figure object.
+
+        :param rhythm_loop: the rhythm loop to plot
+        :param figure: figure to draw the loop
+        :param figure_kwargs: keyword arguments for the creation of the figure. This argument is ignored if a custom
+                              figure has been provided
+        :param legend_kwargs: keyword arguments for the call to Figure.legend
+        :return: matplotlib figure object
+        """
+
+        track_iterator = rhythm_loop.get_track_iterator()
 
         # the figure to add the subplot(s) to
-        figure = figure or plt.figure("%s - %s" % (self._title, rhythm.name), **(figure_kwargs or {}))
+        figure = figure or plt.figure("%s - %s" % (self._title, rhythm_loop.name), **(figure_kwargs or {}))
 
         rhythm_plotter = self._rhythm_plotter
-        concrete_unit = to_concrete_unit(rhythm_plotter.unit, rhythm)
+        concrete_unit = to_concrete_unit(rhythm_plotter.unit, rhythm_loop)
 
         # the setup method will also receive the args given to the decorator
         setup_args = merge_dicts(self._named_decorator_args, {
             'self': rhythm_plotter,
-            'rhythm': rhythm,
+            'rhythm': rhythm_loop,
             'concrete_unit': concrete_unit,
-            'n_pulses': int(math.ceil(rhythm.get_duration(concrete_unit))),
-            'n_tracks': rhythm.track_count()
+            'n_pulses': int(math.ceil(rhythm_loop.get_duration(concrete_unit))),
+            'n_tracks': rhythm_loop.get_track_count()
         })
 
         # this iterator will return both an axes object and a setup result object at each iteration
@@ -100,7 +123,7 @@ class plot(object):
         plot_handles = []
 
         track_i = 0
-        for track_name, track in track_iter:
+        for track in track_iterator:
             axes, axes_setup_result = next(subplots)
 
             handle = fill_subplot(
@@ -113,12 +136,13 @@ class plot(object):
             )[0]
 
             axes.set_xlabel(rhythm_plotter.unit)
-            track_names.append(track_name)
+            track_names.append(track.name)
             plot_handles.append(handle)
             track_i += 1
 
         figure.legend(plot_handles, track_names, loc="center right", **(legend_kwargs or {}))
-        plt.draw()
+        plt.draw()  # draw axes on figure
+
         return figure
 
     def _get_subplot_iterator(self, figure, setup_args):
@@ -191,7 +215,7 @@ class plot(object):
             raise ValueError("Unknown axis '%s', choose between %s" % (axis_arg_str, list(axis_arg_options.keys())))
 
 
-class RhythmPlotter(object):
+class RhythmLoopPlotter(object):
     def __init__(self, unit='ticks', background_color='#38302E', foreground_color='#6F6866', accent_color='#DB5461'):
         self._color = {
             'background': background_color,
@@ -211,8 +235,8 @@ class RhythmPlotter(object):
             raise ValueError("Unknown unit: %s" % str(unit))
         self._unit = unit
 
-    @plot('Schillinger Rhythm Notation')
-    def schillinger(self, track, **kwargs):
+    @plot("Schillinger Rhythm Notation")
+    def schillinger(self, track: PolyphonicRhythm.Track, **kwargs):
         axes = kwargs['axes']
         axes.yaxis.set_ticklabels([])
         axes.yaxis.set_visible(False)
@@ -229,14 +253,14 @@ class RhythmPlotter(object):
         return axes.plot(schillinger_chain, drawstyle='steps-pre', color=kwargs['color'], linewidth=2.5)
 
     @plot("Chronotonic notation")
-    def chronotonic(self, track, **kwargs):
+    def chronotonic(self, track: PolyphonicRhythm.Track, **kwargs):
         axes = kwargs['axes']
         chronotonic_chain = track.get_chronotonic_chain(kwargs['concrete_unit'])
         self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'])
         return axes.plot(chronotonic_chain, '--.', color=kwargs['color'])
 
     @plot("Polygon notation", subplot_layout='combined', max_pulse_circle_count=16)
-    def polygon(self, track, quantize=False, **kwargs):
+    def polygon(self, track: PolyphonicRhythm.Track, quantize=False, **kwargs):
         axes = kwargs['axes']
         n_pulses = kwargs['n_pulses']
 
@@ -321,7 +345,7 @@ class RhythmPlotter(object):
         return circle
 
     @plot("Spectral notation", subplot_layout='v_stack', share_axis='x')
-    def spectral(self, track, quantize=False, **kwargs):
+    def spectral(self, track: PolyphonicRhythm.Track, quantize=False, **kwargs):
         axes = kwargs['axes']
         axes.xaxis.set_visible(False)
         axes.xaxis.set_ticklabels([])
@@ -332,7 +356,7 @@ class RhythmPlotter(object):
         return axes.bar(list(range(len(inter_onsets))), inter_onsets, width=0.95, color=kwargs['color'])
 
     @plot("TEDAS Notation", subplot_layout='v_stack', share_axis='x')
-    def tedas(self, track, quantize=False, **kwargs):
+    def tedas(self, track: PolyphonicRhythm.Track, quantize=False, **kwargs):
         axes = kwargs['axes']
         concrete_unit = kwargs['concrete_unit']
         inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=quantize)
@@ -348,16 +372,14 @@ class RhythmPlotter(object):
         return axes.bar(onset_times, inter_onsets, width=inter_onsets, align='edge', **styles)
 
     @plot("Inter-onset interval histogram")
-    def inter_onset_interval_histogram(self, track, **kwargs):
+    def inter_onset_interval_histogram(self, track: PolyphonicRhythm.Track, **kwargs):
         axes = kwargs['axes']
         occurrences, interval_durations = track.get_interval_histogram(kwargs['concrete_unit'])
         return axes.bar(interval_durations, occurrences, color=kwargs['color'])
 
     @staticmethod
     @concretize_unit(lambda ax, rhythm, *args, **kw: rhythm)
-    def _plot_rhythm_grid(axes, track, unit, axis='x'):
-        rhythm = track.rhythm
-
+    def _plot_rhythm_grid(axes, rhythm: Rhythm, unit, axis='x'):
         duration = rhythm.get_duration(unit)
         measure_duration = rhythm.get_measure_duration(unit)
         beat_duration = rhythm.get_beat_duration(unit)

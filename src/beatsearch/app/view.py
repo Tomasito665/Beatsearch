@@ -18,7 +18,7 @@ from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
 from beatsearch.data.rhythm import (
-    TrackDistanceMeasure,
+    MonophonicRhythmDistanceMeasure,
     TRACK_WILDCARDS,
     Unit
 )
@@ -29,9 +29,9 @@ from beatsearch.utils import (
     eat_args,
     color_variant
 )
-from beatsearch.app.control import BSController, BSRhythmLoader
-from beatsearch.graphics.plot import RhythmPlotter
-from beatsearch.data.rhythm import Rhythm
+from beatsearch.app.control import BSController, BSRhythmLoopLoader
+from beatsearch.graphics.plot import RhythmLoopPlotter
+from beatsearch.data.rhythm import RhythmLoop, IRhythm as Rhythm
 import midi  # after beatsearch imports!
 
 
@@ -57,7 +57,7 @@ class BSAppTtkFrame(ttk.Frame):
         self.dpi = app.winfo_fpixels("1i")
 
 
-class BSMidiRhythmLoader(BSRhythmLoader):
+class BSMidiRhythmLoopLoader(BSRhythmLoopLoader):
     SOURCE_NAME = "MIDI file"
 
     def __init__(self):
@@ -99,7 +99,7 @@ class BSSearchForm(BSAppFrame):
         BSAppFrame.__init__(self, controller, background=background, **kwargs)
 
         combobox_info = [
-            (self.COMBO_DISTANCE_MEASURE, "Distance measure", TrackDistanceMeasure.get_measure_names()),
+            (self.COMBO_DISTANCE_MEASURE, "Distance measure", MonophonicRhythmDistanceMeasure.get_measure_names()),
             (self.COMBO_TRACKS, "Tracks to compare", TRACK_WILDCARDS),
             (self.COMBO_QUANTIZE, "Quantize", Unit.get_unit_names())
         ]
@@ -401,17 +401,17 @@ class BSTransportControls(BSAppFrame, object):
 class BSRhythmComparisonStrip(BSAppTtkFrame):
     def __init__(self, app, background_left="#E0E0E0", background_right="#EEEEEE", **kwargs):
         super().__init__(app, **kwargs)
-        self.rhythm_plotter = RhythmPlotter()
+        self.rhythm_plotter = RhythmLoopPlotter()
         self._rhythm_plot_function = self.rhythm_plotter.polygon
 
         # left panel (target rhythm box)
         header_target = tk.Frame(self, bg=background_left)
         label_target = tk.Label(
             header_target, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_left)
-        target_rhythm_menu_button = tk.Menubutton(header_target, text="Load", relief=tk.RAISED)
+        target_rhythm_menu_button = tk.Menubutton(header_target, text="Load", relief=tk.FLAT, borderwidth=0)
         target_rhythm_menu_button.bind("<Button-1>", eat_args(self.redraw_target_rhythm_menu))
         label_target.pack(side=tk.LEFT, padx=3)
-        target_rhythm_menu_button.pack(side=tk.RIGHT, padx=3)
+        target_rhythm_menu_button.pack(side=tk.RIGHT, padx=4, pady=4)
         frame_target = self.TargetRhythmBox(self, self.dpi, background=background_left)
 
         # right panel (selected rhythm plots)
@@ -428,12 +428,12 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             self, n_boxes=19, dpi=self.dpi, background=background_right)
 
         # lay out left panel
-        header_target.grid(row=0, column=0, sticky="ew")
         frame_target.grid(row=1, column=0, sticky="nsew")
+        header_target.grid(row=0, column=0, sticky="nsew")
 
         # lay out right panel
-        header_selection.grid(row=0, column=1, sticky="ew")
         frame_selection.grid(row=1, column=1, sticky="nsew")
+        header_selection.grid(row=0, column=1, sticky="nsew")
         self.grid_columnconfigure(1, weight=1)  # expand horizontally
 
         # setup target rhythm menu
@@ -495,17 +495,17 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                 self._mousewheel_callback = None
                 self._mousewheel_callback_id = None
 
-            def redraw(self, rhythm: Rhythm, plot_function: tp.Callable):
-                # plot function should be a @plot decorated RhythmPlotter method
-                if (rhythm, plot_function) == self._prev_redraw_args:
+            def redraw(self, rhythm_loop: RhythmLoop, plot_function: tp.Callable):
+                # plot function should be a @plot decorated RhythmLoopPlotter method
+                if (rhythm_loop, plot_function) == self._prev_redraw_args:
                     return
 
                 with self._plot.figure_update() as figure:
-                    if rhythm is not None:
-                        plot_function(rhythm, figure=figure)
-                        figure.suptitle(rhythm.name, fontsize="small", y=0.13)
+                    if rhythm_loop is not None:
+                        plot_function(rhythm_loop, figure=figure)
+                        figure.suptitle(rhythm_loop.name, fontsize="small", y=0.13)
 
-                self._prev_redraw_args = (rhythm, plot_function)
+                self._prev_redraw_args = (rhythm_loop, plot_function)
 
             @property
             def on_mousewheel(self):
@@ -572,12 +572,12 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
             container.pack(padx=3)
 
-        def redraw(self, rhythm: Rhythm, plot_function: tp.Callable):
+        def redraw(self, rhythm_loop: RhythmLoop, plot_function: tp.Callable):
             with self._plot_canvas.figure_update() as figure:
                 figure.clear()
-                if rhythm is not None:
-                    plot_function(rhythm, figure=figure)
-                    figure.suptitle(rhythm.name, fontsize="small", y=0.13)
+                if rhythm_loop is not None:
+                    plot_function(rhythm_loop, figure=figure)
+                    figure.suptitle(rhythm_loop.name, fontsize="small", y=0.13)
                     self._screen_main.tkraise()
                 else:
                     self._screen_no_target.tkraise()
@@ -721,9 +721,9 @@ class BSApp(tk.Tk, object):
 
         self.wm_title(BSApp.WINDOW_TITLE)
         self.config(bg=background)
-        self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoader()
+        self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoopLoader()
         self.controller = self._controller = controller
-        self.rhythm_plotter = RhythmPlotter()
+        self.drum_loop_plotter = RhythmLoopPlotter()
 
         self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
@@ -891,7 +891,7 @@ class BSApp(tk.Tk, object):
 
     def _handle_rhythm_plot_request(self, rhythm_indices, plot_type_name):
         controller = self.controller
-        plotter = self.rhythm_plotter
+        plotter = self.drum_loop_plotter
         plot_function_name = self.RHYTHM_PLOT_TYPES_BY_NAME[plot_type_name]
         plot_function = getattr(plotter, plot_function_name)
         rhythms = iter(controller.get_rhythm_by_index(ix) for ix in rhythm_indices)
@@ -901,7 +901,7 @@ class BSApp(tk.Tk, object):
         plt.show()
 
     @staticmethod
-    def _on_loading_error(loading_error: BSRhythmLoader.LoadingError):
+    def _on_loading_error(loading_error: BSRhythmLoopLoader.LoadingError):
         messagebox.showerror(
             title="Rhythm loading error",
             message=str(loading_error)

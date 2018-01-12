@@ -1,10 +1,8 @@
 import os
-# noinspection PyPep8Naming
 import pickle
 import sys
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
-from beatsearch.data.rhythm import Rhythm
-import midi
+from beatsearch.data.rhythm import MidiRhythm
 
 
 def create_ascii_spinner(spinner_chars, n_iters_per_char=32):
@@ -45,8 +43,8 @@ if __name__ == '__main__':
             log_replace("Parsing %ith rhythm... %s" % (len(rhythms) + 1, next(spinner)))
 
             try:
-                pattern = midi.read_midifile(path)
-                rhythms.append(Rhythm.create_from_midi(pattern, path))
+                rhythm = MidiRhythm(path)
+                rhythms.append(rhythm)
             except (TypeError, ValueError) as e:
                 print(e, path)
                 continue

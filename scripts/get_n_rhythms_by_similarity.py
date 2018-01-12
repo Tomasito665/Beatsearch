@@ -11,10 +11,10 @@ from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import err_print, print_progress_bar, make_dirs_if_not_exist
-from beatsearch.graphics.plot import RhythmPlotter
-from beatsearch.data.rhythm import Rhythm, RhythmDistanceMeasure, TrackDistanceMeasure
+from beatsearch.graphics.plot import RhythmLoopPlotter
+from beatsearch.data.rhythm import Rhythm, PolyphonicRhythmDistanceMeasure, MonophonicRhythmDistanceMeasure
 
-SIM_MEASURES = TrackDistanceMeasure.get_measures()
+SIM_MEASURES = MonophonicRhythmDistanceMeasure.get_measures()
 SIM_MEASURE_CLASSES = tuple(SIM_MEASURES.values())
 SIM_MEASURE_NAMES = tuple(SIM_MEASURES.keys())
 
@@ -153,7 +153,7 @@ if __name__ == "__main__":
             args.measure, list(range(1, len(SIM_MEASURE_CLASSES) + 1))))
         sys.exit(-1)
 
-    measure = RhythmDistanceMeasure(track_distance_measure, tracks)
+    measure = PolyphonicRhythmDistanceMeasure(track_distance_measure, tracks)
     distances = [measure.get_distance(target_rhythm, other) for other in corpus]
 
     sorted_indexes = np.argsort(distances)
@@ -172,7 +172,7 @@ if __name__ == "__main__":
 
     out = make_dirs_if_not_exist(args.out_dir)
     t_start = time()
-    plotter = RhythmPlotter("eighths")
+    plotter = RhythmLoopPlotter("eighths")
 
     if not os.path.isdir(out):
         os.makedirs(out)
