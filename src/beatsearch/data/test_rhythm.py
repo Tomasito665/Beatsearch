@@ -10,17 +10,20 @@ from beatsearch.data.rhythm import (
     MonophonicRhythm,
     MidiRhythm,
     TimeSignature,
-    HammingDistanceMeasure,
-    MonophonicRhythmDistanceMeasure,
-    EuclideanIntervalVectorDistanceMeasure,
-    IntervalDifferenceVectorDistanceMeasure,
-    SwapDistanceMeasure,
-    ChronotonicDistanceMeasure,
     Onset
 )
 
+from beatsearch.data.metrics import (
+    MonophonicRhythmDistanceMeasure,
+    HammingDistanceMeasure,
+    EuclideanIntervalVectorDistanceMeasure,
+    IntervalDifferenceVectorDistanceMeasure,
+    SwapDistanceMeasure,
+    ChronotonicDistanceMeasure
+)
+
 # noinspection PyUnresolvedReferences
-import midi
+import midi  # import after beatsearch (bs package __init__.py adds midi lib to path)
 
 
 class TestRhythmLoop(unittest.TestCase):

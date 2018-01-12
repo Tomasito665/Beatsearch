@@ -16,7 +16,7 @@ from tempfile import TemporaryFile
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoopLoader
-from beatsearch.data.rhythm import Rhythm, DrumLoop, PolyphonicRhythm, TimeSignature, Unit
+from beatsearch.data.rhythm import MidiRhythm, PolyphonicRhythm, TimeSignature, Unit
 from beatsearch.app.view import BSApp
 # noinspection PyUnresolvedReferences
 import midi
@@ -47,7 +47,8 @@ def main(input_track_name, output_track_name):
             player.set_output_track(bs_output_track)
 
         except socket.timeout:
-            app.destroy()
+            if not app.is_closed:
+                app.destroy()
 
     print("Trying to connect to Reaper...")
     threading.Thread(target=find_reaper_thread_target).start()
@@ -97,7 +98,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         ReaperUtils.clear_track(reaper_api, self._output_track)
         self._output_track = output_track
 
-    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
+    def playback_rhythms(self, rhythms: tp.Iterable[MidiRhythm]) -> None:
         with ReaperApi as api:
             api.OnPauseButton()
             self.populate_track(api, rhythms)
@@ -129,7 +130,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         for fpath in self._tmp_files:
             os.remove(fpath)
 
-    def populate_track(self, api, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
+    def populate_track(self, api, rhythms: tp.Iterable[MidiRhythm]) -> None:
         if rhythms == self._current_rhythms:
             return
 
@@ -149,10 +150,10 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         self._current_rhythms = rhythms
 
     @staticmethod
-    def render_rhythm_and_insert_to_track(output_track, rhythm: PolyphonicRhythm, reaper_api):
+    def render_rhythm_and_insert_to_track(output_track, rhythm: MidiRhythm, reaper_api):
         ReaperUtils.set_selected_tracks(reaper_api, output_track)
         with TemporaryFile(prefix="beatsearch-reaper", suffix=rhythm.name + ".mid", delete=False) as f:
-            pattern = rhythm.to_midi()
+            pattern = rhythm.as_midi_pattern()
             midi.write_midifile(f, pattern)
             fpath = f.name
         reaper_api.InsertMedia(fpath, 0)
@@ -228,7 +229,7 @@ class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
             resolution=midi_resolution
         )
 
-        return Rhythm.create_from_midi(midi_pattern, name=media_take_name)
+        return MidiRhythm(midi_pattern=midi_pattern, name=media_take_name)
 
     @classmethod
     def get_source_name(cls):

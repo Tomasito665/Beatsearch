@@ -18,10 +18,9 @@ from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
 from beatsearch.data.rhythm import (
-    MonophonicRhythmDistanceMeasure,
-    TRACK_WILDCARDS,
     Unit
 )
+from beatsearch.data.metrics import MonophonicRhythmDistanceMeasure, TRACK_WILDCARDS
 from beatsearch.utils import (
     head_trail_iter,
     no_callback,
@@ -31,7 +30,7 @@ from beatsearch.utils import (
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter
-from beatsearch.data.rhythm import RhythmLoop, IRhythm as Rhythm
+from beatsearch.data.rhythm import RhythmLoop, Rhythm as Rhythm
 import midi  # after beatsearch imports!
 
 
@@ -718,6 +717,7 @@ class BSApp(tk.Tk, object):
         self.bind("<Control-c>", eat_args(self.close))
         signal.signal(signal.SIGTERM, eat_args(self.close))
         signal.signal(signal.SIGINT, eat_args(self.close))
+        self.is_closed = True
 
         self.wm_title(BSApp.WINDOW_TITLE)
         self.config(bg=background)
@@ -844,9 +844,14 @@ class BSApp(tk.Tk, object):
     def get_frame_names(self):
         return list(self.frames.keys())
 
+    def mainloop(self, n=0):
+        self.is_closed = False
+        super().mainloop(n)
+
     def close(self):
         self.quit()
         self.destroy()
+        self.is_closed = True
 
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]

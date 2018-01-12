@@ -6,11 +6,14 @@ from sortedcollections import OrderedSet
 from beatsearch.data.rhythm import (
     RhythmLoop,
     PolyphonicRhythm,
-    create_rumba_rhythm,
-    SummedMonophonicRhythmDistance,
+    create_rumba_rhythm
+)
+from beatsearch.data.metrics import (
     MonophonicRhythmDistanceMeasure,
     HammingDistanceMeasure,
-    Quantizable)
+    SummedMonophonicRhythmDistance,
+    Quantizable
+)
 from beatsearch.config import __USE_NUMPY__
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
@@ -48,7 +51,7 @@ class BSRhythmPlayer(object):
 
 class BSFakeRhythmPlayer(BSRhythmPlayer):
 
-    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythm = create_rumba_rhythm(track=36)):
+    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythm = create_rumba_rhythm()):
         super(BSFakeRhythmPlayer, self).__init__()
         self._playback_duration = playback_duration  # type: float
         self._timer = None                           # type: tp.Union[threading.Timer, None]

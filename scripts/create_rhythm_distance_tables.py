@@ -9,7 +9,7 @@ from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import print_progress_bar
-from beatsearch.data.rhythm import MonophonicRhythmDistanceMeasure
+from beatsearch.data.metrics import MonophonicRhythmDistanceMeasure
 
 SIM_MEASURES = MonophonicRhythmDistanceMeasure.get_measures()
 SIM_MEASURE_NAMES = tuple(SIM_MEASURES.keys())

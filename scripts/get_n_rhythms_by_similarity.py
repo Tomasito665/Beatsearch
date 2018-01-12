@@ -12,7 +12,8 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src")
 from beatsearch.data.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import err_print, print_progress_bar, make_dirs_if_not_exist
 from beatsearch.graphics.plot import RhythmLoopPlotter
-from beatsearch.data.rhythm import Rhythm, PolyphonicRhythmDistanceMeasure, MonophonicRhythmDistanceMeasure
+from beatsearch.data.rhythm import Rhythm
+from beatsearch.data.metrics import MonophonicRhythmDistanceMeasure, PolyphonicRhythmDistanceMeasure
 
 SIM_MEASURES = MonophonicRhythmDistanceMeasure.get_measures()
 SIM_MEASURE_CLASSES = tuple(SIM_MEASURES.values())
