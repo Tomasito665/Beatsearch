@@ -768,6 +768,9 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
     def get_onset_count(self) -> int:  # implements Rhythm.get_onset_count
         return len(self.onsets)
 
+
+class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
+
     #####################################
     # Monophonic rhythm representations #
     #####################################
@@ -874,13 +877,17 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         bins = histogram[1].tolist()[:-1]
         return occurrences, bins
 
-    def get_binary_schillinger_chain(self, unit='ticks', values=(0, 1)):
+    def get_binary_schillinger_chain(self, unit='ticks', values=(1, 0)):
         """
         Returns the Schillinger notation of this rhythm where each onset is a change of a "binary note".
 
         For example, given the Rumba Clave rhythm and with values (0, 1):
           X--X---X--X-X---
           0001111000110000
+
+        However, when given the values (1, 0), the schillinger chain will be the opposite:
+          X--X---X--X-X---
+          1110000111001111
 
         :param unit: the unit to quantize on ('ticks' is no quantization)
         :param values: binary vector to be used in the schillinger chain. E.g. when given ('a', 'b'), the returned
@@ -889,7 +896,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         """
 
         chain, i = self.get_binary(unit), 0
-        value_i = 0
+        value_i = 1
         while i < len(chain):
             if chain[i] == 1:
                 value_i = 1 - value_i
@@ -968,12 +975,14 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
 
 
-class MonophonicRhythmBase(MonophonicRhythm, metaclass=ABCMeta):
+class MonophonicRhythmBase(MonophonicRhythmRepresentationsMixin, MonophonicRhythm, metaclass=ABCMeta):
     """Monophonic rhythm base class implementing MonophonicRhythm
 
     Abstract base class for monophonic rhythms. This class implements MonophonicRhythm.get_onsets, adding onset state
     to subclasses. Note that this class does not extend RhythmBase and therefore does NOT add rhythm base state like
     bpm, resolution, time signature, etc.
+
+    This class inherits all monophonic rhythm representations from the MonophonicRhythmRepresentationsMixin class.
     """
 
     class OnsetsNotInChronologicalOrder(Exception):
