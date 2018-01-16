@@ -3,7 +3,7 @@ import math
 import typing as tp
 from collections import OrderedDict
 
-from beatsearch.data.rhythm import convert_time, IMonophonicRhythm, MonophonicRhythm, IPolyphonicRhythm
+from beatsearch.data.rhythm import convert_time, MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm
 from beatsearch.utils import friendly_named_class
 
 
@@ -48,7 +48,7 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
     """Abstract base class for monophonic rhythm distance measures
 
     This is an abstract base class for monophonic rhythm distance measures. It measures the distance
-    between two MonophonicRhythm objects.
+    between two MonophonicRhythmImpl objects.
     """
 
     LENGTH_POLICIES = ['exact', 'multiple', 'fill']
@@ -129,7 +129,7 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
             convert_time(1, 1, output_unit)
         self._output_unit = output_unit
 
-    def get_distance(self, rhythm_a: IMonophonicRhythm, rhythm_b: IMonophonicRhythm):
+    def get_distance(self, rhythm_a: MonophonicRhythm, rhythm_b: MonophonicRhythm):
         """
         Returns the distance between the given tracks.
 
@@ -155,7 +155,7 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
         distance = self.__compute_distance__(max_len, *(iterables + cookies))
         return convert_time(distance, internal_unit, output_unit, quantize=False)
 
-    def __get_iterable__(self, rhythm: IMonophonicRhythm, unit):
+    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
         """
         Should prepare and return the rhythm representation on which the similarity measure is based. The returned
         vector's will be length policy checked.
@@ -168,7 +168,7 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
         raise NotImplementedError
 
     # noinspection PyMethodMayBeStatic
-    def __get_cookie__(self, rhythm: IMonophonicRhythm, unit):
+    def __get_cookie__(self, rhythm: MonophonicRhythm, unit):
         """
         The result of this method will be passed to __compute_distance__, both for rhythm a and rhythm b. By default,
         the cookie is the rhythm itself.
@@ -280,7 +280,7 @@ class HammingDistanceMeasure(MonophonicRhythmDistanceMeasure):
     def __init__(self, unit='eighths', length_policy='multiple'):
         super(HammingDistanceMeasure, self).__init__(unit, length_policy)
 
-    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+    def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_binary(unit)
 
     def __compute_distance__(self, n, cx, cy, *cookies):  # cx = (binary) chain x
@@ -303,7 +303,7 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
         super(EuclideanIntervalVectorDistanceMeasure, self).__init__(unit, length_policy)
         self.quantize_enabled = quantize
 
-    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+    def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_post_note_inter_onset_intervals(unit, self.quantize_enabled)
 
     def __compute_distance__(self, n, vx, vy, *cookies):
@@ -326,7 +326,7 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
         self.quantize_enabled = quantize
         self.cyclic = cyclic
 
-    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+    def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_interval_difference_vector(self.cyclic, unit, self.quantize_enabled)
 
     def __compute_distance__(self, n, vx, vy, *cookies):
@@ -358,10 +358,10 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
         super(SwapDistanceMeasure, self).__init__(unit, length_policy)
         self.quantize_enabled = quantize
 
-    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+    def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_onset_times(unit, self.quantize_enabled)
 
-    def __get_cookie__(self, rhythm: MonophonicRhythm, unit):
+    def __get_cookie__(self, rhythm: MonophonicRhythmImpl, unit):
         return int(math.ceil(rhythm.get_duration(unit)))
 
     def __compute_distance__(self, n, vx, vy, dur_x, dur_y):
@@ -385,7 +385,7 @@ class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
     def __init__(self, unit='eighths', length_policy='multiple'):
         super(ChronotonicDistanceMeasure, self).__init__(unit, length_policy)
 
-    def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
+    def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_chronotonic_chain(unit)
 
     def __compute_distance__(self, n, cx, cy, *args):
@@ -402,8 +402,8 @@ class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
 TRACK_WILDCARDS = ["*", "a*", "b*"]  # NOTE: Don't change the wildcard order or the code will break
 
 
-def rhythm_pair_track_iterator(rhythm_a: IPolyphonicRhythm,
-                               rhythm_b: IPolyphonicRhythm,
+def rhythm_pair_track_iterator(rhythm_a: PolyphonicRhythm,
+                               rhythm_b: PolyphonicRhythm,
                                tracks: tp.Union[str, tp.Iterable[tp.Any]]):
     """
     Returns an iterator over the tracks of the given rhythms. Each iteration yields a track name and a pair of tracks
@@ -481,7 +481,7 @@ class PolyphonicRhythmDistanceMeasure(DistanceMeasure):
     between two Rhythm objects.
     """
 
-    def get_distance(self, rhythm_a: IPolyphonicRhythm, rhythm_b: IPolyphonicRhythm) -> tp.Union[float, int]:
+    def get_distance(self, rhythm_a: PolyphonicRhythm, rhythm_b: PolyphonicRhythm) -> tp.Union[float, int]:
         raise NotImplementedError
 
 

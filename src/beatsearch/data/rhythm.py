@@ -297,7 +297,7 @@ class Rhythm(object, metaclass=ABCMeta):
     @abstractmethod
     def set_resolution(self, resolution: int):
         """
-        Sets this rhythm's tick resolution.
+        Sets this rhythm's tick resolution and rescales the onsets to the new resolution.
 
         :param resolution: new tick resolution in PPQN
         :return: None
@@ -373,7 +373,7 @@ class Rhythm(object, metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def set_duration_in_ticks(self, requested_duration: int) -> None:
+    def set_duration_in_ticks(self, requested_duration: int) -> int:
         """
         Sets the duration of the rhythm to the closest duration possible to the requested duration and returns the
         actual new duration.
@@ -540,8 +540,11 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
     implemented in subclasses.
     """
 
-    def __init__(self):
-        """Sets up state for generic rhythm properties"""
+    def __init__(self, **kwargs):
+        """Sets up state for generic rhythm properties
+
+        :param kwargs: unused
+        """
 
         self._resolution = 0              # type: int
         self._bpm = 0                     # type: int
@@ -592,7 +595,9 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
 
     def set_resolution(self, new_res: int):
         """
-        Sets the tick resolution of this rhythm. This will update the onset positions and the duration.
+        Sets the tick resolution of this rhythm. If this rhythm already has a resolution, this method will automatically
+        scale the onsets within this rhythm from the old resolution to the new resolution. This method will always call
+        set_duration_in_ticks, even if the duration didn't rescale.
 
         :param new_res: new tick resolution in PPQN
         :return: None
@@ -604,16 +609,13 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
         if new_res < 0:
             raise ValueError("expected positive resolution but got %i" % new_res)
 
-        # nothing to rescale
-        if not old_res:
-            assert self.get_onset_count() == 0, "rhythm contains onsets but it has no resolution"
-            self._resolution = new_res
-            return
-
-        self.__rescale_onset_ticks__(old_res, new_res)
-
         old_dur = self.get_duration_in_ticks()
-        new_dur = convert_time(old_dur, old_res, new_res, quantize=True)
+
+        if old_res > 0 and new_res > 0:
+            self.__rescale_onset_ticks__(old_res, new_res)
+            new_dur = convert_time(old_dur, old_res, new_res, quantize=True)
+        else:
+            new_dur = old_dur
 
         self._resolution = new_res
         self.set_duration_in_ticks(new_dur)
@@ -716,7 +718,7 @@ class Onset(namedtuple("Onset", ["tick", "velocity"])):
         return Onset(scaled_tick, self.velocity)
 
 
-class IMonophonicRhythm(Rhythm, metaclass=ABCMeta):
+class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
     """Monophonic rhythm interface
 
     Interface for monophonic rhythms.
@@ -725,18 +727,37 @@ class IMonophonicRhythm(Rhythm, metaclass=ABCMeta):
     @abstractmethod
     def get_onsets(self) -> tp.Tuple[Onset, ...]:
         """
-        Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of
-        MonophonicRhythm.Onset.
+        Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of Onset.
 
-        :return: the onsets within this rhythm as a tuple of MonophonicRhythm.Onset objects
+        :return: the onsets within this rhythm as a tuple of Onset objects
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
+        """
+        Sets the onsets of this rhythm.
+
+        :param onsets: onsets as an iterable of (absolute tick, velocity) tuples or as Onset objects
+        :return: None
         """
 
         raise NotImplementedError
 
     @property
     def onsets(self) -> tp.Tuple[Onset, ...]:
-        """See IMonophonicRhythm.get_onsets. This property is read-only."""
+        """See MonophonicRhythm.get_onsets"""
         return self.get_onsets()
+
+    @onsets.setter
+    def onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
+        """See MonophonicRhythm.set_onsets"""
+        self.set_onsets(onsets)
+
+    @onsets.deleter
+    def onsets(self):
+        self.set_onsets([])
 
     def get_last_onset_tick(self) -> int:  # implements Rhythm.get_last_onset_tick
         try:
@@ -947,10 +968,10 @@ class IMonophonicRhythm(Rhythm, metaclass=ABCMeta):
         return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
 
 
-class MonophonicRhythmBase(IMonophonicRhythm, metaclass=ABCMeta):
-    """Monophonic rhythm base class implementing IMonophonicRhythm
+class MonophonicRhythmBase(MonophonicRhythm, metaclass=ABCMeta):
+    """Monophonic rhythm base class implementing MonophonicRhythm
 
-    Abstract base class for monophonic rhythms. This class implements IMonophonicRhythm.get_onsets, adding onset state
+    Abstract base class for monophonic rhythms. This class implements MonophonicRhythm.get_onsets, adding onset state
     to subclasses. Note that this class does not extend RhythmBase and therefore does NOT add rhythm base state like
     bpm, resolution, time signature, etc.
     """
@@ -958,58 +979,79 @@ class MonophonicRhythmBase(IMonophonicRhythm, metaclass=ABCMeta):
     class OnsetsNotInChronologicalOrder(Exception):
         """Exception thrown when two adjacent onsets are not in chronological order"""
         def __init__(self, tick_a: int, tick_b: int):
-            msg = "<..., %i, %i <--!, ...>" % (tick_a, tick_b)
+            msg = "<..., %i, !%i!, ...>" % (tick_a, tick_b)
             super().__init__(msg)
 
     def __init__(
             self,
             onsets: tp.Union[tp.Iterable[Onset],
                              tp.Iterable[tp.Tuple[int, int]],
-                             tp.Iterable[tp.Sequence[int]]]
+                             tp.Iterable[tp.Sequence[int]]] = None,
     ):
         """
         Creates a new monophonic rhythm from the given onsets. The onsets will be stored as MonophonicOnset.Onset
         named tuples.
 
-        :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The tick
-                       resolution should equal the parent's resolution. The onsets should be given in chronological
-                       order.
+        :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The onsets should
+                       be given in chronological order.
         :raises OnsetsNotInChronologicalOrder
         """
 
-        def validate_onsets_gen():
+        self._onsets = tuple()  # type: tp.Tuple[Onset, ...]
+        self.set_onsets(onsets)
+
+    def get_onsets(self) -> tp.Tuple[Onset, ...]:
+        """
+        Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of Onset.
+
+        :return: the onsets within this rhythm as a tuple of MonophonicRhythmImpl.Onset objects
+        """
+
+        return self._onsets
+
+    def set_onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
+        """
+        Sets the onsets of this rhythm. The given onsets must be in chronological order. If they're not, this method
+        will raise an OnsetsNotInChronologicalOrder exception.
+
+        :param onsets: onsets as an iterable of (absolute tick, velocity) tuples or as Onset objects or false value to
+                       remove the onsets
+        :return: None
+        :raises OnsetsNotInChronologicalOrder
+        """
+
+        if not onsets:
+            self._onsets = tuple()
+            return
+
+        def validate_onsets_generator():
             prev_tick = -1
-            for [tick, velocity] in onsets:
+            for onset in onsets:
+                try:
+                    tick, velocity, *_ = onset
+                except (TypeError, ValueError):
+                    raise ValueError("onset should be iterable of at least two "
+                                     "elements (tick, velocity) but got %s" % str(onset))
                 if tick < prev_tick:
                     raise self.OnsetsNotInChronologicalOrder(prev_tick, tick)
                 yield Onset(tick, velocity)
                 prev_tick = tick
 
-        self._onsets = tuple(validate_onsets_gen())  # type: (tp.Tuple[Onset, ...])
-
-    def get_onsets(self) -> tp.Tuple[Onset, ...]:
-        """
-        Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of
-        MonophonicRhythm.Onset.
-
-        :return: the onsets within this rhythm as a tuple of MonophonicRhythm.Onset objects
-        """
-
-        return self._onsets
+        self._onsets = tuple(validate_onsets_generator())
 
     # implements Rhythm.__rescale_onset_ticks__
     def __rescale_onset_ticks__(self, old_resolution: int, new_resolution: int):
         self._onsets = tuple(onset.scale(old_resolution, new_resolution) for onset in self._onsets)
 
 
-class MonophonicRhythm(RhythmBase, MonophonicRhythmBase):
+class MonophonicRhythmImpl(RhythmBase, MonophonicRhythmBase):
     """Implements both rhythm base and monophonic rhythm base"""
 
     def __init__(
             self,
             onsets: tp.Union[tp.Iterable[Onset],
                              tp.Iterable[tp.Tuple[int, int]],
-                             tp.Iterable[tp.Sequence[int]]],
+                             tp.Iterable[tp.Sequence[int]]] = None,
             **kwargs
     ):
         """
@@ -1026,15 +1068,149 @@ class MonophonicRhythm(RhythmBase, MonophonicRhythmBase):
         self.post_init(**kwargs)
 
 
-# def needs_parent(func):  # decorator that checks if parent is set and otherwise raises a ParentNotSetError
-#     def wrapper(track, *args, **kwargs):
-#         if not track.parent:
-#             raise IPolyphonicRhythm.Track.ParentNotSetError
-#         return func(track, *args, **kwargs)
-#     return wrapper
+class SlavedRhythmBase(Rhythm, metaclass=ABCMeta):
+    """Rhythm abstract base class
+
+    This class extends the Rhythm interface and implements its property getters and setters. Each SlavedRhythmBase
+    instance is slaved to a parent rhythm. Calls to rhythm property getters are redirected to the parent. Calls to
+    setters will result in an AttributeError. Thus, the slaved rhythm can read but not write the properties of the
+    parent.
+    """
+
+    class ParentPropertyAccessError(Exception):
+        def __init__(self, method_name):
+            super().__init__("Slaved rhythms have read-only properties, use parent.%s" % method_name)
+
+    class ParentNotSet(Exception):
+        pass
+
+    def __init__(self, parent: Rhythm = None):
+        """
+        Creates a new dependent rhythm parented to the given parent-rhythm or parented, if given.
+
+        :param parent: parent rhythm
+        """
+
+        self._parent = None  # type: Rhythm
+        self.set_parent(parent)
+
+    def get_parent(self) -> tp.Union[Rhythm, None]:
+        """Returns the parent
+
+        Returns the parent pf this slave rhythm or None if it doesn't have a parent.
+        """
+        return self._parent
+
+    def set_parent(self, parent: tp.Union[Rhythm, None]):
+        """Sets the parent
+
+        Sets the parent of this slave rhythm.
+
+        :param parent: parent or None to remove parent
+        :return: None
+        """
+
+        self._parent = parent
+
+    @property
+    def parent(self) -> Rhythm:
+        """See SlavedRhythmBase.set_parent and SlavedRhythmBase.get_parent"""
+        return self.get_parent()
+
+    @parent.setter
+    def parent(self, parent: tp.Union[Rhythm, None]):
+        self.set_parent(parent)
+
+    ###############################
+    # Redirected property getters #
+    ###############################
+
+    def get_resolution(self) -> int:
+        """Returns the resolution of the parent"""
+        return self.__check_and_get_parent().get_resolution()
+
+    def get_bpm(self) -> float:
+        """Returns the bpm of the parent"""
+        return self.__check_and_get_parent().get_bpm()
+
+    def get_time_signature(self) -> tp.Union[TimeSignature, None]:
+        """Returns the time signature of the parent"""
+        return self.__check_and_get_parent().get_time_signature()
+
+    def get_duration_in_ticks(self) -> int:
+        """Returns the tick duration of the parent"""
+        return self.__check_and_get_parent().get_duration_in_ticks()
+
+    def set_resolution(self, resolution: int):
+        """Raises a ParentPropertyAccessError exception"""
+        raise self.ParentPropertyAccessError("set_resolution")
+
+    def set_bpm(self, bpm: tp.Union[float, int]) -> None:
+        """Raises a ParentPropertyAccessError exception"""
+        raise self.ParentPropertyAccessError("set_bpm")
+
+    def set_time_signature(
+            self, time_signature: tp.Union[TimeSignature, tp.Tuple[int, int], tp.Sequence[int], None]) -> None:
+        """Raises a ParentPropertyAccessError exception"""
+        raise self.ParentPropertyAccessError("set_time_signature")
+
+    def set_duration_in_ticks(self, requested_duration: int) -> None:
+        """Raises a ParentPropertyAccessError exception"""
+        raise self.ParentPropertyAccessError("set_duration_in_ticks")
+
+    # used internally, raises a ParentNotSet exception if parent not set and returns the parent
+    def __check_and_get_parent(self) -> Rhythm:
+        parent = self._parent
+        if not parent:
+            raise self.ParentNotSet
+        return parent
 
 
-class IPolyphonicRhythm(Rhythm, metaclass=ABCMeta):
+class Track(MonophonicRhythmBase, SlavedRhythmBase):
+    """Represents one track of a polyphonic rhythm
+
+    A polyphonic rhythm consists of multiple monophonic rhythms; tracks. Each of those tracks is represented by one
+    instance of this class. A track is a slaved rhythm, parented to the polyphonic rhythm to which it belongs.
+    """
+
+    def __init__(
+            self, onsets: tp.Union[tp.Iterable[Onset],
+                                   tp.Iterable[tp.Tuple[int, int]],
+                                   tp.Iterable[tp.Sequence[int]]] = None,
+            track_name: str = "", parent: Rhythm = None
+    ):
+        """
+        Creates a new rhythm track.
+
+        :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The tick
+                       resolution should equal the parent's resolution. The onsets should be given in chronological
+                       order.
+        :param track_name: The name of this track. This can't be changed after instantiation.
+        :param parent: The polyphonic rhythm which this track belongs to
+        """
+
+        MonophonicRhythmBase.__init__(self, onsets=onsets)
+        SlavedRhythmBase.__init__(self, parent=parent)
+
+        self._track_name = str(track_name)  # type: str
+        self._parent = parent               # type: PolyphonicRhythmImpl
+
+    def get_name(self):  # type: () -> str
+        """
+        Returns the name of this track. Note that there is a getter but not a setter for a track's name. The name of
+        a track can not be changed after initialization.
+        :return: track name
+        """
+
+        return self._track_name
+
+    @property
+    def name(self):
+        """See Track.get_name. This property is read-only"""
+        return self.get_name()
+
+
+class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
 
     class TrackNameError(Exception):
         """Thrown if there's something wrong with a track name"""
@@ -1048,196 +1224,6 @@ class IPolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         """Thrown by set_tracks if __validate_track_name__ returns False"""
         pass
 
-    class Track(MonophonicRhythmBase):
-        """Represents one track of a polyphonic rhythm
-
-        A polyphonic rhythm consists of multiple monophonic rhythms; tracks. Each of those tracks is represented by one
-        instance of this class. Note that -- although this class does implement Rhythm through MonophonicRhythmBase --
-        it does not inherit the rhythm base state, because it does not extend RhythmBase. It is not necessary for Track
-        to have base rhythm state, because this meta-data is already stored in the parent of the tracks; the
-        PolyphonicRhythm. Base rhythm getters redirect to the polyphonic parent, setters will raise an exception when
-        used.
-        """
-
-        def __init__(
-                self,
-                onsets: tp.Union[tp.Iterable[Onset],
-                                 tp.Iterable[tp.Tuple[int, int]],
-                                 tp.Iterable[tp.Sequence[int]]],
-                track_name: str,
-                parent: Rhythm = None
-        ):
-            """
-            Creates a new rhythm track.
-
-            :param onsets: An iterable returning an (absolute tick, velocity) tuple for each iteration. The tick
-                           resolution should equal the parent's resolution. The onsets should be given in chronological
-                           order.
-            :param track_name: The name of this track. This can't be changed after instantiation.
-            :param parent: The polyphonic rhythm which this track belongs to
-            """
-
-            super().__init__(onsets)
-            self._track_name = str(track_name)           # type: str
-            self._parent = parent                        # type: PolyphonicRhythm
-
-        class ParentNotSetError(Exception):
-            pass
-
-        # noinspection PyMethodParameters
-        def needs_parent(method: tp.Callable):
-            """
-            Decorator for Track methods. It wraps the given method and raises a ParentNotSetError exception if the track
-            has no parent.
-
-            :param method: method to decorate, should receive a Track argument as first argument (self)
-            :return: decorated method
-            """
-
-            @wraps(method)
-            def wrapper(track, *args, **kwargs):
-                assert isinstance(track, IPolyphonicRhythm.Track)
-                if not track.parent:
-                    raise IPolyphonicRhythm.Track.ParentNotSetError
-                return method(track, *args, **kwargs)
-            return wrapper
-
-        def get_parent(self):  # type: () -> PolyphonicRhythm
-            """
-            Returns the parent of this track. The parent is a polyphonic rhythm.
-
-            :return: polyphonic rhythm which this track is parented to or None
-            """
-
-            return self._parent
-
-        def set_parent(self, parent):  # type: (PolyphonicRhythm) -> None
-            """
-            Parents this track to the given polyphonic rhythm. Note that the tick resolution of the given parent will
-            reflect the resolution of this track's onsets.
-
-            :param parent: polyphonic rhythm
-            :return: None
-            """
-
-            self._parent = parent
-
-        def get_name(self):  # type: () -> str
-            """
-            Returns the name of this track. Note that there is a getter but not a setter for a track's name. The name of
-            a track can not be changed after initialization.
-
-            :return: track name
-            """
-
-            return self._track_name
-
-        @property
-        def parent(self):  # type: () -> PolyphonicRhythm
-            """See Track.set_parent and Track.get_parent"""
-            return self.get_parent()
-
-        @parent.setter
-        def parent(self, rhythm):  # type: (PolyphonicRhythm) -> None
-            self.set_parent(rhythm)
-
-        @property
-        def name(self):
-            """See Track.get_name. This property is read-only"""
-            return self.get_name()
-
-        @needs_parent
-        def get_resolution(self):
-            """
-            Returns the resolution of parent in PPQN.
-
-            :return: resolution of parent in PPQN and therefore
-            :raises Track.ParentNotSetError
-            """
-
-            return self._parent.get_resolution()
-
-        @needs_parent
-        def get_bpm(self):
-            """
-            Returns the tempo of parent in beats per minute.
-
-            :return: bpm of parent
-            :raises Track.ParentNotSetError
-            """
-
-            return self._parent.get_bpm()
-
-        @needs_parent
-        def get_time_signature(self):
-            """
-            Returns the time signature of parent.
-
-            :return: time signature of parent as a TimeSignature object
-            :raises Track.ParentNotSetError
-            """
-
-            return self._parent.get_time_signature()
-
-        @needs_parent
-        def get_duration_in_ticks(self):
-            """
-            Returns the duration of parent.
-
-            :return: duration of parent in ticks
-            :raises Track.ParentNotSetError
-            """
-
-            return self._parent.get_duration_in_ticks()
-
-        def set_resolution(self, resolution: int):
-            """
-            Can't set resolution for a single track. To set the resolution for all tracks, call parent.set_resolution.
-
-            :param resolution: unused
-            :return: None
-            :raises Exception: always
-            """
-
-            raise Exception("Can't set resolution for single track, call parent.")
-
-        def set_bpm(self, bpm: tp.Union[float, int]) -> None:
-            """
-            Can't set the bpm for a single track. To set the bpm for all tracks, call parent.set_bpm.
-
-            :param bpm: unused
-            :return: None
-            :raises Exception: always
-            """
-
-            raise Exception("Can't set BPM of a single track, call parent.")
-
-        def set_time_signature(self, time_signature: tp.Union[TimeSignature,
-                                                              tp.Tuple[int, int],
-                                                              tp.Sequence[int], None]) -> None:
-            """
-            Can't set the time signature for a single track. To set the time signature for all tracks, call
-            parent.set_time_signature.
-
-            :param time_signature: unused
-            :return: None
-            :raises Exception: always
-            """
-
-            raise Exception("Can't set time signature of a single track, call parent.")
-
-        def set_duration_in_ticks(self, requested_duration: int) -> None:
-            """
-            Can't set the duration for a single track. To set the duration for all tracks, call
-            parent.set_duration_in_ticks or parent.set_duration.
-
-            :param requested_duration: unused
-            :return: None
-            :raises Exception: always
-            """
-
-            raise Exception("Can't set duration of a single track, call parent.")
-
     @abstractmethod
     def set_tracks(self, tracks: tp.Iterable[Track], resolution: int) -> None:
         """
@@ -1245,7 +1231,7 @@ class IPolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         this polyphonic rhythm. This method also resets the duration of the rhythm to the position of the last onset
         in the given tracks.
 
-        :param tracks: iterator yielding PolyphonicRhythm.Track objects
+        :param tracks: iterator yielding PolyphonicRhythmImpl.Track objects
         :param resolution: resolution of the onsets in the given tracks
         :return: None
         """
@@ -1255,10 +1241,10 @@ class IPolyphonicRhythm(Rhythm, metaclass=ABCMeta):
     @abstractmethod
     def get_track_iterator(self) -> tp.Iterator[Track]:
         """
-        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a PolyphonicRhythm.Track
+        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a PolyphonicRhythmImpl.Track
         object.
 
-        :return: iterator over this rhythm's tracks yielding PolyphonicRhythm.Track objects
+        :return: iterator over this rhythm's tracks yielding PolyphonicRhythmImpl.Track objects
         """
 
         raise NotImplementedError
@@ -1288,13 +1274,13 @@ class IPolyphonicRhythm(Rhythm, metaclass=ABCMeta):
     def create_tracks(cls, **onsets_by_track_name: tp.Iterable[tp.Tuple[int, int]]) -> tp.Generator[Track, None, None]:
         # TODO add docstring
         for name, onsets in onsets_by_track_name.items():
-            yield cls.Track(onsets=onsets, track_name=name)
+            yield Track(onsets=onsets, track_name=name)
 
     #####################################
     # Polyphonic rhythm representations #
     #####################################
 
-    # TODO remove duplicate functionality (see IMonophonicRhythm.get_interval_histogram)
+    # TODO remove duplicate functionality (see MonophonicRhythm.get_interval_histogram)
     def get_interval_histogram(self, unit="ticks") -> (int, int):
         """
         Returns the interval histogram of all the tracks combined.
@@ -1314,15 +1300,16 @@ class IPolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         return occurrences, bins
 
 
-class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
+class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
 
     def __init__(
-            self, tracks: tp.Iterable[IPolyphonicRhythm.Track] = tuple(),
+            self, tracks: tp.Iterable[Track] = tuple(),
             resolution: int = 0,
             **kwargs,
     ):
         """
-        Creates a new polyphonic rhythm with the given tracks.
+        Creates a new polyphonic rhythm with the given tracks. The tick resolution of the onsets in the tracks is passed
+        as second argument and is required when the tracks are given to the constructor.
 
         :param tracks: sequence of tracks
         :param resolution: the resolution of the given tracks, this parameter is unused if no tracks were given
@@ -1330,7 +1317,7 @@ class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
         """
 
         super().__init__()
-        self._tracks = OrderedDict()  # type: tp.Dict[str, PolyphonicRhythm.Track]
+        self._tracks = OrderedDict()  # type: tp.Dict[str, Track]
 
         if tracks:
             if resolution is None:
@@ -1339,15 +1326,18 @@ class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
 
         self.post_init(**kwargs)
 
-    def set_tracks(self, tracks: tp.Iterable[IPolyphonicRhythm.Track], resolution: int) -> None:
+    def set_tracks(self, tracks: tp.Iterable[Track], resolution: int) -> None:
         """
         Sets the tracks and updates the resolution of this rhythm. The given tracks will automatically be parented to
         this polyphonic rhythm. This method also resets the duration of the rhythm to the position of the last onset
         in the given tracks.
 
-        :param tracks: iterator yielding PolyphonicRhythm.Track objects
+        Note that the given tracks are not deep copied.
+
+        :param tracks: iterator yielding Track objects
         :param resolution: resolution of the onsets in the given tracks
         :return: None
+        :raises EquallyNamedTracksError: when given multiple tracks with the same name
         """
 
         tracks_by_name = {}
@@ -1360,7 +1350,7 @@ class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
             if naming_error:
                 raise self.IllegalTrackName(naming_error)
             tracks_by_name[name] = t
-            t.set_parent(self)
+            t.parent = self
 
         # by clearing the old tracks we prevent .set_resolution of rescaling
         # the onsets of the previous tracks, that we don't need anymore
@@ -1385,17 +1375,16 @@ class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
 
         return ""
 
-    def get_track_iterator(self) -> tp.Iterator[IPolyphonicRhythm.Track]:
+    def get_track_iterator(self) -> tp.Iterator[Track]:
         """
-        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a PolyphonicRhythm.Track
-        object.
+        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a Track object.
 
-        :return: iterator over this rhythm's tracks yielding PolyphonicRhythm.Track objects
+        :return: iterator over this rhythm's tracks yielding PolyphonicRhythmImpl.Track objects
         """
 
         return iter(self._tracks.values())
 
-    def get_track_by_name(self, track_name: str) -> tp.Union[IPolyphonicRhythm.Track, None]:
+    def get_track_by_name(self, track_name: str) -> tp.Union[Track, None]:
         """
         Returns the track with the given name or None if this rhythm has no track with the given name.
 
@@ -1452,7 +1441,7 @@ class PolyphonicRhythm(RhythmBase, IPolyphonicRhythm):
     def __setstate__(self, state):
         state['_tracks'] = {}
         for track_name, onsets in state['__track_onsets_by_name__'].items():
-            track = PolyphonicRhythm.Track(onsets, track_name, self)
+            track = Track(onsets, track_name, self)
             state['_tracks'][track.name] = track
         del state['__track_onsets_by_name__']
         self.__dict__.update(state)
@@ -1599,7 +1588,7 @@ GMDrumMapping = MidiMapping("GMDrumMapping", [
 ])
 
 
-class RhythmLoop(PolyphonicRhythm):
+class RhythmLoop(PolyphonicRhythmImpl):
     """Rhythm loop with a name and duration always snapped to a downbeat"""
 
     def __init__(self, name: str = "", **kwargs):
@@ -1622,15 +1611,13 @@ class RhythmLoop(PolyphonicRhythm):
                  the position of the last note, this will always be greater than the requested duration
         """
 
-        if self.get_track_count() == 0:
-            return
-
-        if not self.get_time_signature():
-            # set duration freely if there is no time signature set (duration will be updated as soon as the time
-            # signature is set)
+        if not self.get_time_signature() or not self.get_resolution():
+            # In order to know the tick position of the downbeat, we need both a resolution and a time signature. If
+            # one of those is not, set the duration freely to the requested duration, it will automatically snap to
+            # a downbeat whenever a time signature or resolution is set (it is updated in those methods)
             return super().set_duration_in_ticks(requested_duration)
 
-        measure_duration = self.get_measure_duration("ticks")
+        measure_duration = int(self.get_measure_duration("ticks"))
         n_measures = int(math.ceil(requested_duration / measure_duration))
         t_next_downbeat = n_measures * measure_duration
         assert t_next_downbeat >= requested_duration
@@ -1647,10 +1634,6 @@ class RhythmLoop(PolyphonicRhythm):
 
         return actual_duration
 
-    @Rhythm.Precondition.needs_time_signature
-    def set_tracks(self, tracks: tp.Iterable[PolyphonicRhythm.Track], resolution: int) -> None:
-        super().set_tracks(tracks, resolution)
-
     def set_time_signature(self, time_signature: tp.Union[TimeSignature,
                                                           tp.Tuple[int, int],
                                                           tp.Sequence[int], None]) -> None:
@@ -1662,13 +1645,15 @@ class RhythmLoop(PolyphonicRhythm):
         :return: None
         """
 
-        if self.get_track_count() and not time_signature:
-            raise Exception("Can't remove time signature from non-empty rhythm loop")
-
+        old_time_signature = self.get_time_signature()
         super().set_time_signature(time_signature)
 
-        # update duration (snap to downbeat) if tracks have already been set
-        if self.get_track_count():
+        # We don't use the time_signature argument because that
+        # is not guaranteed to be a TimeSignature object
+        new_time_signature = self.get_time_signature()
+
+        # If time signature has changed, update the duration to snap the duration to a downbeat
+        if new_time_signature and new_time_signature != old_time_signature:
             self.set_duration_in_ticks(self.get_duration_in_ticks())
 
     def set_name(self, name: str) -> None:
@@ -1725,7 +1710,7 @@ class MidiRhythm(RhythmLoop):
 
         # loads the tracks and sets the bpm, time signature, midi metronome and resolution
         if midi_pattern:
-            self._load(midi_pattern, preserve_midi_duration)
+            self.load_midi_pattern(midi_pattern, preserve_midi_duration)
 
     @property
     def midi_mapping(self):
@@ -1744,10 +1729,10 @@ class MidiRhythm(RhythmLoop):
 
         midi_track = midi.Track(tick_relative=False)  # create track and add metadata events
 
-        midi_track.append(midi.TrackNameEvent(text=self._name))  # track name
+        midi_track.append(midi.TrackNameEvent(text=self.get_name()))  # track name
         midi_metronome = 24 if self._midi_metronome is None else self._midi_metronome
-        midi_track.append(self._time_signature.to_midi_event(midi_metronome))  # time signature
-        midi_track.append(midi.SetTempoEvent(bpm=self._bpm))  # tempo
+        midi_track.append(self.get_time_signature().to_midi_event(midi_metronome))  # time signature
+        midi_track.append(midi.SetTempoEvent(bpm=self.get_bpm()))  # tempo
 
         # add note events
         for track in self.get_track_iterator():
@@ -1803,9 +1788,29 @@ class MidiRhythm(RhythmLoop):
             return ""
         return "No midi key found with abbreviation \"%s\" in %s" % (track_name, mapping.name)
 
-    # TODO somehow expose this functionality so that you can create empty rhythm and afterwards load-in
-    # the tracks from a midi pattern
-    def _load(self, pattern: midi.Pattern, preserve_midi_duration: bool) -> None:
+    def load_midi_pattern(self, pattern: midi.Pattern, preserve_midi_duration: bool = False) -> None:
+        """
+        Loads a midi pattern and sets this rhythm's tracks, time signature bpm and duration. The given midi pattern must
+        have a resolution property and can't have more than one track containing note events. The midi events map to
+        rhythm properties like this:
+
+            midi.NoteOnEvent            ->  adds an onset to this rhythm
+            midi.TimeSignatureEvent *   ->  set the time signature of this rhythm
+            midi.SetTempoEvent          ->  sets the bpm of this rhythm
+            midi.EndOfTrackEvent **     ->  sets the duration of this rhythm (only if preserve_midi_duration is true)
+
+                * required
+                ** required only if preserve_midi_duration is true
+
+        If preserve_midi_duration is false, the duration of this rhythm will be set to the first downbeat after the last
+        note position.
+
+        :param pattern: the midi pattern to load
+        :param preserve_midi_duration: when true, the duration will be set to the position of the midi EndOfTrackEvent,
+                                       otherwise it will be set to the first downbeat after the last note position
+        :return: None
+        """
+
         mapping = self._midi_mapping
         n_tracks_containing_note_events = sum(any(isinstance(e, midi.NoteEvent) for e in track) for track in pattern)
 
@@ -1820,7 +1825,7 @@ class MidiRhythm(RhythmLoop):
         bpm = 0               # type: tp.Union[float]
         track_data = {}       # type: tp.Dict[MidiKey, tp.List[tp.Tuple[int, int], ...]]
         ts_midi_event = None  # type: tp.Union[midi.TimeSignatureEvent, None]
-        ts_eot_event = None   # type: tp.Union[midi.EndOfTrackEvent, None]
+        eot_event = None      # type: tp.Union[midi.EndOfTrackEvent, None]
 
         for msg in track:
             if isinstance(msg, midi.NoteOnEvent):
@@ -1842,7 +1847,7 @@ class MidiRhythm(RhythmLoop):
             elif isinstance(msg, midi.SetTempoEvent):
                 bpm = float(msg.get_bpm())
             elif isinstance(msg, midi.EndOfTrackEvent):
-                ts_eot_event = msg
+                eot_event = msg
                 break
 
         if ts_midi_event is None:
@@ -1850,15 +1855,22 @@ class MidiRhythm(RhythmLoop):
 
         time_signature = TimeSignature.from_midi_event(ts_midi_event)
         midi_metronome = ts_midi_event.get_metronome()  # type: int
-        track_generator = (self.Track(onsets, key.abbreviation) for key, onsets in track_data.items())
+
+        # noinspection PyShadowingNames
+        def track_generator():
+            # sort the rhythm tracks by midi pitch
+            sorted_midi_keys = sorted(track_data.keys(), key=lambda midi_key: midi_key.pitch)
+            for midi_key in sorted_midi_keys:
+                onsets = track_data[midi_key]
+                yield Track(onsets, midi_key.abbreviation)
 
         self._midi_metronome = midi_metronome
         self.set_time_signature(time_signature)
         self.set_bpm(bpm)
-        self.set_tracks(track_generator, pattern.resolution)
+        self.set_tracks(track_generator(), pattern.resolution)
 
         if preserve_midi_duration:
-            ts_eot_event.tick()
+            self.set_duration_in_ticks(eot_event.tick)
 
 
 def create_rumba_rhythm(resolution=240):
@@ -1869,7 +1881,7 @@ def create_rumba_rhythm(resolution=240):
     :return: rumba rhythm
     """
 
-    track = PolyphonicRhythm.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)), "main_track")
-    rhythm = PolyphonicRhythm([track], 4, time_signature=(4, 4))
+    track = Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)), "main_track")
+    rhythm = PolyphonicRhythmImpl([track], 4, time_signature=(4, 4))
     rhythm.set_resolution(resolution)
     return rhythm

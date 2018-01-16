@@ -16,7 +16,7 @@ from tempfile import TemporaryFile
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoopLoader
-from beatsearch.data.rhythm import MidiRhythm, PolyphonicRhythm, TimeSignature, Unit
+from beatsearch.data.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit
 from beatsearch.app.view import BSApp
 # noinspection PyUnresolvedReferences
 import midi
@@ -73,7 +73,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         self._end_pos = -1                   # type: float
         self._prev_pos = -1                  # type: float
         self._output_track = output_track    # type: str
-        self._current_rhythms = []           # type: tp.List[PolyphonicRhythm]
+        self._current_rhythms = []           # type: tp.List[PolyphonicRhythmImpl]
         self._is_playing = False             # type: bool
 
         if output_track is not None:

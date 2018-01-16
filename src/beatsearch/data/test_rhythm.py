@@ -1,379 +1,1165 @@
-import unittest
-import math
-from collections import OrderedDict
-from unittest.mock import MagicMock
+import enum
+import typing as tp
+from functools import wraps, partial
+from unittest import TestCase, main
+from unittest.mock import MagicMock, patch, call
+from abc import ABCMeta, abstractmethod
+from beatsearch.data.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm
+from beatsearch.data.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
+from beatsearch.data.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
+from beatsearch.data.rhythm import TimeSignature, Onset, MidiMapping, MidiKey
+import midi
 
-from beatsearch.data.rhythm import (
-    RhythmLoop,
-    GMDrumMapping,
-    PolyphonicRhythm,
-    MonophonicRhythm,
-    MidiRhythm,
-    TimeSignature,
-    Onset
-)
-
-from beatsearch.data.metrics import (
-    MonophonicRhythmDistanceMeasure,
-    HammingDistanceMeasure,
-    EuclideanIntervalVectorDistanceMeasure,
-    IntervalDifferenceVectorDistanceMeasure,
-    SwapDistanceMeasure,
-    ChronotonicDistanceMeasure
-)
-
-# noinspection PyUnresolvedReferences
-import midi  # import after beatsearch (bs package __init__.py adds midi lib to path)
+#####################
+# Rhythm Interfaces #
+#####################
 
 
-class TestRhythmLoop(unittest.TestCase):
-    track_data = OrderedDict()
-    track_data[GMDrumMapping.find_by_pitch(36).abbreviation] = (Onset(0, 90), Onset(1402, 127))
-    track_data[GMDrumMapping.find_by_pitch(38).abbreviation] = (Onset(375, 95), Onset(924, 120))
-    track_data[GMDrumMapping.find_by_pitch(42).abbreviation] = (Onset(624, 100), )
-    time_signature = TimeSignature(6, 8)
-    rhythm_name = "The_Star-Spangled_Banner_beat"
-    ppq = 240
-    bpm = 180
-    duration = 2160  # 3 3/4 measures with a resolution of 240 ppq
-    midi_file_path = "/home/user/obama/The_Star-Spangled_Banner_beat.mid"
-    to_midi_note_duration = 32
+class TestRhythmInterface(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, Rhythm)
 
-    def setUp(self):
-        self.rhythm = MidiRhythm(
-            name=self.rhythm_name,
-            bpm=self.bpm,
-            time_signature=self.time_signature
-        )  # type: MidiRhythm
-        self.rhythm.set_tracks(PolyphonicRhythm.create_tracks(**self.track_data), self.ppq)
-        self.rhythm.set_duration(self.duration, "ticks")
-        self.rhythm.duration_in_ticks = TestRhythmLoop.duration
-        self.to_midi_result = self.rhythm.as_midi_pattern(TestRhythmLoop.to_midi_note_duration)
 
-    def tearDown(self):
-        self.rhythm = None
+class TestMonophonicRhythmInterface(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, MonophonicRhythm)
 
-    def test_name_property_equals_name_given_to_constructor(self):
-        self.assertEqual(self.rhythm.name, TestRhythmLoop.rhythm_name)
 
-    def test_name_property_is_writeable(self):
-        self.rhythm.name = "new_name"
-        self.assertEqual(self.rhythm.name, "new_name")
+class TestPolyphonicRhythmInterface(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, PolyphonicRhythm)
 
-    def test_bpm_property_equals_bpm_given_to_constructor(self):
-        self.assertEqual(self.rhythm.bpm, TestRhythmLoop.bpm)
 
-    def test_bpm_property_is_writeable(self):
-        expected_bpm = 150
-        assert expected_bpm != self.bpm
-        self.rhythm.bpm = expected_bpm
-        self.assertEqual(self.rhythm.bpm, expected_bpm)
+################################
+# Rhythm abstract base classes #
+################################
 
-    def test_time_signature_property_equals_ts_given_to_constructor(self):
-        self.assertEqual(self.rhythm.time_signature, TestRhythmLoop.time_signature)
 
-    def test_measure_duration_is_correct(self):
-        self.assertEqual(self.rhythm.get_measure_duration(), 720)
+class TestMonophonicRhythmBase(TestCase):
+    def test_not_instantiable(self):
+        self.assertRaises(Exception, RhythmBase)
 
-    def test_beat_duration_is_correct(self):
-        self.assertEqual(self.rhythm.get_beat_duration(), 120)
 
-    def test_get_resolution_returns_resolution_given_to_constructor(self):
-        self.assertEqual(self.rhythm.get_resolution(), TestRhythmLoop.ppq)
+##########################
+# Rhythm implementations #
+##########################
 
-    def test_get_duration_returns_duration_given_to_constructor(self):
-        self.assertEqual(self.rhythm.get_duration(), TestRhythmLoop.duration)
 
-    def test_one_track_is_created_per_onset_pitch(self):
-        rhythm = RhythmLoop(name="", bpm=120, time_signature=TimeSignature(4, 4))
-        rhythm.set_tracks(PolyphonicRhythm.create_tracks(
-            one=((0, 0), ), two=((0, 0), ), three=((0, 0), ), four=((0, 0), )), 240)
+class RhythmMockedSetters(Rhythm, metaclass=ABCMeta):
+    def __init__(self):
+        self.set_bpm = MagicMock()
+        self.set_resolution = MagicMock()
+        self.set_time_signature = MagicMock()
+        self.set_duration_in_ticks = MagicMock()
 
-        self.assertEqual(rhythm.get_track_count(), 4)
-        for track in rhythm.get_track_iterator():
-            self.assertIsInstance(track, RhythmLoop.Track)
 
-    def test_track_onsets_are_correct(self):
-        expected_onset_chains = list(self.track_data.values())
+class RhythmMockedGetters(Rhythm, metaclass=ABCMeta):
+    def __init__(self):
+        self.get_bpm = MagicMock(return_value=123)
+        self.get_resolution = MagicMock(return_value=123)
+        self.get_time_signature = MagicMock(return_value=(5, 4))
+        self.get_duration_in_ticks = MagicMock(return_value=123)
 
-        actual_onset_chains = [
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(36).abbreviation).onsets,
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(38).abbreviation).onsets,
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(42).abbreviation).onsets
-        ]
 
-        self.assertEqual(actual_onset_chains, expected_onset_chains)
+class RhythmMockedSettersAndGetters(RhythmMockedSetters, RhythmMockedGetters, metaclass=ABCMeta):
+    def __init__(self):
+        RhythmMockedSetters.__init__(self)
+        RhythmMockedGetters.__init__(self)
 
-    def test_duration_rescales_correctly_when_resolution_upscale(self):
-        assert self.ppq == 240
-        assert self.duration == 2160
 
-        self.rhythm.set_resolution(960)
-        self.assertEqual(self.rhythm.get_duration(), 8640)
+class RhythmMockedPostInit(Rhythm, metaclass=ABCMeta):
+    def __init__(self):
+        self.post_init = MagicMock()
 
-    def test_duration_rescales_correctly_when_resolution_downscale(self):
-        assert self.ppq == 240
-        assert self.duration == 2160
 
-        self.rhythm.set_resolution(22)
-        self.assertEqual(self.rhythm.get_duration(), 198)
+class ITestRhythmBase(object):
+    @classmethod
+    @abstractmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        """Returns the concrete RhythmBase implementation class"""
+        raise NotImplementedError
 
-    def test_track_onsets_rescale_correctly_when_resolution_upscale(self):
-        assert self.ppq == 240  # expected onsets computed assuming an original resolution of 240 ppq
-        self.rhythm.set_resolution(960)  # rescale time resolution to 960 ppq
+    @classmethod
+    @abstractmethod
+    def get_mocked_setters_mixin(cls):
+        """Returns the mixin used to mock the setters of the class returned by get_rhythm_class"""
+        raise NotImplementedError
 
-        # expected onset data when rescaling from 240 ppq to 960 ppq
-        expected_onset_data = [
-            (Onset(0, 90), Onset(5608, 127)),
-            (Onset(1500, 95), Onset(3696, 120)),
-            (Onset(2496, 100),)
-        ]
+    @classmethod
+    @abstractmethod
+    def get_mocked_getters_mixin(cls):
+        """Returns the mixin used to mock the getters of the class returned by get_rhythm_class"""
+        raise NotImplementedError
 
-        actual_onset_data = [
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(36).abbreviation).onsets,
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(38).abbreviation).onsets,
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(42).abbreviation).onsets
-        ]
+    @classmethod
+    def get_mocked_post_init_mixin(cls):
+        """Returns the mixin used to mock the post_init function of the class returned by get_rhythm_class"""
+        return RhythmMockedPostInit
 
-        self.assertEqual(actual_onset_data, expected_onset_data)
+    @classmethod
+    def get_mocked_setters_and_getters_mixin(cls):
+        """Returns the mixin used to mock the setters and the getters of the class returned by get_rhythm_class"""
+        return RhythmMockedSettersAndGetters
 
-    def test_track_onsets_rescale_correctly_when_resolution_downscale(self):
-        assert self.ppq == 240  # expected onsets computed assuming an original resolution of 240 ppq
-        self.rhythm.set_resolution(22)  # rescale time resolution to 22 ppq
+    # TODO For each test needing one of these mixed-in classes, a new class is made. This is horrifically inefficient...
+    # however, when lazy initializing them as a class variable, they're not re-initialized down to more than one level
+    # of inheritance of ITestRhythmBase
 
-        # expected onset data when rescaling from 240 ppq to 22 ppq
-        expected_onset_data = [
-            (Onset(0, 90), Onset(129, 127)),
-            (Onset(34, 95), Onset(85, 120)),
-            (Onset(57, 100), )
-        ]
+    @classmethod
+    def get_rhythm_class_with_mocked_setters(cls) -> tp.Type[RhythmMockedSetters]:
+        """Returns a class inheriting from the RhythmBase implementation and from the RhythmMockedSetters mixin"""
 
-        actual_onset_data = [
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(36).abbreviation).onsets,
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(38).abbreviation).onsets,
-            self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(42).abbreviation).onsets
-        ]
+        rhythm_class = cls.get_rhythm_class()
+        mocked_setters_mixin = cls.get_mocked_setters_mixin()
 
-        self.assertEqual(actual_onset_data, expected_onset_data)
+        # noinspection PyAbstractClass
+        class RhythmImplWithMockedSetters(rhythm_class, mocked_setters_mixin):
+            def __init__(self, **kw):
+                super().__init__(**kw)  # init rhythm_class
+                # Note: mocked setters mixin initialization is after super initialization, which
+                # means that setters called from within the super constructor are not mocked
+                mocked_setters_mixin.__init__(self)
 
-    def test_midi_has_only_one_track(self):
-        pattern = self.rhythm.as_midi_pattern()
-        self.assertEqual(len(pattern), 1)
+        return RhythmImplWithMockedSetters
 
-    def test_midi_has_correct_meta_data(self):
-        track = self.rhythm.as_midi_pattern()[0]
-        self.assertIsInstance(track[0], midi.TrackNameEvent)
-        self.assertIsInstance(track[1], midi.TimeSignatureEvent)
-        self.assertIsInstance(track[2], midi.SetTempoEvent)
-        self.assertIsInstance(track[-1], midi.EndOfTrackEvent)
+    @classmethod
+    def get_rhythm_class_with_mocked_getters(cls) -> tp.Type[RhythmMockedGetters]:
+        """Returns a class inheriting from the RhythmBase implementation and from the RhythmMockedGetters mixin"""
 
-    def test_track_pre_note_inter_onset_intervals(self):
-        expected_intervals = [0, 3, 4, 3, 2]
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        actual_intervals = rhythm.get_pre_note_inter_onset_intervals()
-        self.assertEqual(actual_intervals, expected_intervals)
+        rhythm_class = cls.get_rhythm_class()
+        mocked_getters_mixin = cls.get_mocked_getters_mixin()
 
-    def test_track_post_note_inter_onset_intervals(self):
-        expected_intervals = [3, 4, 3, 2, 4]
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        actual_intervals = rhythm.get_post_note_inter_onset_intervals()
-        self.assertEqual(actual_intervals, expected_intervals)
+        # noinspection PyAbstractClass
+        class RhythmImplWithMockedGetters(rhythm_class, mocked_getters_mixin):
+            def __init__(self, **kw):
+                super().__init__(**kw)
+                mocked_getters_mixin.__init__(self)
 
-    def test_non_cyclic_track_interval_difference_vector_is_correct(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_interval_difference_vector = [4. / 3., 3. / 4., 2. / 3., 4. / 2.]
-        actual_interval_difference_vector = rhythm.get_interval_difference_vector(cyclic=False)
-        self.assertEqual(actual_interval_difference_vector, expected_interval_difference_vector)
+        return RhythmImplWithMockedGetters
 
-    def test_cyclic_track_interval_difference_vector_is_correct(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_interval_difference_vector = [4. / 3., 3. / 4., 2. / 3., 4. / 2., 3. / 4.]
-        actual_interval_difference_vector = rhythm.get_interval_difference_vector(cyclic=True)
-        self.assertEqual(actual_interval_difference_vector, expected_interval_difference_vector)
+    @classmethod
+    def get_rhythm_class_with_mocked_post_init(cls) -> tp.Type[RhythmMockedPostInit]:
+        """Returns a class inheriting from the RhythmBase implementation and from the RhythmMockedPostInit mixin"""
 
-    def test_track_to_binary_without_resolution_change(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_binary = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary = rhythm.get_binary("ticks")
-        self.assertEqual(actual_binary, expected_binary)
+        rhythm_class = cls.get_rhythm_class()
+        mocked_post_init_mixin = cls.get_mocked_post_init_mixin()
 
-    def test_track_binary_with_down_scale_resolution_and_not_quantized_input_data(self):
-        rhythm = MonophonicRhythm([(7, 127), (176, 127), (421, 127), (611, 127), (713, 127)],
-                                  resolution=240, duration=960)
-        expected_binary = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary = rhythm.get_binary("sixteenths")
-        self.assertEqual(actual_binary, expected_binary)
+        # noinspection PyAbstractClass
+        class RhythmImplWithMockedPostInit(rhythm_class, mocked_post_init_mixin):
+            def __init__(self, **kw):
+                mocked_post_init_mixin.__init__(self)  # first because post_init is called by super().__init__
+                super().__init__(**kw)
 
-    def test_track_binary_schillinger_chain_is_correct(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_schillinger_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
-        actual_schillinger_chain = rhythm.get_binary_schillinger_chain("ticks")
-        self.assertEqual(actual_schillinger_chain, expected_schillinger_chain)
+        return RhythmImplWithMockedPostInit
 
-    def test_track_binary_schillinger_chain_only_consists_of_given_binary_values(self):
-        values = ("real_madrid", "fc_barcelona")
-        track = self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(36).abbreviation)
-        schillinger_chain = track.get_binary_schillinger_chain(values=values)
-        self.assertTrue(all(val == values[0] or val == values[1] for val in schillinger_chain))
+    @classmethod
+    def get_rhythm_class_with_mocked_setters_and_getters(cls) -> tp.Type[RhythmMockedSettersAndGetters]:
+        """
+        Returns a class inheriting from the RhythmBase implementation and from the RhythmMockedSettersAndGetters mixin
+        """
 
-    def test_track_chronotonic_chain_is_correct(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_chronotonic_chain = [3, 3, 3, 4, 4, 4, 4, 3, 3, 3, 2, 2, 4, 4, 4, 4]
-        actual_chronotonic_chain = rhythm.get_chronotonic_chain()
-        self.assertEqual(actual_chronotonic_chain, expected_chronotonic_chain)
+        rhythm_class = cls.get_rhythm_class()
+        mocked_setters_and_getters = cls.get_mocked_setters_and_getters_mixin()
 
-    def test_track_onset_times_are_correct(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_onset_times = [0, 3, 7, 10, 12]
-        actual_onset_times = rhythm.get_onset_times("ticks")
-        self.assertEqual(actual_onset_times, expected_onset_times)
+        # noinspection PyAbstractClass
+        class RhythmImplWithMockedSettersAndGetters(rhythm_class, mocked_setters_and_getters):
+            def __init__(self, **kw):
+                super().__init__(**kw)
+                mocked_setters_and_getters.__init__(self)
 
-    def test_track_interval_histogram_is_correct(self):
-        rhythm = MonophonicRhythm([(0, 127), (3, 127), (7, 127), (10, 127), (12, 127)], resolution=16, duration=16)
-        expected_histogram = (
-            [1, 2, 2],
-            [2, 3, 4]
+        return RhythmImplWithMockedSettersAndGetters
+
+
+# noinspection PyPep8Naming
+class inject_rhythm(object):
+    def __init__(self):
+        raise TypeError("inject_rhythm is used as a namespace and it shouldn't be initialised")
+
+    class Mock(enum.Enum):
+        NO_MOCK = enum.auto()
+        MOCK_GETTERS = enum.auto()
+        MOCK_SETTERS = enum.auto()
+        MOCK_POST_INIT = enum.auto()
+        MOCK_GETTERS_AND_SETTERS = enum.auto()
+
+    @classmethod
+    def __get_rhythm_class(cls, test: ITestRhythmBase, mock_type: Mock):
+        if mock_type is cls.Mock.NO_MOCK:
+            return test.get_rhythm_class()
+        elif mock_type is cls.Mock.MOCK_GETTERS:
+            return test.get_rhythm_class_with_mocked_getters()
+        elif mock_type is cls.Mock.MOCK_SETTERS:
+            return test.get_rhythm_class_with_mocked_setters()
+        elif mock_type is cls.Mock.MOCK_POST_INIT:
+            return test.get_rhythm_class_with_mocked_post_init()
+        elif mock_type is cls.Mock.MOCK_GETTERS_AND_SETTERS:
+            return test.get_rhythm_class_with_mocked_setters_and_getters()
+        else:
+            raise ValueError("Unknown mock type: %s" % str(mock_type))
+
+    # noinspection PyMethodParameters
+    def __create_decorator(mock_type: Mock, **constructor_kwargs):
+        def decorator(func: tp.Callable[[ITestRhythmBase, Rhythm, tp.Any], tp.Any]):
+            @wraps(func)
+            def wrapper(self: ITestRhythmBase, *args, **kwargs):
+                rhythm_class = inject_rhythm.__get_rhythm_class(self, mock_type)
+                rhythm_obj = rhythm_class(**constructor_kwargs)
+                return func(self, rhythm_obj, *args, **kwargs)
+            return wrapper
+        return decorator
+
+    no_mock = partial(__create_decorator, mock_type=Mock.NO_MOCK)
+    mocked_getters = partial(__create_decorator, mock_type=Mock.MOCK_GETTERS)
+    mocked_setters = partial(__create_decorator, mock_type=Mock.MOCK_SETTERS)
+    mocked_setters_and_getters = partial(__create_decorator, mock_type=Mock.MOCK_GETTERS_AND_SETTERS)
+    mocked_post_init = partial(__create_decorator, mock_type=Mock.MOCK_POST_INIT)
+
+    @staticmethod
+    def type(func: tp.Callable[[ITestRhythmBase, tp.Type[Rhythm], tp.Any], tp.Any]):
+        @wraps(func)
+        def wrapper(self: ITestRhythmBase, *args, **kwargs):
+            rhythm_class = inject_rhythm.__get_rhythm_class(self, inject_rhythm.Mock.NO_MOCK)
+            return func(self, rhythm_class, *args, **kwargs)
+        return wrapper
+
+
+class FakeRhythmBaseImplementation(RhythmBase):
+    def __init__(self, **kwargs):
+        RhythmBase.__init__(self)
+        self.post_init(**kwargs)
+
+    def __rescale_onset_ticks__(self, old_resolution: int, new_resolution: int) -> None:
+        pass
+
+    def get_last_onset_tick(self) -> int:
+        return -1
+
+    def get_onset_count(self) -> int:
+        return 0
+
+
+class TestRhythmBase(ITestRhythmBase, TestCase):
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        return FakeRhythmBaseImplementation
+
+    @classmethod
+    def get_mocked_setters_mixin(cls):
+        return RhythmMockedSetters
+
+    @classmethod
+    def get_mocked_getters_mixin(cls):
+        return RhythmMockedGetters
+
+    #############
+    # post_init #
+    #############
+
+    @inject_rhythm.mocked_setters()
+    def test_post_init_calls_bpm_setter(self, rhythm):
+        rhythm.post_init(bpm=123)
+        rhythm.set_bpm.assert_called_once_with(123)
+
+    @inject_rhythm.mocked_setters()
+    def test_post_init_calls_resolution_setter(self, rhythm):
+        rhythm.post_init(resolution=123)
+        rhythm.set_resolution.assert_called_once_with(123)
+
+    @inject_rhythm.mocked_setters()
+    def test_post_init_calls_time_signature_setter(self, rhythm):
+        rhythm.post_init(time_signature=(5, 4))
+        rhythm.set_time_signature.assert_called_once_with((5, 4))
+
+    @inject_rhythm.mocked_setters()
+    def test_post_init_calls_duration_in_ticks_setter(self, rhythm):
+        rhythm.post_init(duration_in_ticks=123)
+        rhythm.set_duration_in_ticks.assert_called_once_with(123)
+
+    @inject_rhythm.mocked_setters()
+    def test_post_init_calls_duration_in_ticks_setter_when_given_duration_alias(self, rhythm):
+        rhythm.post_init(duration=123)
+        rhythm.set_duration_in_ticks.assert_called_once_with(123)
+
+    @inject_rhythm.mocked_setters()
+    def test_post_init_doesnt_call_setters_when_given_anything(self, rhythm):
+        rhythm.post_init()
+        rhythm.set_bpm.assert_not_called()
+        rhythm.set_resolution.assert_not_called()
+        rhythm.set_time_signature.assert_not_called()
+        rhythm.set_duration_in_ticks.assert_not_called()
+
+    #########################################
+    # properties call corresponding setters #
+    #########################################
+
+    @inject_rhythm.mocked_setters()
+    def test_bpm_prop_calls_setter(self, rhythm):
+        rhythm.bpm = 123
+        rhythm.set_bpm.assert_called_once_with(123)
+
+    @inject_rhythm.mocked_setters()
+    def test_resolution_prop_calls_setter(self, rhythm):
+        rhythm.resolution = 123
+        rhythm.set_resolution.assert_called_once_with(123)
+
+    @inject_rhythm.mocked_setters()
+    def test_time_signature_prop_calls_setter(self, rhythm):
+        rhythm.time_signature = (5, 4)
+        rhythm.set_time_signature.assert_called_once_with((5, 4))
+
+    @inject_rhythm.mocked_setters()
+    def test_duration_in_ticks_prop_calls_setter(self, rhythm):
+        rhythm.duration_in_ticks = 123
+        rhythm.set_duration_in_ticks.assert_called_once_with(123)
+
+    #########################################
+    # properties call corresponding getters #
+    #########################################
+
+    @inject_rhythm.mocked_getters()
+    def test_bpm_prop_calls_getter(self, rhythm):
+        self.assertEqual(rhythm.bpm, rhythm.get_bpm.return_value)
+        rhythm.get_bpm.assert_called_once()
+
+    @inject_rhythm.mocked_getters()
+    def test_resolution_prop_calls_getter(self, rhythm):
+        self.assertEqual(rhythm.resolution, rhythm.get_resolution.return_value)
+        rhythm.get_resolution.assert_called_once()
+
+    @inject_rhythm.mocked_getters()
+    def test_time_signature_prop_calls_getter(self, rhythm):
+        self.assertEqual(rhythm.time_signature, rhythm.get_time_signature.return_value)
+        rhythm.get_time_signature.assert_called_once()
+
+    @inject_rhythm.mocked_getters()
+    def test_duration_in_ticks_prop_calls_getter(self, rhythm):
+        self.assertEqual(rhythm.duration_in_ticks, rhythm.get_duration_in_ticks.return_value)
+        rhythm.get_duration_in_ticks.assert_called_once()
+
+    ############################
+    # getters and setters work #
+    ############################
+
+    @inject_rhythm.no_mock()
+    def test_bpm_setter_getter(self, rhythm):
+        rhythm.set_duration_in_ticks(123)
+        self.assertEqual(rhythm.get_duration_in_ticks(), 123)
+
+    @inject_rhythm.no_mock()
+    def test_resolution_setter_getter(self, rhythm):
+        rhythm.set_resolution(123)
+        self.assertEqual(rhythm.get_resolution(), 123)
+
+    @inject_rhythm.no_mock()
+    def test_time_signature_setter_getter_with_ts_object(self, rhythm):
+        numerator, denominator = 5, 4
+        rhythm.set_time_signature(TimeSignature(numerator, denominator))
+        ret = rhythm.get_time_signature()
+        self.assertIsInstance(ret, TimeSignature)
+        self.assertEqual(ret.numerator, numerator)
+        self.assertEqual(ret.denominator, denominator)
+
+    @inject_rhythm.no_mock()
+    def test_time_signature_setter_getter_with_tuple(self, rhythm):
+        numerator, denominator = 5, 4
+        rhythm.set_time_signature((numerator, denominator))
+        ret = rhythm.get_time_signature()
+        self.assertIsInstance(ret, TimeSignature)
+        self.assertEqual(ret.numerator, numerator)
+        self.assertEqual(ret.denominator, denominator)
+
+    @inject_rhythm.no_mock()
+    def test_duration_in_ticks_setter_getter(self, rhythm):
+        rhythm.set_duration_in_ticks(123)
+        self.assertEqual(rhythm.get_duration_in_ticks(), 123)
+
+    ####################################################################
+    # test constructor sets properties when given as keyword arguments #
+    ####################################################################
+
+    @inject_rhythm.mocked_post_init(bpm=123, resolution=234, time_signature=(5, 4), duration_in_ticks=345, duration=456)
+    def test_constructor_calls_post_init_with_correct_arguments(self, rhythm):
+        rhythm.post_init.assert_called_once_with(
+            bpm=123,
+            resolution=234,
+            time_signature=(5, 4),
+            duration_in_ticks=345,
+            duration=456
         )
-        actual_histogram = rhythm.get_interval_histogram("ticks")
-        self.assertEqual(actual_histogram[0], expected_histogram[0])
-        self.assertEqual(actual_histogram[1], expected_histogram[1])
 
-    def test_track_get_resolution_returns_same_as_rhythm_get_resolution(self):
-        track = self.rhythm.get_track_by_name(GMDrumMapping.find_by_pitch(36).abbreviation)
-        self.assertEqual(track.get_resolution(), self.rhythm.get_resolution())
+    @inject_rhythm.mocked_post_init()
+    def test_constructor_calls_post_init_with_no_arguments(self, rhythm):
+        rhythm.post_init.assert_called_with()
+
+    ##############################
+    # test beat/measure duration #
+    ##############################
+
+    @inject_rhythm.type
+    def test_beat_duration(self, rhythm_class):
+        resolution = 16
+
+        def create_rhythm(time_signature):
+            r = rhythm_class()
+            r.get_resolution = MagicMock(return_value=resolution)
+            r.get_time_signature = MagicMock(return_value=time_signature)
+            return r
+
+        rhythm_info = {
+            "quarter_beat_unit": [create_rhythm(TimeSignature(5, 4)), resolution],
+            "eighth_beat_unit": [create_rhythm(TimeSignature(5, 8)), resolution // 2]
+        }
+
+        for test_name, [rhythm, expected_beat_duration] in rhythm_info.items():
+            with self.subTest(name=test_name):
+                self.assertEqual(rhythm.get_beat_duration(), expected_beat_duration)
+
+    @inject_rhythm.type
+    def test_measure_duration(self, rhythm_class):
+        ppq = 16
+
+        def do_subtest(name, time_signature, expected_measure_duration):
+            r = rhythm_class()
+            r.get_resolution = MagicMock(return_value=ppq)
+            r.get_time_signature = MagicMock(return_value=time_signature)
+            with self.subTest(name=name):
+                self.assertEqual(r.get_measure_duration(), expected_measure_duration)
+
+        test_info = [
+            ("4/4", TimeSignature(4, 4), ppq * 4),
+            ("4/8", TimeSignature(4, 8), ppq * 2),
+            ("5/4", TimeSignature(5, 4), ppq * 5),
+            ("5/8", TimeSignature(5, 8), ppq * 2.5)
+        ]
+
+        for args in test_info:
+            do_subtest(*args)
 
 
-class TestTrackMeasures(unittest.TestCase):
-    def setUp(self):
-        self.tr_a = RhythmLoop.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)), "test")
-        self.tr_b = RhythmLoop.Track(((1, 127), (3, 127), (6, 127), (10, 127), (14, 127)), "test")
-        self.tr_aa = RhythmLoop.Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127),
-                                      (16, 127), (19, 127), (23, 127), (26, 127), (28, 127)), "test")
+class TestMonophonicRhythmImpl(TestRhythmBase):
+    class MonophonicRhythmMockedSettersMixin(MonophonicRhythm, RhythmMockedSetters, metaclass=ABCMeta):
+        def __init__(self):
+            MonophonicRhythm.__init__(self)
+            RhythmMockedSetters.__init__(self)
+            self.set_onsets = MagicMock()
 
-        fake_rhythm = type("RhythmLoop", (object, ), dict(
-            get_duration=lambda *_: None,
-            get_duration_in_ticks=lambda *_: None
-        ))
+    class MonophonicRhythmMockedGettersMixin(MonophonicRhythm, RhythmMockedGetters, metaclass=ABCMeta):
+        def __init__(self):
+            MonophonicRhythm.__init__(self)
+            RhythmMockedGetters.__init__(self)
+            self.get_onsets = MagicMock(return_value=((1, 2), (3, 4), (4, 5)))
 
-        fake_rhythm_dur_16, fake_rhythm_dur_32 = fake_rhythm(), fake_rhythm()
-        fake_rhythm_dur_32.get_duration = MagicMock(return_value=32)
-        fake_rhythm_dur_32.get_duration_in_ticks = MagicMock(return_value=32)
-        fake_rhythm_dur_16.get_duration = MagicMock(return_value=16)
-        fake_rhythm_dur_16.get_duration_in_ticks = MagicMock(return_value=16)
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        return MonophonicRhythmImpl
 
-        for t in [self.tr_a, self.tr_b]:
-            t.parent = fake_rhythm_dur_16
-        self.tr_aa.parent = fake_rhythm_dur_32
+    @classmethod
+    def get_mocked_setters_mixin(cls):
+        return cls.MonophonicRhythmMockedSettersMixin
 
-        for t in [self.tr_a, self.tr_b, self.tr_aa]:
-            t.get_resolution = MagicMock(return_value=4)
+    @classmethod
+    def get_mocked_getters_mixin(cls):
+        return cls.MonophonicRhythmMockedGettersMixin
 
-        self.len_policies = ["exact", "multiple", "fill"]
+    ###################################
+    # onsets prop <-> getters/setters #
+    ###################################
 
-    def test_track_measure_length_policy_property_given_to_constructor(self):
-        t = MonophonicRhythmDistanceMeasure("quarters", length_policy="exact")
-        self.assertEqual(t.length_policy, "exact")
+    @inject_rhythm.mocked_setters()
+    def test_onsets_prop_calls_setter(self, rhythm):
+        onsets = (1, 2), (3, 4), (4, 5)
+        rhythm.onsets = onsets
+        rhythm.set_onsets.assert_called_once_with(onsets)
 
-    ####################
-    # HAMMING DISTANCE #
-    ####################
-
-    def test_hamming_distance_is_correct(self):
-        d_expected = 6
-        for lp in self.len_policies:
-            m = HammingDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
-
-    def test_auto_hamming_distance_is_zero(self):
-        for lp in self.len_policies:
-            m = HammingDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
-
-    def test_hamming_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:  # skip "exact"
-            m = HammingDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
-
-    #############################
-    # EUCLIDEAN VECTOR DISTANCE #
-    #############################
-
-    def test_euclidean_vector_distance_is_correct(self):
-        d_expected = math.sqrt(11)
-        for lp in self.len_policies:
-            m = EuclideanIntervalVectorDistanceMeasure("ticks", lp, quantize=True)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
-
-    def test_auto_euclidean_vector_distance_is_zero(self):
-        for lp in self.len_policies:
-            m = EuclideanIntervalVectorDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
-
-    def test_euclidean_vector_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:  # skip "exact"
-            m = EuclideanIntervalVectorDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
-
-    #######################################
-    # INTERVAL DIFFERENCE VECTOR DISTANCE #
-    #######################################
-
-    def test_interval_difference_vector_distance_is_correct(self):
-        d_expected = 4.736111111111111
-        for lp in self.len_policies:
-            m = IntervalDifferenceVectorDistanceMeasure("ticks", lp, quantize=True, cyclic=True)
-            self.assertAlmostEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
-
-    def test_auto_interval_difference_vector_distance_is_zero(self):
-        for lp in self.len_policies:
-            m = IntervalDifferenceVectorDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
-
-    def test_interval_difference_vector_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:  # skip "exact"
-            m = IntervalDifferenceVectorDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
+    @inject_rhythm.mocked_getters()
+    def test_onsets_prop_calls_getter(self, rhythm):
+        self.assertEqual(rhythm.onsets, rhythm.get_onsets.return_value)
 
     #################
-    # SWAP DISTANCE #
+    # onsets getter #
     #################
 
-    def test_swap_distance_is_correct(self):
-        d_expected = 4
-        for lp in self.len_policies:
-            m = SwapDistanceMeasure("ticks", length_policy=lp, quantize=True)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
+    @inject_rhythm.no_mock()
+    def test_onsets_setter_raises_onsets_not_in_chronological_order(self, rhythm):
+        onsets = ((1, 0), (2, 0), (3, 0), (2, 0), (4, 0))
+        self.assertRaises(MonophonicRhythmBase.OnsetsNotInChronologicalOrder, rhythm.set_onsets, onsets)
 
-    def test_auto_swap_distance_is_zero(self):
-        for lp in self.len_policies:
-            m = SwapDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
+    @inject_rhythm.no_mock()
+    def test_onsets_setter_raises_value_error_on_invalid_input(self, rhythm):
+        onset_inputs = {
+            'on_missing_velocity': ((1, 0), (2, 0), (3, 0), 4),
+            'on_string': "this is not a valid onset chain",
+            'on_1d_tuple': (1, 2, 3, 4, 5)
+        }
 
-    def test_swap_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:
-            m = SwapDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
+        for test_name, onsets in onset_inputs.items():
+            with self.subTest(name=test_name):
+                self.assertRaises(ValueError, rhythm.set_onsets, onsets)
 
     ########################
-    # CHRONOTONIC DISTANCE #
+    # onsets setter/getter #
     ########################
 
-    def test_chronotonic_distance_is_correct(self):
-        d_expected = 19
-        for lp in self.len_policies:
-            m = ChronotonicDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_b), d_expected)
+    @inject_rhythm.no_mock()
+    def test_onsets_setter_getter_with_onset_objects(self, rhythm):
+        onsets = (Onset(0, 80), Onset(5, 14), Onset(6, 40), Onset(8, 95))
+        rhythm.set_onsets(onsets)
+        actual_onsets = rhythm.get_onsets()
+        self.assertEqual(actual_onsets, onsets)
+        self.assertIsNot(actual_onsets, onsets, "set_onsets should deep copy/convert the given onsets")
 
-    def test_auto_chronotonic_distance_is_zero(self):
-        for lp in self.len_policies:
-            m = ChronotonicDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_a), 0)
+    @inject_rhythm.no_mock()
+    def test_onsets_setter_getter_with_mixed_onset_formats(self, rhythm):
+        onsets = ([0, 80], (5, 14, 14), Onset(6, 40), iter([8, 95]))
+        rhythm.set_onsets(onsets)
+        expected_onsets = (Onset(0, 80), Onset(5, 14), Onset(6, 40), Onset(8, 95))
+        actual_onsets = rhythm.get_onsets()
+        self.assertEqual(actual_onsets, expected_onsets)
+        self.assertIsNot(actual_onsets, expected_onsets, "set_onsets should deep copy/convert the given onsets")
 
-    def test_chronotonic_distance_single_to_double_is_zero(self):
-        for lp in self.len_policies[1:]:
-            m = ChronotonicDistanceMeasure("ticks", lp)
-            self.assertEqual(m.get_distance(self.tr_a, self.tr_aa), 0)
+    ###################
+    # onset rescaling #
+    ###################
+
+    @inject_rhythm.no_mock()
+    def test_rescale_onsets(self, rhythm):
+        original_onsets = (Onset(0, 80), Onset(3, 80), Onset(7, 80), Onset(10, 80), Onset(12, 80))
+        rhythm.set_onsets(original_onsets)
+        assert rhythm.get_onsets() == original_onsets
+        rhythm.__rescale_onset_ticks__(16, 32)  # scale factor of 2.0
+        expected_onsets = (Onset(0, 80), Onset(6, 80), Onset(14, 80), Onset(20, 80), Onset(24, 80))
+        self.assertEqual(rhythm.get_onsets(), expected_onsets)
+
+    @inject_rhythm.no_mock()
+    def test_rescale_onsets_rounded_to_nearest_ticks(self, rhythm):
+        original_onsets = (Onset(1, 80), Onset(2, 80), Onset(3, 80))
+        rhythm.set_onsets(original_onsets)
+        assert rhythm.get_onsets() == original_onsets
+        rhythm.__rescale_onset_ticks__(10, 13)  # scale factor of 1.3
+        expected_onsets = (Onset(1, 80), Onset(3, 80), Onset(4, 80))  # 1.3, 2.6, 3.9
+        self.assertEqual(rhythm.get_onsets(), expected_onsets)
+
+    ###############
+    # onset count #
+    ###############
+
+    @inject_rhythm.no_mock()
+    def test_onset_count_zero_when_no_onsets(self, rhythm):
+        self.assertEqual(0, rhythm.get_onset_count())
+
+    @inject_rhythm.no_mock()
+    def test_onset_count_with_onsets(self, rhythm):
+        rhythm.set_onsets((Onset(1, 80), Onset(2, 80), Onset(3, 80), Onset(4, 80), Onset(5, 80), Onset(6, 80)))
+        self.assertEqual(rhythm.get_onset_count(), 6)
+
+    #######################
+    # last onset position #
+    #######################
+
+    @inject_rhythm.no_mock()
+    def test_last_onset_tick_minus_one_when_no_onsets(self, rhythm):
+        self.assertEqual(rhythm.get_last_onset_tick(), -1)
+
+    @inject_rhythm.no_mock()
+    def test_last_onset_tick_with_onsets(self, rhythm):
+        rhythm.set_onsets((Onset(12, 80), Onset(43, 80), Onset(56, 80), Onset(98, 80), Onset(101, 80), Onset(106, 80)))
+        self.assertEqual(rhythm.get_last_onset_tick(), 106)
+
+
+class FakeSlavedRhythmBaseImplementation(SlavedRhythmBase):
+    def __init__(self, **kw):
+        SlavedRhythmBase.__init__(self, **kw)
+
+    def __rescale_onset_ticks__(self, old_resolution: int, new_resolution: int) -> None:
+        pass
+
+    def get_last_onset_tick(self) -> int:
+        return -1
+
+    def get_onset_count(self) -> int:
+        return 0
+
+
+class TestSlavedRhythm(TestRhythmBase):
+    class SlavedRhythmMockedSettersMixin(RhythmMockedSetters, metaclass=ABCMeta):
+        def __init__(self):
+            RhythmMockedSetters.__init__(self)
+            self.set_parent = MagicMock()
+
+    class SlavedRhythmMockedGettersMixin(RhythmMockedGetters, metaclass=ABCMeta):
+        def __init__(self):
+            RhythmMockedGetters.__init__(self)
+            self.get_parent = MagicMock()
+
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        # noinspection PyTypeChecker
+        return FakeSlavedRhythmBaseImplementation
+
+    @classmethod
+    def get_mocked_setters_mixin(cls):
+        return cls.SlavedRhythmMockedSettersMixin
+
+    @classmethod
+    def get_mocked_getters_mixin(cls):
+        return cls.SlavedRhythmMockedGettersMixin
+
+    ###########################################
+    # setters raise ParentPropertyAccessError #
+    ###########################################
+
+    @inject_rhythm.no_mock()
+    def test_bpm_setter_getter(self, rhythm):
+        self.assertRaises(SlavedRhythmBase.ParentPropertyAccessError, rhythm.set_bpm, 0)
+
+    @inject_rhythm.no_mock()
+    def test_resolution_setter_getter(self, rhythm):
+        self.assertRaises(SlavedRhythmBase.ParentPropertyAccessError, rhythm.set_resolution, 0)
+
+    @inject_rhythm.no_mock()
+    def test_time_signature_setter_getter_with_ts_object(self, rhythm):
+        self.assertRaises(SlavedRhythmBase.ParentPropertyAccessError, rhythm.set_time_signature, 0)
+
+    @inject_rhythm.no_mock()
+    def test_time_signature_setter_getter_with_tuple(self, rhythm):
+        self.assertRaises(SlavedRhythmBase.ParentPropertyAccessError, rhythm.set_time_signature, 0)
+
+    @inject_rhythm.no_mock()
+    def test_duration_in_ticks_setter_getter(self, rhythm):
+        self.assertRaises(SlavedRhythmBase.ParentPropertyAccessError, rhythm.set_duration_in_ticks, 0)
+
+    ##############################
+    # getters redirect to parent #
+    ##############################
+
+    @inject_rhythm.no_mock()
+    def test_bpm_getter_redirects_to_parent(self, rhythm):
+        parent = MagicMock(Rhythm)
+        parent.bpm = 123
+        parent.get_bpm.return_value = parent.bpm
+        rhythm.parent = parent
+        self.assertEqual(rhythm.get_bpm(), parent.bpm)
+
+    @inject_rhythm.no_mock()
+    def test_resolution_getter_redirects_to_parent(self, rhythm):
+        parent = MagicMock(Rhythm)
+        parent.resolution = 123
+        parent.get_resolution.return_value = parent.resolution
+        rhythm.parent = parent
+        self.assertEqual(rhythm.get_resolution(), parent.resolution)
+
+    @inject_rhythm.no_mock()
+    def test_time_signature_getter_redirects_to_parent(self, rhythm):
+        parent = MagicMock(Rhythm)
+        parent.time_signature = (5, 4)
+        parent.get_time_signature.return_value = parent.time_signature
+        rhythm.parent = parent
+        self.assertEqual(rhythm.get_time_signature(), parent.time_signature)
+
+    @inject_rhythm.no_mock()
+    def test_duration_in_ticks_getter_redirects_to_parent(self, rhythm):
+        parent = MagicMock(Rhythm)
+        parent.duration_in_ticks = 123
+        parent.get_duration_in_ticks.return_value = parent.duration_in_ticks
+        rhythm.parent = parent
+        self.assertEqual(rhythm.get_duration_in_ticks(), parent.duration_in_ticks)
+
+    ###################
+    # parent property #
+    ###################
+
+    @inject_rhythm.mocked_setters(parent="I am your father")
+    def test_constructor_sets_parent(self, rhythm):
+        self.assertEqual(rhythm.get_parent(), "I am your father")
+
+    @inject_rhythm.mocked_setters()
+    def test_parent_prop_calls_setter(self, rhythm):
+        rhythm.parent = "I am your father"
+        rhythm.set_parent.assert_called_once_with("I am your father")
+
+    @inject_rhythm.mocked_getters()
+    def test_parent_prop_calls_getter(self, rhythm):
+        rhythm.get_parent.return_value = "I am your father"
+        self.assertEqual(rhythm.parent, "I am your father")
+
+    #######################################################################
+    # post_init tests disabled, slaved rhythms have no post_init function #
+    #######################################################################
+
+    def test_constructor_calls_post_init_with_correct_arguments(self, rhythm=None):
+        pass
+
+    def test_constructor_calls_post_init_with_no_arguments(self, rhythm=None):
+        pass
+
+    def test_post_init_calls_bpm_setter(self, rhythm=None):
+        pass
+
+    def test_post_init_calls_duration_in_ticks_setter(self, rhythm=None):
+        pass
+
+    def test_post_init_calls_duration_in_ticks_setter_when_given_duration_alias(self, rhythm=None):
+        pass
+
+    def test_post_init_calls_resolution_setter(self, rhythm=None):
+        pass
+
+    def test_post_init_calls_time_signature_setter(self, rhythm=None):
+        pass
+
+    def test_post_init_doesnt_call_setters_when_given_anything(self, rhythm=None):
+        pass
+
+
+class TestTrack(TestSlavedRhythm):
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[Rhythm]:
+        return Track
+
+    @inject_rhythm.no_mock(track_name="kick")
+    def test_track_name_equals_constructor_argument(self, rhythm):
+        self.assertEqual(rhythm.get_name(), "kick")
+
+    @inject_rhythm.no_mock()
+    def test_track_name_prop_calls_getter(self, rhythm):
+        rhythm.get_name = MagicMock(return_value="Juan")
+        self.assertEqual(rhythm.name, "Juan")
+
+    @inject_rhythm.no_mock()
+    def test_track_name_read_only(self, rhythm):
+        self.assertRaises(AttributeError, setattr, rhythm, "name", "Juan")
+
+
+class TestPolyphonicRhythmImpl(TestRhythmBase):
+
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        return PolyphonicRhythmImpl
+
+    @inject_rhythm.mocked_post_init(bpm=123, resolution=234, time_signature=(5, 4), duration_in_ticks=345, duration=456)
+    def test_constructor_calls_post_init_with_correct_arguments(self, rhythm):
+        rhythm.post_init.assert_called_once_with(
+            bpm=123,
+            time_signature=(5, 4),
+            duration_in_ticks=345,
+            duration=456
+            # resolution should not be passed to post_init, it should be handled at the PolyphonicRhythmImpl level,
+            # not at the base level
+        )
+
+    @staticmethod
+    def create_fake_named_track(track_name):
+        track = MagicMock(Track)
+        track.name = track_name
+        track.get_name.return_value = track_name
+        return track
+
+    ###############################################
+    # set_tracks/track_iterator/get_track_by_name #
+    ###############################################
+
+    @inject_rhythm.mocked_setters()
+    def test_set_tracks_adds_all_tracks(self, rhythm):
+        kick, snare, tom = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks((kick, snare, tom), 16)
+        actual_tracks = set(rhythm.get_track_iterator())
+        self.assertIn(kick, actual_tracks)
+        self.assertIn(snare, actual_tracks)
+        self.assertIn(tom, actual_tracks)
+
+    @inject_rhythm.mocked_setters()
+    def test_set_tracks_adds_all_tracks_same_order_as_iterator_returns(self, rhythm):
+        kick, snare, tom = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks((kick, snare, tom), 16)
+        actual_kick, actual_snare, actual_tom = rhythm.get_track_iterator()
+        self.assertIs(actual_kick, kick)
+        self.assertIs(actual_snare, snare)
+        self.assertIs(actual_tom, tom)
+
+    @inject_rhythm.mocked_setters()
+    def test_set_tracks_adds_all_tracks_same_order_as_iterator_returns(self, rhythm):
+        kick, snare, tom = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks((kick, snare, tom), 16)
+        self.assertIs(rhythm.get_track_by_name("kick"), kick)
+        self.assertIs(rhythm.get_track_by_name("snare"), snare)
+        self.assertIs(rhythm.get_track_by_name("tom"), tom)
+
+    @inject_rhythm.mocked_setters()
+    def test_set_tracks_parents_tracks_to_rhythm(self, rhythm):
+        tracks = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks(tracks, 16)
+
+        for track in rhythm.get_track_iterator():
+            with self.subTest(name="track_%s" % track.name):
+                self.assertIs(track.parent, rhythm)
+
+    @inject_rhythm.mocked_setters()
+    def test_set_tracks_sets_resolution(self, rhythm):
+        rhythm.set_tracks([], 128)
+        rhythm.set_resolution.assert_called_once_with(128)
+
+    @inject_rhythm.no_mock()
+    def test_set_tracks_updates_duration_to_last_onset_tick(self, rhythm):
+        rhythm.get_last_onset_tick = MagicMock(return_value=123)
+        rhythm.set_tracks([], 0)
+        self.assertEqual(rhythm.get_duration_in_ticks(), 123)
+
+    #########################
+    # track name validation #
+    #########################
+
+    @inject_rhythm.mocked_setters()
+    def test_set_tracks_raises_equally_named_tracks_error(self, rhythm):
+        track_a = self.create_fake_named_track("i_am_fake")
+        track_b = self.create_fake_named_track("i_am_fake")
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        self.assertRaises(PolyphonicRhythm.EquallyNamedTracksError, rhythm.set_tracks, (track_a, track_b), 16)
+
+    @inject_rhythm.no_mock()
+    def test_set_tracks_raises_illegal_track_name(self, rhythm):
+        track = self.create_fake_named_track("")
+        error = "that name is illegal"
+        rhythm.__get_track_naming_error__ = MagicMock(return_value=error)
+        self.assertRaisesRegex(PolyphonicRhythm.IllegalTrackName, error, rhythm.set_tracks, [track], 0)
+
+    ###############
+    # track count #
+    ###############
+
+    @inject_rhythm.mocked_setters()
+    def test_track_count(self, rhythm):
+        tracks = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom", "hi-hat", "crash"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks(tracks, 0)
+        self.assertEqual(rhythm.get_track_count(), 5)
+
+    ##################
+    # rescale onsets #
+    ##################
+
+    @inject_rhythm.no_mock()
+    def test_set_resolution_calls_rescaling(self, rhythm):
+        rhythm.get_last_onset_tick = MagicMock(return_value=0)
+        rhythm.__rescale_onset_ticks__ = MagicMock()
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks(tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"]), 16)
+        rhythm.set_resolution(32)
+        rhythm.__rescale_onset_ticks__.assert_called_once_with(16, 32)
+
+    ###############
+    # onset count #
+    ###############
+
+    @inject_rhythm.mocked_setters()
+    def test_onset_count_sum_of_track_onset_count(self, rhythm):
+        track_a, track_b = MagicMock(Track), MagicMock(Track)
+        track_a.get_onset_count.return_value = 4
+        track_b.get_onset_count.return_value = 7
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks((track_a, track_b), 0)
+        self.assertEqual(rhythm.get_onset_count(), 11)
+
+    @inject_rhythm.no_mock()
+    def test_onset_count_zero_if_no_tracks(self, rhythm):
+        self.assertEqual(rhythm.get_onset_count(), 0)
+
+
+class TestRhythmLoop(TestPolyphonicRhythmImpl):
+
+    class RhythmLoopMockedSettersMixin(RhythmMockedSetters, metaclass=ABCMeta):
+        def __init__(self):
+            RhythmMockedSetters.__init__(self)
+            self.set_name = MagicMock()
+
+    class RhythmLoopMockedGettersMixin(RhythmMockedGetters, metaclass=ABCMeta):
+        def __init__(self):
+            RhythmMockedGetters.__init__(self)
+            self.get_name = MagicMock()
+
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        return RhythmLoop
+
+    @classmethod
+    def get_mocked_setters_mixin(cls):
+        return cls.RhythmLoopMockedSettersMixin
+
+    @classmethod
+    def get_mocked_getters_mixin(cls):
+        return cls.RhythmLoopMockedGettersMixin
+
+    #################
+    # name property #
+    #################
+
+    @inject_rhythm.mocked_setters()
+    def test_name_prop_calls_setter(self, rhythm):
+        assert rhythm.name != "Jorge"
+        rhythm.name = "Jorge"
+        rhythm.set_name.assert_called_once_with("Jorge")
+
+    @inject_rhythm.mocked_getters()
+    def test_name_prop_calls_getter(self, rhythm):
+        assert rhythm.name != "Jorge"
+        rhythm.get_name.return_value = "Jorge"
+        self.assertEqual(rhythm.name, "Jorge")
+
+    @inject_rhythm.no_mock()
+    def test_name_setter_getter(self, rhythm):
+        assert rhythm.get_name() != "Jorge"
+        rhythm.set_name("Jorge")
+        self.assertEqual(rhythm.get_name(), "Jorge")
+
+    @inject_rhythm.no_mock(name="Jorge")
+    def test_name_getter_returns_constructor_arg(self, rhythm):
+        self.assertEqual(rhythm.get_name(), "Jorge")
+
+    #################################
+    # duration snapping to downbeat #
+    #################################
+
+    @inject_rhythm.type
+    def _create_rhythm_mocked_ts_and_res(self, rhythm_class, time_signature=False, resolution=False):
+        rhythm = rhythm_class()
+        if time_signature is not False:
+            rhythm.get_time_signature = MagicMock(return_value=time_signature)
+        if resolution is not False:
+            rhythm.get_resolution = MagicMock(return_value=resolution)
+        return rhythm
+
+    def test_duration_in_ticks_setter_permissive_when_no_downbeat_can_be_computed(self):
+        rhythms = {
+            'no_ts-no_res': self._create_rhythm_mocked_ts_and_res(time_signature=None, resolution=0),
+            'no_ts': self._create_rhythm_mocked_ts_and_res(time_signature=None, resolution=16),
+            'no_res': self._create_rhythm_mocked_ts_and_res(time_signature=TimeSignature(4, 4), resolution=0)
+        }
+
+        for test_name, rhythm in rhythms.items():
+            with self.subTest(name=test_name):
+                with patch.object(RhythmBase, "set_duration_in_ticks") as mock:
+                    rhythm.set_duration_in_ticks(123)
+                    mock.assert_called_once_with(123)
+
+    def test_duration_in_ticks_setter_snaps_given_duration_to_next_downbeat_when_downbeat_can_be_computed(self):
+        def do_subtest(name, measure_duration, given_duration, expected_duration, ts=None, res=16):
+            rhythm = self._create_rhythm_mocked_ts_and_res(time_signature=ts or TimeSignature(4, 4), resolution=res)
+            rhythm.get_measure_duration = MagicMock(return_value=measure_duration)
+            rhythm.set_duration_in_ticks(given_duration)
+            with self.subTest(name=name):
+                self.assertEqual(rhythm.get_duration_in_ticks(), expected_duration)
+
+        subtest_info = [
+            ("zero-duration-not-changed", 64, 0, 0),
+            ("duration-snaps-to-first-rounded-downbeat", 64, 33, 64),
+            ("duration-snaps-to-first-non-rounded-downbeat", 64, 1, 64),
+            ("duration-snaps-to-nth-rounded-downbeat", 64, 225, 256),
+            ("duration-snaps-to-nth-non-rounded-downbeat", 64, 193, 256),
+            ("duration-at-downbeat-not-changed", 64, 192, 192)
+        ]
+
+        for args in subtest_info:
+            do_subtest(*args)
+
+    def test_non_zero_duration_is_updated_as_soon_as_downbeat_is_computable(self):
+        with_ts_without_res = self._create_rhythm_mocked_ts_and_res(time_signature=TimeSignature(4, 4))
+        with_res_without_ts = self._create_rhythm_mocked_ts_and_res(resolution=16)
+
+        for r in [with_ts_without_res, with_res_without_ts]:
+            r.set_duration_in_ticks = MagicMock()
+            r.get_duration_in_ticks = MagicMock(return_value=16)  # <- non-zero duration
+
+        with self.subTest(name="completing_with_resolution"):
+            with_ts_without_res.set_resolution(16)
+            with_ts_without_res.set_duration_in_ticks.assert_called_once()
+
+        with self.subTest(name="completing_with_time_signature"):
+            with_res_without_ts.set_time_signature(TimeSignature(4, 4))
+            with_res_without_ts.set_duration_in_ticks.assert_called_once()
+
+
+class TestMidiRhythm(TestRhythmLoop):
+    @classmethod
+    def get_rhythm_class(cls) -> tp.Type[RhythmBase]:
+        return MidiRhythm
+
+    ###############################################
+    # loading from midi pattern integration tests #
+    ###############################################
+
+    # noinspection SpellCheckingInspection
+    @staticmethod
+    def _create_midi_time_signature_mock_event(numerator, denominator, metronome=24, thirtyseconds=8, tick=0):
+        ts_event = MagicMock(midi.TimeSignatureEvent)
+        ts_event.get_numerator.return_value = numerator
+        ts_event.get_denominator.return_value = denominator
+        ts_event.get_thirtyseconds.return_value = thirtyseconds
+        ts_event.get_metronome.return_value = metronome
+        ts_event.tick = tick
+        return ts_event
+
+    @staticmethod
+    def _create_midi_set_tempo_mock_event(bpm, tick=0):
+        bpm_event = MagicMock(midi.SetTempoEvent)
+        bpm_event.get_bpm.return_value = bpm
+        bpm_event.tick = tick
+        return bpm_event
+
+    @staticmethod
+    def _create_midi_note_on_mock_events(notes):
+        for rel_tick, pitch, velocity in notes:
+            event = MagicMock(midi.NoteOnEvent)
+            event.tick = rel_tick
+            event.get_velocity.return_value = velocity
+            event.get_pitch.return_value = pitch
+            yield event
+
+    @staticmethod
+    def _create_midi_key_mock(name, pitch, abbreviation):
+        midi_key = MagicMock(MidiKey)
+        midi_key.pitch = pitch
+        midi_key.name = name
+        midi_key.abbreviation = abbreviation
+        return midi_key
+
+    ##########################################
+    # from/to midi pattern integration tests #
+    ##########################################
+
+    @inject_rhythm.mocked_setters(midi_mapping=MagicMock(MidiMapping))
+    def test_load_midi_pattern(self, rhythm):
+        kick, snare = 36, 38
+
+        expected_ts = TimeSignature(6, 8)
+        expected_bpm = 180
+        expected_kick_onsets = (Onset(0, 80), Onset(3, 40), Onset(7, 80), Onset(12, 80))
+        expected_snare_onsets = (Onset(2, 80), Onset(10, 60))
+        expected_resolution = 16
+
+        kick_key_mock = self._create_midi_key_mock("kick", kick, "kck")
+        snare_key_mock = self._create_midi_key_mock("snare", snare, "snr")
+
+        assert isinstance(rhythm.midi_mapping, MagicMock), \
+            "something went wrong in the constructor, midi_mapping was not set"
+        rhythm.midi_mapping.find_by_pitch = lambda pitch: kick_key_mock if pitch == kick else snare_key_mock
+
+        midi_track = midi.Track([
+            self._create_midi_time_signature_mock_event(expected_ts.numerator, expected_ts.denominator),
+            self._create_midi_set_tempo_mock_event(expected_bpm),
+            midi.NoteOnEvent(tick=0, pitch=kick, velocity=expected_kick_onsets[0].velocity),
+            midi.NoteOnEvent(tick=2, pitch=snare, velocity=expected_snare_onsets[0].velocity),
+            midi.NoteOnEvent(tick=1, pitch=kick, velocity=expected_kick_onsets[1].velocity),
+            midi.NoteOnEvent(tick=4, pitch=kick, velocity=expected_kick_onsets[2].velocity),
+            midi.NoteOnEvent(tick=3, pitch=snare, velocity=expected_snare_onsets[1].velocity),
+            midi.NoteOnEvent(tick=2, pitch=kick, velocity=expected_kick_onsets[3].velocity)
+        ])
+
+        pattern = midi.Pattern([midi_track], resolution=expected_resolution)
+        rhythm.load_midi_pattern(pattern)
+        kick_track, snare_track = tuple(rhythm.get_track_iterator())
+
+        with self.subTest("track_onsets_set_correctly"):
+            self.assertEqual(kick_track.get_onsets(), expected_kick_onsets)
+            self.assertEqual(snare_track.get_onsets(), expected_snare_onsets)
+
+        with self.subTest("track_names_set_correctly"):
+            self.assertEqual(kick_track.get_name(), kick_key_mock.abbreviation)
+            self.assertEqual(snare_track.get_name(), snare_key_mock.abbreviation)
+
+        with self.subTest("bpm_set_correctly"):
+            rhythm.set_bpm.assert_called_once_with(float(180))
+
+        with self.subTest("time_signature_set_correctly"):
+            try:
+                rhythm.set_time_signature.assert_called_once_with(TimeSignature(6, 8))
+            except AssertionError:
+                rhythm.set_time_signature.assert_called_once_with((6, 8))
+
+        with self.subTest("resolution_set_correctly"):
+            rhythm.set_resolution.assert_called_once_with(expected_resolution)
+
+    @inject_rhythm.mocked_getters(midi_mapping=MagicMock(MidiMapping))
+    def test_as_midi_pattern(self, rhythm):
+        kick, snare = 36, 38
+
+        kick_key_mock = self._create_midi_key_mock("kick", kick, "kck")
+        snare_key_mock = self._create_midi_key_mock("snare", snare, "snr")
+
+        assert isinstance(rhythm.midi_mapping, MagicMock), \
+            "something went wrong in the constructor, midi_mapping was not set"
+        rhythm.midi_mapping.find_by_abbreviation = \
+            lambda abbr: kick_key_mock if abbr == kick_key_mock.abbreviation else snare_key_mock
+
+        kick_onsets = (Onset(0, 80), Onset(3, 40), Onset(7, 80), Onset(12, 80))
+        snare_onsets = (Onset(2, 80), Onset(10, 60))
+        time_signature = TimeSignature(6, 8)
+        resolution = 16
+        bpm = 180
+
+        kick_track = Track(kick_onsets, kick_key_mock.abbreviation, rhythm)
+        snare_track = Track(snare_onsets, snare_key_mock.abbreviation, rhythm)
+
+        rhythm.get_track_iterator = MagicMock(return_value=iter((kick_track, snare_track)))
+        rhythm.get_resolution.return_value = resolution
+        rhythm.get_time_signature.return_value = time_signature
+        rhythm.get_bpm.return_value = bpm
+        rhythm.get_name.return_value = "Jorge"
+
+        midi_pattern = rhythm.as_midi_pattern(note_length=0)
+
+        self.assertEqual(midi_pattern.resolution, resolution)
+        self.assertEqual(len(midi_pattern), 1)
+
+        midi_track = midi_pattern[0]
+        actual_track_name_event, actual_time_signature_event, \
+            actual_tempo_event, *actual_note_events, actual_eot_event = midi_track
+
+        self.assertIsInstance(actual_track_name_event, midi.TrackNameEvent)
+        self.assertEqual(actual_track_name_event.text, "Jorge")
+
+        self.assertIsInstance(actual_time_signature_event, midi.TimeSignatureEvent)
+        self.assertEqual(actual_time_signature_event.numerator, time_signature.numerator)
+        self.assertEqual(actual_time_signature_event.denominator, time_signature.denominator)
+
+        self.assertIsInstance(actual_tempo_event, midi.SetTempoEvent)
+        self.assertEqual(actual_tempo_event.bpm, midi.SetTempoEvent(bpm=float(bpm)).bpm)
+
+        self.assertIsInstance(actual_eot_event, midi.EndOfTrackEvent)
+
+        expected_note_events = (
+            midi.NoteOnEvent(tick=0, pitch=kick, velocity=kick_onsets[0].velocity),
+            midi.NoteOffEvent(tick=0, pitch=kick, velocity=0),
+
+            midi.NoteOnEvent(tick=2, pitch=snare, velocity=snare_onsets[0].velocity),
+            midi.NoteOffEvent(tick=0, pitch=snare, velocity=0),
+
+            midi.NoteOnEvent(tick=1, pitch=kick, velocity=kick_onsets[1].velocity),
+            midi.NoteOffEvent(tick=0, pitch=kick, velocity=0),
+
+            midi.NoteOnEvent(tick=4, pitch=kick, velocity=kick_onsets[2].velocity),
+            midi.NoteOffEvent(tick=0, pitch=kick, velocity=0),
+
+            midi.NoteOnEvent(tick=3, pitch=snare, velocity=snare_onsets[1].velocity),
+            midi.NoteOffEvent(tick=0, pitch=snare, velocity=0),
+
+            midi.NoteOnEvent(tick=2, pitch=kick, velocity=kick_onsets[3].velocity),
+            midi.NoteOffEvent(tick=0, pitch=kick, velocity=0)
+        )  # type: tp.Tuple[midi.NoteEvent]
+
+        self.assertEqual(len(actual_note_events), len(expected_note_events))
+
+        for expected_event, actual_event in zip(expected_note_events, actual_note_events):
+            self.assertEqual(expected_event.tick, actual_event.tick)
+            if isinstance(expected_event, midi.NoteOnEvent):
+                self.assertIsInstance(actual_event, midi.NoteOnEvent)
+            else:
+                assert isinstance(expected_event, midi.NoteOffEvent)
+                self.assertIsInstance(actual_event, midi.NoteOffEvent)
+            self.assertEqual(expected_event.velocity, actual_event.velocity)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()

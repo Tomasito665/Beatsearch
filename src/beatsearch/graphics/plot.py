@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 import numpy as np
 import typing as tp
-from beatsearch.data.rhythm import concretize_unit, Unit, RhythmLoop, PolyphonicRhythm, Rhythm as Rhythm
+from beatsearch.data.rhythm import concretize_unit, Unit, RhythmLoop, PolyphonicRhythmImpl, Rhythm, Track
 from beatsearch.utils import merge_dicts
 from itertools import cycle
 
@@ -236,7 +236,7 @@ class RhythmLoopPlotter(object):
         self._unit = unit
 
     @plot("Schillinger Rhythm Notation")
-    def schillinger(self, track: PolyphonicRhythm.Track, **kwargs):
+    def schillinger(self, track: Track, **kwargs):
         axes = kwargs['axes']
         axes.yaxis.set_ticklabels([])
         axes.yaxis.set_visible(False)
@@ -253,14 +253,14 @@ class RhythmLoopPlotter(object):
         return axes.plot(schillinger_chain, drawstyle='steps-pre', color=kwargs['color'], linewidth=2.5)
 
     @plot("Chronotonic notation")
-    def chronotonic(self, track: PolyphonicRhythm.Track, **kwargs):
+    def chronotonic(self, track: Track, **kwargs):
         axes = kwargs['axes']
         chronotonic_chain = track.get_chronotonic_chain(kwargs['concrete_unit'])
         self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'])
         return axes.plot(chronotonic_chain, '--.', color=kwargs['color'])
 
     @plot("Polygon notation", subplot_layout='combined', max_pulse_circle_count=16)
-    def polygon(self, track: PolyphonicRhythm.Track, quantize=False, **kwargs):
+    def polygon(self, track: Track, quantize=False, **kwargs):
         axes = kwargs['axes']
         n_pulses = kwargs['n_pulses']
 
@@ -345,7 +345,7 @@ class RhythmLoopPlotter(object):
         return circle
 
     @plot("Spectral notation", subplot_layout='v_stack', share_axis='x')
-    def spectral(self, track: PolyphonicRhythm.Track, quantize=False, **kwargs):
+    def spectral(self, track: Track, quantize=False, **kwargs):
         axes = kwargs['axes']
         axes.xaxis.set_visible(False)
         axes.xaxis.set_ticklabels([])
@@ -356,7 +356,7 @@ class RhythmLoopPlotter(object):
         return axes.bar(list(range(len(inter_onsets))), inter_onsets, width=0.95, color=kwargs['color'])
 
     @plot("TEDAS Notation", subplot_layout='v_stack', share_axis='x')
-    def tedas(self, track: PolyphonicRhythm.Track, quantize=False, **kwargs):
+    def tedas(self, track: Track, quantize=False, **kwargs):
         axes = kwargs['axes']
         concrete_unit = kwargs['concrete_unit']
         inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=quantize)
@@ -372,7 +372,7 @@ class RhythmLoopPlotter(object):
         return axes.bar(onset_times, inter_onsets, width=inter_onsets, align='edge', **styles)
 
     @plot("Inter-onset interval histogram")
-    def inter_onset_interval_histogram(self, track: PolyphonicRhythm.Track, **kwargs):
+    def inter_onset_interval_histogram(self, track: Track, **kwargs):
         axes = kwargs['axes']
         occurrences, interval_durations = track.get_interval_histogram(kwargs['concrete_unit'])
         return axes.bar(interval_durations, occurrences, color=kwargs['color'])

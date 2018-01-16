@@ -5,7 +5,7 @@ import threading
 from sortedcollections import OrderedSet
 from beatsearch.data.rhythm import (
     RhythmLoop,
-    PolyphonicRhythm,
+    PolyphonicRhythmImpl,
     create_rumba_rhythm
 )
 from beatsearch.data.metrics import (
@@ -25,7 +25,7 @@ class BSRhythmPlayer(object):
     def __init__(self):
         self._on_playback_ended_callback = no_callback
 
-    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythmImpl]) -> None:
         raise NotImplementedError
 
     def stop_playback(self):  # type: () -> None
@@ -51,14 +51,14 @@ class BSRhythmPlayer(object):
 
 class BSFakeRhythmPlayer(BSRhythmPlayer):
 
-    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythm = create_rumba_rhythm()):
+    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythmImpl = create_rumba_rhythm()):
         super(BSFakeRhythmPlayer, self).__init__()
         self._playback_duration = playback_duration  # type: float
         self._timer = None                           # type: tp.Union[threading.Timer, None]
-        self._rhythm = rhythm                        # type: PolyphonicRhythm
+        self._rhythm = rhythm                        # type: PolyphonicRhythmImpl
         self._repeat = False                         # type: bool
 
-    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythmImpl]) -> None:
         @wraps(self.on_playback_ended)
         def on_playback_ended():
             if self.get_repeat():
