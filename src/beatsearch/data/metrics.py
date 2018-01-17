@@ -2,39 +2,9 @@ import inspect
 import math
 import typing as tp
 from collections import OrderedDict
-
+from abc import abstractmethod, ABCMeta
 from beatsearch.data.rhythm import convert_time, MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm
 from beatsearch.utils import friendly_named_class
-
-
-def check_iterables_meet_length_policy(iterables, len_policy):
-    """
-    Checks whether the given iterables meet a certain duration policy. Duration policies are:
-        'exact' - met when all iterables have the exact same length and are not empty
-        'multiple' - met when the length of the largest iterable is a multiple of all the other iterable lengths
-        'fill' - met when any of the chains is empty
-
-    :param iterables: iterables to check the lengths of
-    :param len_policy: one of {'exact', 'multiple' or 'fill'}
-    :return length of the largest iterable
-    """
-
-    if not iterables:
-        return
-
-    l = [len(c) for c in iterables]  # lengths
-
-    if len_policy == 'exact':
-        if not all(x == l[0] for x in l):
-            raise ValueError("When length policy is set to 'exact', iterables should have the same lengths")
-    elif len_policy == 'multiple':
-        if not all(x % l[0] == 0 or l[0] % x == 0 for x in l):
-            raise ValueError("When length policy is set to 'multiple', the length of the largest "
-                             "iterable should be a multiple of all the other iterable lengths")
-    elif len_policy != 'fill':
-        raise ValueError("Unknown length policy: '%s'" % len_policy)
-
-    return max(l)
 
 
 class DistanceMeasure(object):
@@ -44,14 +14,15 @@ class DistanceMeasure(object):
         raise NotImplementedError
 
 
-class MonophonicRhythmDistanceMeasure(DistanceMeasure):
+class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
     """Abstract base class for monophonic rhythm distance measures
 
     This is an abstract base class for monophonic rhythm distance measures. It measures the distance
     between two MonophonicRhythmImpl objects.
     """
 
-    LENGTH_POLICIES = ['exact', 'multiple', 'fill']
+    LENGTH_POLICIES = ["exact", "multiple", "fill"]
+    DEFAULT_LENGTH_POLICY = LENGTH_POLICIES[0]
 
     class UnknownLengthPolicy(Exception):
         def __init__(self, given_length_policy):
@@ -59,7 +30,18 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
                 "Given %s, please choose between: %s" % (
                     given_length_policy, MonophonicRhythmDistanceMeasure.LENGTH_POLICIES))
 
-    def __init__(self, unit, length_policy):
+    class LengthPolicyNotMet(Exception):
+        MESSAGES = {
+            'exact': "When length policy is set to \"exact\", both iterables should have the same number of elements",
+            'multiple': "When length policy is set to \"multiple\", the length of the largest "
+                        "iterable should be a multiple of all the other iterable lengths"
+        }
+
+        def __init__(self, length_policy):
+            msg = self.MESSAGES[length_policy]
+            super().__init__(msg)
+
+    def __init__(self, unit="ticks", length_policy=DEFAULT_LENGTH_POLICY):
         """
         Creates a new monophonic rhythm distance measure.
 
@@ -69,11 +51,9 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
 
         self._len_policy = ''
         self._internal_unit = 0
-        self._output_unit = 0
 
         self.length_policy = length_policy
         self.internal_unit = unit
-        self.output_unit = unit
 
     @property
     def length_policy(self):
@@ -94,40 +74,24 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
 
     @length_policy.setter
     def length_policy(self, length_policy):
-        valid_policies = MonophonicRhythmDistanceMeasure.LENGTH_POLICIES
+        valid_policies = self.LENGTH_POLICIES
         if length_policy not in valid_policies:
-            raise MonophonicRhythmDistanceMeasure.UnknownLengthPolicy(length_policy)
+            raise self.UnknownLengthPolicy(length_policy)
         self._len_policy = length_policy
 
     @property
     def internal_unit(self):
         """
-        Unit used internally for distance computation. This unit is given to __get_iterable__
+        Unit used internally for distance computation. This unit is given to __get_iterable__.
         """
 
         return self._internal_unit
 
     @internal_unit.setter
     def internal_unit(self, internal_unit):
-        if internal_unit != 'ticks':
+        if internal_unit != "ticks":
             convert_time(1, 1, internal_unit)
         self._internal_unit = internal_unit
-
-    @property
-    def output_unit(self):
-        """
-        The output unit is the unit of the distance returned by get_distance. E.g. when the output_unit is 'ticks', the
-        distance returned by get_distance will be in 'ticks'.
-        """
-
-        return self._output_unit
-
-    @output_unit.setter
-    def output_unit(self, output_unit):
-        if output_unit != 'ticks':
-            # validates the given unit
-            convert_time(1, 1, output_unit)
-        self._output_unit = output_unit
 
     def get_distance(self, rhythm_a: MonophonicRhythm, rhythm_b: MonophonicRhythm):
         """
@@ -138,23 +102,24 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
         :return: distance between the given monophonic rhythms
         """
 
-        internal_unit_in_ticks = self._internal_unit == 'ticks'
-        output_unit_in_ticks = self._output_unit == 'ticks'
+        internal_unit_in_ticks = self._internal_unit == "ticks"
         res_a, res_b = rhythm_a.get_resolution(), rhythm_b.get_resolution()
-        if (internal_unit_in_ticks or output_unit_in_ticks) and res_a != res_b:
+        if internal_unit_in_ticks and res_a != res_b:
             raise ValueError("%s unit set to 'ticks', but given rhythms have "
                              "different resolutions (%i != %i)" %
                              ("Internal" if internal_unit_in_ticks else "Output", res_a, res_b))
         internal_unit = res_a if internal_unit_in_ticks else self._internal_unit
-        output_unit = res_a if output_unit_in_ticks else self._output_unit
 
         rhythms = [rhythm_a, rhythm_b]
         iterables = [self.__get_iterable__(t, internal_unit) for t in rhythms]
         cookies = [self.__get_cookie__(t, internal_unit) for t in rhythms]
-        max_len = self._check_if_iterables_meet_len_policy(*iterables)
-        distance = self.__compute_distance__(max_len, *(iterables + cookies))
-        return convert_time(distance, internal_unit, output_unit, quantize=False)
 
+        if not self.__class__.check_if_iterables_meet_len_policy(self.length_policy, *iterables):
+            raise self.LengthPolicyNotMet(self.length_policy)
+
+        return self.__compute_distance__(max(len(i) for i in iterables), *(iterables + cookies))
+
+    @abstractmethod
     def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
         """
         Should prepare and return the rhythm representation on which the similarity measure is based. The returned
@@ -180,7 +145,9 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
 
         return rhythm
 
-    def __compute_distance__(self, max_len, iterable_a, iterable_b, cookie_a, cookie_b):
+    @staticmethod  # TODO enforce python 3.3
+    @abstractmethod
+    def __compute_distance__(max_len, iterable_a, iterable_b, cookie_a, cookie_b):
         """
         The result of this method is returned by get_distance. If that method is given two rhythms a and b, this method
         is given both the iterables of a and b and the cookies of a and b, returned by respectively __get_iterable__
@@ -196,26 +163,31 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
 
         raise NotImplementedError
 
-    def _check_if_iterables_meet_len_policy(self, iterable_a, iterable_b):
-        if not iterable_a or not iterable_b:
-            return
+    @classmethod
+    def check_if_iterables_meet_len_policy(cls, length_policy, iterable_a, iterable_b):
+        """
+        Checks whether the given iterables meet a certain duration policy. Duration policies are:
+            'exact'     - met when all iterables have the exact same length and are not empty
+            'multiple'  - met when the length of the largest iterable is a multiple of all the other iterable lengths
+            'fill'      - met when any of the chains is empty
+
+        :param length_policy: one of {'exact', 'multiple' or 'fill'}
+        :param iterable_a: iterable
+        :param iterable_b: iterable
+        :return: True if the two iterables meet the length policy, False if not
+        :raises ValueError if given unknown length policy
+        """
 
         l = [len(iterable_a), len(iterable_b)]
 
-        if self.length_policy == "exact":
-            if l[0] != l[1]:
-                raise ValueError("When length policy is set to \"exact\", both iterables "
-                                 "should have the same number of elements")
+        if length_policy == "exact":
+            return l[0] == l[1]
+        elif length_policy == "multiple":
+            return all(x % l[0] == 0 or l[0] % x == 0 for x in l)
+        elif length_policy == "fill":
+            return l[0] > 0 and l[1] > 0
 
-        elif self.length_policy == "multiple":
-            if not all(x % l[0] == 0 or l[0] % x == 0 for x in l):
-                raise ValueError("When length policy is set to \"multiple\", the length of the largest "
-                                 "iterable should be a multiple of all the other iterable lengths")
-
-        elif self.length_policy != "fill":
-            raise ValueError("Unknown length policy: \"%s\"" % self.length_policy)
-
-        return max(l)
+        raise cls.UnknownLengthPolicy(length_policy)
 
     __measures__ = {}  # monophonic rhythm distance implementations by __friendly_name__
 
@@ -228,17 +200,17 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure):
         :return: an ordered dictionary containing all subclasses of MonophonicRhythmDistanceMeasure by name
         """
 
-        if len(MonophonicRhythmDistanceMeasure.__measures__) != MonophonicRhythmDistanceMeasure.__subclasses__():
+        if len(MonophonicRhythmDistanceMeasure.__measures__) != len(MonophonicRhythmDistanceMeasure.__subclasses__()):
             measures = OrderedDict()
-            for tdm in cls.__subclasses__():
-                name = tdm.__name__
+            for dm in cls.__subclasses__():  # Distance Measure
+                name = dm.__name__
                 if friendly_name:
                     try:
                         # noinspection PyUnresolvedReferences
-                        name = tdm.__friendly_name__
+                        name = dm.__friendly_name__
                     except AttributeError:
                         pass
-                measures[name] = tdm
+                measures[name] = dm
             cls.__measures__ = measures
 
         return MonophonicRhythmDistanceMeasure.__measures__
@@ -277,13 +249,14 @@ class HammingDistanceMeasure(MonophonicRhythmDistanceMeasure):
     where the binary rhythm chains do not match. The hamming distance is always an integer.
     """
 
-    def __init__(self, unit='eighths', length_policy='multiple'):
-        super(HammingDistanceMeasure, self).__init__(unit, length_policy)
+    def __init__(self, unit="eighths", length_policy="multiple"):
+        super().__init__(unit, length_policy)
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_binary(unit)
 
-    def __compute_distance__(self, n, cx, cy, *cookies):  # cx = (binary) chain x
+    @staticmethod
+    def __compute_distance__(n, cx, cy, *cookies):
         hamming_distance, i = 0, 0
         while i < n:
             x = cx[i % len(cx)]
@@ -299,14 +272,15 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
     The euclidean interval vector distance is the euclidean distance between the inter-onset vectors of the rhythms.
     """
 
-    def __init__(self, unit='ticks', length_policy='exact', quantize=False):
-        super(EuclideanIntervalVectorDistanceMeasure, self).__init__(unit, length_policy)
+    def __init__(self, unit="ticks", length_policy="exact", quantize=False):
+        super().__init__(unit, length_policy)
         self.quantize_enabled = quantize
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_post_note_inter_onset_intervals(unit, self.quantize_enabled)
 
-    def __compute_distance__(self, n, vx, vy, *cookies):
+    @staticmethod
+    def __compute_distance__(n, vx, vy, *cookies):
         sum_squared_dt, i = 0, 0
         while i < n:
             dt = vx[i % len(vx)] - vy[i % len(vy)]
@@ -321,15 +295,16 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
     The interval difference vector distance is based on the interval difference vectors of the rhythms.
     """
 
-    def __init__(self, unit='ticks', length_policy='fill', quantize=False, cyclic=True):
-        super(IntervalDifferenceVectorDistanceMeasure, self).__init__(unit, length_policy)
+    def __init__(self, unit="ticks", length_policy="fill", quantize=False, cyclic=True):
+        super().__init__(unit, length_policy)
         self.quantize_enabled = quantize
         self.cyclic = cyclic
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_interval_difference_vector(self.cyclic, unit, self.quantize_enabled)
 
-    def __compute_distance__(self, n, vx, vy, *cookies):
+    @staticmethod
+    def __compute_distance__(n, vx, vy, *cookies):
         summed_fractions, i = 0, 0
         while i < n:
             x = float(vx[i % len(vx)])
@@ -338,7 +313,7 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
             try:
                 summed_fractions += numerator / denominator
             except ZeroDivisionError:
-                return float('inf')
+                return float("inf")
             i += 1
         return summed_fractions - n
 
@@ -354,8 +329,8 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     operation). Enable this by setting quantize to True in the constructor.
     """
 
-    def __init__(self, unit='eighths', length_policy='multiple', quantize=False):
-        super(SwapDistanceMeasure, self).__init__(unit, length_policy)
+    def __init__(self, unit="eighths", length_policy="multiple", quantize=False):
+        super().__init__(unit, length_policy)
         self.quantize_enabled = quantize
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
@@ -364,7 +339,8 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     def __get_cookie__(self, rhythm: MonophonicRhythmImpl, unit):
         return int(math.ceil(rhythm.get_duration(unit)))
 
-    def __compute_distance__(self, n, vx, vy, dur_x, dur_y):
+    @staticmethod
+    def __compute_distance__(n, vx, vy, dur_x, dur_y):
         swap_distance, i, x_offset, y_offset = 0, 0, 0, 0
         while i < n:
             x_offset = i // len(vx) * dur_x
@@ -382,13 +358,14 @@ class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
     The chronotonic distance is the area difference (aka measure K) of the rhythm's chronotonic chains.
     """
 
-    def __init__(self, unit='eighths', length_policy='multiple'):
-        super(ChronotonicDistanceMeasure, self).__init__(unit, length_policy)
+    def __init__(self, unit="eighths", length_policy="multiple"):
+        super().__init__(unit, length_policy)
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl, unit):
         return rhythm.get_chronotonic_chain(unit)
 
-    def __compute_distance__(self, n, cx, cy, *args):
+    @staticmethod
+    def __compute_distance__(n, cx, cy, *args):
         chronotonic_distance, i = 0, 0
         while i < n:
             x = cx[i % len(cx)]
@@ -474,19 +451,20 @@ def rhythm_pair_track_iterator(rhythm_a: PolyphonicRhythm,
         assert False
 
 
-class PolyphonicRhythmDistanceMeasure(DistanceMeasure):
+class PolyphonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
     """Abstract base class for polyphonic rhythm distance measures
 
     This is an abstract base class for polyphonic rhythm distance measures. It measures the distance
     between two Rhythm objects.
     """
 
+    @abstractmethod
     def get_distance(self, rhythm_a: PolyphonicRhythm, rhythm_b: PolyphonicRhythm) -> tp.Union[float, int]:
         raise NotImplementedError
 
 
 class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
-    def __init__(self, track_distance_measure=HammingDistanceMeasure, tracks='a*', normalize=True):
+    def __init__(self, track_distance_measure=HammingDistanceMeasure, tracks="a*", normalize=True):
         # type: (tp.Union[MonophonicRhythmDistanceMeasure, type], tp.Union[str, tp.Iterable[tp.Any]]) -> None
         self._tracks = []
         self.tracks = tracks
@@ -548,7 +526,7 @@ class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
         """
 
         measure = self.monophonic_measure
-        unit = measure.output_unit
+        unit = measure.internal_unit
         duration = max(rhythm_a.get_duration(unit), rhythm_b.get_duration(unit))
         n_tracks, total_distance = 0, 0
 
