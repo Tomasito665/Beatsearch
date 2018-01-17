@@ -71,7 +71,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         self._tmp_files = set()              # type: tp.Set[str]
         self._start_pos = -1                 # type: float
         self._end_pos = -1                   # type: float
-        self._prev_pos = -1                  # type: float
+        self._end_pos_first_rhythm = -1      # type: float
         self._output_track = output_track    # type: str
         self._current_rhythms = []           # type: tp.List[PolyphonicRhythmImpl]
         self._is_playing = False             # type: bool
@@ -112,8 +112,15 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
     def stop_playback(self) -> None:
         with ReaperApi as api:
             api.OnStopButton()
+
             api.RPR_CSurf_OnMuteChange(self.output_track, True)  # mute output track
             api.RPR_CSurf_OnSoloChange(self.output_track, False)  # un-solo output track
+
+            if self._current_rhythms:
+                assert self._start_pos > 0
+                assert self._end_pos_first_rhythm > 0
+                ReaperUtils.set_time_selection(api, self._start_pos, self._end_pos_first_rhythm)
+
             ReaperUtils.enable_metronome(api, True)
         self._is_playing = False
 
@@ -135,19 +142,28 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
             return
 
         ReaperUtils.clear_track(api, self._output_track)
+        ReaperUtils.delete_all_time_signature_markers(api)
         measure_duration = ReaperUtils.get_measure_duration(api)
 
         # Reaper freaks out when we try to time select starting from 0 so
         # we place the rhythms at the start of the second measure
         api.SetEditCurPos(measure_duration, False, False)
         self._start_pos = api.GetCursorPosition()
+        self._end_pos_first_rhythm = -1
 
         for rhythm in rhythms:
+            ReaperUtils.insert_time_signature_marker(api, rhythm.time_signature)
             temp_file = self.render_rhythm_and_insert_to_track(self._output_track, rhythm, api)
             self._tmp_files.add(temp_file)
 
+            if self._end_pos_first_rhythm < 0:
+                self._end_pos_first_rhythm = api.GetCursorPosition()
+
         self._end_pos = api.GetCursorPosition()
         self._current_rhythms = rhythms
+
+        time_signature_proj_start = ReaperUtils.get_time_signature_at_time(api, 0)
+        ReaperUtils.insert_time_signature_marker(api, time_signature_proj_start)
 
     @staticmethod
     def render_rhythm_and_insert_to_track(output_track, rhythm: MidiRhythm, reaper_api):
@@ -188,10 +204,12 @@ class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
             if first_selected_item is not None:
                 media_take = api.GetMediaItemTake(first_selected_item, 0)
                 media_take_name = api.GetSetMediaItemTakeInfo_String(media_take, "P_NAME", 0, False)[3]
+                position = api.RPR_GetMediaItemInfo_Value(first_selected_item, "D_POSITION")
+                time_signature = ReaperUtils.get_time_signature_at_time(api, position)
+                bpm = ReaperUtils.get_tempo_at_time(api, position)
 
                 midi_resolution = ReaperUtils.get_midi_resolution(api, media_take)
                 midi_notes = tuple(ReaperUtils.midi_note_iter(api, media_take))
-                _, bpm, ts_numerator = api.RPR_GetProjectTimeSignature2(0, 0, 0)
 
         # Note: raise outside ReaperApi context, otherwise it will be caught by beyond.Reaper
         if first_selected_item is None:
@@ -202,12 +220,7 @@ class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
         # add meta data
         midi_track.append(midi.TrackNameEvent(text=media_take_name))
         midi_track.append(midi.SetTempoEvent(bpm=bpm))
-        midi_track.append(midi.TimeSignatureEvent(
-            numerator=ts_numerator,
-            denominator=4,  # TODO Get actual denominator
-            metronome=24,  # TODO Get actual metronome
-            thirtyseconds=8  # TODO Get actual thirty-seconds
-        ))
+        midi_track.append(time_signature.to_midi_event())
 
         # add note on/off events
         for note in midi_notes:
@@ -508,9 +521,11 @@ class ReaperUtils:
         time_signature = cls.get_time_signature(reaper_api, time, project)
         beat_unit = time_signature.get_beat_unit()
 
+        # noinspection PyUnresolvedReferences
         if beat_unit == Unit.QUARTER:
             n_quarter_notes_per_measure = time_signature.numerator
         else:
+            # noinspection PyUnresolvedReferences
             assert beat_unit == Unit.EIGHTH
             n_quarter_notes_per_measure = time_signature.numerator / 2.0
 
@@ -527,13 +542,91 @@ class ReaperUtils:
         """
         Enables or disables the Reaper metronome.
 
-        :param reaper_api:
+        :param reaper_api: reaper api
         :param enabled: true for enabling the metronome, false for disabling
         :return: None
         """
 
         action_id = cls.RPR_COMMAND_ENABLE_METRONOME if enabled else cls.RPR_COMMAND_DISABLE_METRONOME
         reaper_api.RPR_Main_OnCommand(action_id, 0)
+
+    @classmethod
+    def delete_all_time_signature_markers(cls, reaper_api: ReaperApi):
+        """
+        Removes all timesignature/tempo markers.
+
+        :param reaper_api: reaper api
+        :return: None
+        """
+
+        def get_marker_count():
+            return reaper_api.RPR_CountTempoTimeSigMarkers(-1)
+
+        n_markers = get_marker_count()
+
+        while n_markers > 0:
+            reaper_api.RPR_DeleteTempoTimeSigMarker(-1, int(n_markers > 1))
+            n_markers = get_marker_count()
+
+    @classmethod
+    def insert_time_signature_marker(cls, reaper_api: ReaperApi, time_signature, position=-1):
+        """
+        Adds a time signature marker on the given position.
+
+        :param reaper_api: reaper api
+        :param position: position in seconds or -1 for current position
+        :param time_signature: time signature
+        :return: None
+        """
+
+        bpm = cls.get_project_tempo(reaper_api)
+        numerator = time_signature.numerator
+        denominator = time_signature.denominator
+        if position < 0:
+            position = reaper_api.GetCursorPosition()
+        reaper_api.RPR_SetTempoTimeSigMarker(-1, -1, position, -1, -1, bpm, numerator, denominator, False)
+
+    @classmethod
+    def get_project_tempo(cls, reaper_api: ReaperApi):
+        """
+        Returns the project tempo in bpm.
+
+        :param reaper_api: reaper api
+        :return: project tempo in bpm
+        """
+
+        return reaper_api.RPR_GetProjectTimeSignature2(0, 0, 0)[1]
+
+    @classmethod
+    def get_time_signature_at_time(cls, reaper_api: ReaperApi, position=-1) -> TimeSignature:
+        """
+        Returns the time signature at the start of the current project.
+
+        :param reaper_api: reaper api
+        :param position: position in seconds, -1 for current position
+        :return: time signature at the start of the current project as a TimeSignature object
+        """
+
+        if position < 0:
+            position = reaper_api.GetCursorPosition()
+
+        numerator, denominator = reaper_api.RPR_TimeMap_GetTimeSigAtTime(-1, position, 0, 0, 0)[2:4]
+        return TimeSignature(numerator, denominator)
+
+    @classmethod
+    def get_tempo_at_time(cls, reaper_api: ReaperApi, position=-1):
+        """
+        Returns the tempo in bpm at the given position.
+
+        :param reaper_api: reaper api
+        :param position: position in seconds, -1 for current position
+        :return: tempo in bpm at the given position
+        """
+
+        if position < 0:
+            position = reaper_api.GetCursorPosition()
+
+        return reaper_api.RPR_TimeMap_GetTimeSigAtTime(-1, position, 0, 0, 0)[4]
 
 
 if __name__ == "__main__":
