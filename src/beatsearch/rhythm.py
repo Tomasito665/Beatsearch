@@ -1741,7 +1741,9 @@ class MidiRhythm(RhythmLoop):
         midi_track.append(midi.TrackNameEvent(text=self.get_name()))  # track name
         midi_metronome = 24 if self._midi_metronome is None else self._midi_metronome
         midi_track.append(self.get_time_signature().to_midi_event(midi_metronome))  # time signature
-        midi_track.append(midi.SetTempoEvent(bpm=self.get_bpm()))  # tempo
+
+        if self.bpm:
+            midi_track.append(midi.SetTempoEvent(bpm=self.bpm))  # tempo
 
         # add note events
         for track in self.get_track_iterator():
