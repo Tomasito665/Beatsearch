@@ -1077,6 +1077,48 @@ class MonophonicRhythmImpl(RhythmBase, MonophonicRhythmBase):
         self.post_init(**kwargs)
 
 
+class MonophonicRhythmFactory(object):
+    def __init__(self):
+        raise Exception("can't instantiate this class, it is a factory and only contains static methods")
+
+    @classmethod
+    def from_string(cls, onset_string, onset_character="x", velocity=100, resolution=4) -> MonophonicRhythmImpl:
+        """
+        Creates a new monophonic rhythm, given a given string. Each character in the string will represent one tick and
+        each onset character will represent an onset in the rhythm, e.g. "x--x---x--x-x---", given onset character "x".
+
+        :param onset_string: onset string where each onset character will result in an onset, the length of the string
+                             will determine the duration of the rhythm
+        :param onset_character: the onset character
+        :param velocity: the velocity of the onsets (velocity is the same for all onsets)
+        :param resolution: resolution in pulses per quarter note (if res=4, four characters in the onset
+                           string will represent one quarter note)
+        :return: monophonic rhythm object
+        """
+
+        binary_string = tuple((char == onset_character) for char in onset_string)
+        return cls.from_binary_chain(binary_string, velocity, resolution)
+
+    @classmethod
+    def from_binary_chain(cls, binary_chain, velocity=100, resolution=4) -> MonophonicRhythmImpl:
+        """
+        Creates a new monophonic rhythm, given a binary chain (iterable). Each element in the iterable represents one
+        tick. If the element is True, that will result in an onset, e.g. [1, 0, 1, 0, 1, 1, 1, 0].
+
+        :param binary_chain: iterable containing true or false elements
+        :param velocity: the velocity of the onsets (velocity is the same for all onsets)
+        :param resolution: resolution in pulses per quarter note (if res=4, four elements in the binary chain will
+                           represent one quarter note)
+        :return: monophonic rhythm object
+        """
+
+        onsets = filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_chain)))
+        return MonophonicRhythmImpl(onsets=tuple(onsets), duration=len(binary_chain), resolution=resolution)
+
+
+MonophonicRhythm.create = MonophonicRhythmFactory
+
+
 class SlavedRhythmBase(Rhythm, metaclass=ABCMeta):
     """Rhythm abstract base class
 

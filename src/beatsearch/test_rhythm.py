@@ -1308,6 +1308,8 @@ class TestMidiRhythm(TestRhythmLoop):
 
 # TODO Add tests for convert_time -> should always return an int when quantize is True
 
+# TODO Add tests for MonophonicRhythmFactory
+
 class TestOnset(TestCase):
     def test_properties_equal_constructor_args(self):
         args = (123, 75)
