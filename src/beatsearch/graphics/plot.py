@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 import numpy as np
 import typing as tp
-from beatsearch.data.rhythm import concretize_unit, Unit, RhythmLoop, PolyphonicRhythmImpl, Rhythm, Track
+from beatsearch.rhythm import concretize_unit, Unit, RhythmLoop, Rhythm, Track
 from beatsearch.utils import merge_dicts
 from itertools import cycle
 

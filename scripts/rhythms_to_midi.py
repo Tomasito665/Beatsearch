@@ -5,7 +5,7 @@ import midi
 from time import time
 from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
-from beatsearch.data.rhythmcorpus import RhythmCorpus
+from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import print_progress_bar
 
 

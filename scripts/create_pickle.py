@@ -2,7 +2,7 @@ import os
 import pickle
 import sys
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
-from beatsearch.data.rhythm import MidiRhythm
+from beatsearch.rhythm import MidiRhythm
 
 
 def create_ascii_spinner(spinner_chars, n_iters_per_char=32):

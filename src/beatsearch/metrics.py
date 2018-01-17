@@ -3,7 +3,7 @@ import math
 import typing as tp
 from collections import OrderedDict
 from abc import abstractmethod, ABCMeta
-from beatsearch.data.rhythm import convert_time, MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm
+from beatsearch.rhythm import convert_time, MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm
 from beatsearch.utils import friendly_named_class
 
 

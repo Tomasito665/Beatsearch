@@ -3,19 +3,19 @@ from functools import wraps
 import typing as tp
 import threading
 from sortedcollections import OrderedSet
-from beatsearch.data.rhythm import (
+from beatsearch.rhythm import (
     RhythmLoop,
     PolyphonicRhythmImpl,
     create_rumba_rhythm
 )
-from beatsearch.data.metrics import (
+from beatsearch.metrics import (
     MonophonicRhythmDistanceMeasure,
     HammingDistanceMeasure,
     SummedMonophonicRhythmDistance,
     Quantizable
 )
 from beatsearch.config import __USE_NUMPY__
-from beatsearch.data.rhythmcorpus import RhythmCorpus
+from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
 if __USE_NUMPY__:
     import numpy

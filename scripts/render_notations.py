@@ -4,8 +4,8 @@ import midi
 from time import time
 from matplotlib import pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
-from beatsearch.data.rhythmcorpus import RhythmCorpus
-from beatsearch.data.rhythm import Unit
+from beatsearch.rhythmcorpus import RhythmCorpus
+from beatsearch.rhythm import Unit
 from beatsearch.graphics.plot import RhythmLoopPlotter
 from beatsearch.utils import print_progress_bar
 

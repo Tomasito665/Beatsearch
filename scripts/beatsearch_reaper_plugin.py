@@ -16,7 +16,7 @@ from tempfile import TemporaryFile
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoopLoader
-from beatsearch.data.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit
+from beatsearch.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit
 from beatsearch.app.view import BSApp
 # noinspection PyUnresolvedReferences
 import midi

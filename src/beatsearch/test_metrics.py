@@ -4,18 +4,18 @@ from abc import ABCMeta, abstractmethod
 from collections import namedtuple
 from unittest import TestCase, main
 from unittest.mock import patch, MagicMock, PropertyMock, call
-from beatsearch.data.rhythm import MonophonicRhythm, PolyphonicRhythm, \
-    MonophonicRhythmRepresentationsMixin, MonophonicRhythmImpl
+from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, \
+    MonophonicRhythmRepresentationsMixin
 
 # miscellaneous
-from beatsearch.data.metrics import Quantizable
+from beatsearch.metrics import Quantizable
 from beatsearch.utils import friendly_named_class
 
 # rhythm distance measure abstract base classes
-from beatsearch.data.metrics import MonophonicRhythmDistanceMeasure, PolyphonicRhythmDistanceMeasure
+from beatsearch.metrics import MonophonicRhythmDistanceMeasure, PolyphonicRhythmDistanceMeasure
 
 # concrete monophonic rhythm distance measures
-from beatsearch.data.metrics import (
+from beatsearch.metrics import (
     HammingDistanceMeasure,
     EuclideanIntervalVectorDistanceMeasure,
     IntervalDifferenceVectorDistanceMeasure,

@@ -2,20 +2,20 @@ import enum
 import typing as tp
 from functools import wraps, partial
 from unittest import TestCase, main
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from abc import ABCMeta, abstractmethod
 
 # rhythm interfaces
-from beatsearch.data.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm
+from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm
 
 # rhythm abstract base classes
-from beatsearch.data.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
+from beatsearch.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
 
 # concrete rhythm implementations
-from beatsearch.data.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
+from beatsearch.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
 
 # misc
-from beatsearch.data.rhythm import TimeSignature, Onset, MidiMapping, MidiKey, MonophonicRhythmRepresentationsMixin
+from beatsearch.rhythm import TimeSignature, Onset, MidiMapping, MidiKey, MonophonicRhythmRepresentationsMixin
 import midi
 
 
@@ -625,7 +625,7 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     # onsets setter/getter #
     ########################
 
-    @patch("beatsearch.data.rhythm.Onset", side_effect=mock_onset)
+    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
     def test_onsets_setter_getter_with_onset_objects(self, rhythm, _):
         onsets = (mock_onset(0, 80), mock_onset(5, 14), mock_onset(6, 40), mock_onset(8, 95))
@@ -634,7 +634,7 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
         self.assertEqual(actual_onsets, onsets)
         self.assertIsNot(actual_onsets, onsets, "set_onsets should deep copy/convert the given onsets")
 
-    @patch("beatsearch.data.rhythm.Onset", side_effect=mock_onset)
+    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
     def test_onsets_setter_getter_with_mixed_onset_formats(self, rhythm, _):
         onsets = ([0, 80], (5, 14, 14), mock_onset(6, 40), iter([8, 95]))
@@ -648,7 +648,7 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     # onset rescaling #
     ###################
 
-    @patch("beatsearch.data.rhythm.Onset", side_effect=mock_onset)
+    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
     def test_rescale_onsets_scales_onsets(self, rhythm, _):
         original_onsets = (mock_onset(0, 80), mock_onset(3, 80), mock_onset(7, 80), mock_onset(10, 80))
@@ -680,7 +680,7 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     def test_onset_count_zero_when_no_onsets(self, rhythm):
         self.assertEqual(0, rhythm.get_onset_count())
 
-    @patch("beatsearch.data.rhythm.Onset", side_effect=mock_onset)
+    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
     def test_onset_count_with_onsets(self, rhythm, _):
         rhythm.set_onsets((mock_onset(1, 80), mock_onset(2, 80), mock_onset(3, 80), mock_onset(4, 80), mock_onset(5, 80), mock_onset(6, 80)))
@@ -694,7 +694,7 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     def test_last_onset_tick_minus_one_when_no_onsets(self, rhythm):
         self.assertEqual(rhythm.get_last_onset_tick(), -1)
 
-    @patch("beatsearch.data.rhythm.Onset", side_effect=mock_onset)
+    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
     def test_last_onset_tick_with_onsets(self, rhythm, _):
         rhythm.set_onsets((mock_onset(12, 80), mock_onset(43, 80), mock_onset(56, 80), mock_onset(98, 80), mock_onset(101, 80), mock_onset(106, 80)))
@@ -1164,7 +1164,7 @@ class TestMidiRhythm(TestRhythmLoop):
     # from/to midi pattern integration tests #
     ##########################################
 
-    @patch("beatsearch.data.rhythm.Onset", side_effect=mock_onset)
+    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.mocked_setters(midi_mapping=MagicMock(MidiMapping))
     def test_load_midi_pattern(self, rhythm, _):
         kick, snare = 36, 38

@@ -17,10 +17,10 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
-from beatsearch.data.rhythm import (
+from beatsearch.rhythm import (
     Unit
 )
-from beatsearch.data.metrics import MonophonicRhythmDistanceMeasure, TRACK_WILDCARDS
+from beatsearch.metrics import MonophonicRhythmDistanceMeasure, TRACK_WILDCARDS
 from beatsearch.utils import (
     head_trail_iter,
     no_callback,
@@ -30,7 +30,7 @@ from beatsearch.utils import (
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter
-from beatsearch.data.rhythm import RhythmLoop, Rhythm as Rhythm
+from beatsearch.rhythm import RhythmLoop, Rhythm as Rhythm
 import midi  # after beatsearch imports!
 
 
