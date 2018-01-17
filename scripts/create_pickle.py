@@ -44,6 +44,7 @@ if __name__ == '__main__':
 
             try:
                 rhythm = MidiRhythm(path)
+                rhythm.set_resolution(960)
                 rhythms.append(rhythm)
             except (TypeError, ValueError) as e:
                 print(e, path)

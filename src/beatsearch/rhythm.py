@@ -113,7 +113,7 @@ def convert_time(time, unit_from, unit_to, quantize=False):
         return int(round(time)) if quantize else time
 
     if time == 0:
-        return time
+        return int(time) if quantize else float(time)
 
     try:
         # if unit_from is a time resolution
@@ -1845,7 +1845,7 @@ class MidiRhythm(RhythmLoop):
                         print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.name))
                         continue
                     track_data[midi_key] = []
-                onset = (msg.tick, msg.get_velocity())
+                onset = (int(msg.tick), int(msg.get_velocity()))
                 track_data[midi_key].append(onset)
             elif isinstance(msg, midi.TimeSignatureEvent):
                 if ts_midi_event is None:

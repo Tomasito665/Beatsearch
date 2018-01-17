@@ -1201,6 +1201,13 @@ class TestMidiRhythm(TestRhythmLoop):
             self.assertEqual(kick_track.get_onsets(), expected_kick_onsets)
             self.assertEqual(snare_track.get_onsets(), expected_snare_onsets)
 
+        with self.subTest("track_onsets_tick_positions_are_integers"):
+            for kick_onset, snare_onset in zip(kick_track.get_onsets(), snare_track.get_onsets()):
+                self.assertIsInstance(
+                    kick_onset.tick, int, "kick onset tick position \"%s\" is not an int" % str(kick_onset.tick))
+                self.assertIsInstance(
+                    snare_onset.tick, int, "snare onset tick position \"%s\" is not an int" % str(snare_onset.tick))
+
         with self.subTest("track_names_set_correctly"):
             self.assertEqual(kick_track.get_name(), kick_key_mock.abbreviation)
             self.assertEqual(snare_track.get_name(), snare_key_mock.abbreviation)
@@ -1298,6 +1305,8 @@ class TestMidiRhythm(TestRhythmLoop):
                 self.assertIsInstance(actual_event, midi.NoteOffEvent)
             self.assertEqual(expected_event.velocity, actual_event.velocity)
 
+
+# TODO Add tests for convert_time -> should always return an int when quantize is True
 
 class TestOnset(TestCase):
     def test_properties_equal_constructor_args(self):
