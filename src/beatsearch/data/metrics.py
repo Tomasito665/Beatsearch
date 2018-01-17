@@ -189,7 +189,8 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
 
         raise cls.UnknownLengthPolicy(length_policy)
 
-    __measures__ = {}  # monophonic rhythm distance implementations by __friendly_name__
+    __measures_by_friendly_name__ = {}  # monophonic rhythm distance implementations by __friendly_name__
+    __measures_by_class_name__ = {}  # monophonic rhythm distance implementations by __name__
 
     @classmethod
     def get_measures(cls, friendly_name=True):
@@ -200,7 +201,8 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
         :return: an ordered dictionary containing all subclasses of MonophonicRhythmDistanceMeasure by name
         """
 
-        if len(MonophonicRhythmDistanceMeasure.__measures__) != len(MonophonicRhythmDistanceMeasure.__subclasses__()):
+        if len(MonophonicRhythmDistanceMeasure.__measures_by_friendly_name__) != \
+                len(MonophonicRhythmDistanceMeasure.__subclasses__()):
             measures = OrderedDict()
             for dm in cls.__subclasses__():  # Distance Measure
                 name = dm.__name__
@@ -211,9 +213,10 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
                     except AttributeError:
                         pass
                 measures[name] = dm
-            cls.__measures__ = measures
+                measures[dm.__name__] = dm
+            cls.__measures_by_friendly_name__ = measures
 
-        return MonophonicRhythmDistanceMeasure.__measures__
+        return MonophonicRhythmDistanceMeasure.__measures_by_friendly_name__
 
     @classmethod
     def get_measure_names(cls):
@@ -222,11 +225,23 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
 
     @classmethod
     def get_measure_by_name(cls, measure_name):
+        """
+        Returns a subclass given its name. This can either be its friendly name or its class name.
+
+        :param measure_name: either its friendly name or its class name
+        :return: the monophonic rhythm distance measure
+        """
+
         measures = cls.get_measures()
+
         try:
             return measures[measure_name]
         except KeyError:
-            raise ValueError("No measure with name: '%s'" % measure_name)
+            by_class_name = cls.__measures_by_class_name__
+            try:
+                return by_class_name[measure_name]
+            except KeyError:
+                raise ValueError("No measure with class or friendly name: '%s'" % measure_name)
 
 
 class Quantizable(object):

@@ -24,7 +24,7 @@ from beatsearch.data.metrics import (
 )
 
 
-@friendly_named_class("Fake measure")
+@friendly_named_class("Fake measure friendly name")
 class FakeMonophonicRhythmDistanceMeasureImpl(MonophonicRhythmDistanceMeasure):
     def __get_iterable__(self, rhythm: MonophonicRhythm, unit):
         return tuple()
@@ -74,6 +74,16 @@ class TestMonophonicRhythmDistanceMeasureBase(TestCase):
                 clazz(quantize="fake-quantize-enabled")
                 with self.subTest(msg=clazz.__name__):
                     quantize_enabled_mock.assert_called_once_with("fake-quantize-enabled")
+
+    def test_get_measure_by_friendly_name(self):
+        friendly_name = FakeMonophonicRhythmDistanceMeasureImpl.__friendly_name__
+        measure = MonophonicRhythmDistanceMeasure.get_measure_by_name(friendly_name)
+        self.assertIs(measure, FakeMonophonicRhythmDistanceMeasureImpl)
+
+    def test_get_measure_by_class_name(self):
+        name = FakeMonophonicRhythmDistanceMeasureImpl.__name__
+        measure = MonophonicRhythmDistanceMeasure.get_measure_by_name(name)
+        self.assertIs(measure, FakeMonophonicRhythmDistanceMeasureImpl)
 
     @staticmethod
     def get_distance_measure_type():
