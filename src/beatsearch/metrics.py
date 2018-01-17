@@ -550,7 +550,7 @@ class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
             if None not in tracks:
                 try:
                     distance = measure.get_distance(tracks[0], tracks[1])
-                except ValueError:
+                except MonophonicRhythmDistanceMeasure.LengthPolicyNotMet:
                     pass
             total_distance += distance
             n_tracks += 1
