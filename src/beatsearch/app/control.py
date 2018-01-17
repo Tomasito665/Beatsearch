@@ -389,8 +389,10 @@ class BSController(object):
         self._precondition_check_rhythm_player_set()
         selected_rhythm_indices = self.get_rhythm_selection()
         rhythms = [self.get_rhythm_by_index(i) for i in selected_rhythm_indices]
-        self._rhythm_player.playback_rhythms(rhythms)
-        self._dispatch(BSController.RHYTHM_PLAYBACK_START)
+
+        if rhythms:
+            self._rhythm_player.playback_rhythms(rhythms)
+            self._dispatch(BSController.RHYTHM_PLAYBACK_START)
 
     def stop_rhythm_playback(self):
         """
