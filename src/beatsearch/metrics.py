@@ -203,7 +203,8 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
 
         if len(MonophonicRhythmDistanceMeasure.__measures_by_friendly_name__) != \
                 len(MonophonicRhythmDistanceMeasure.__subclasses__()):
-            measures = OrderedDict()
+            by_friendly_name = OrderedDict()
+            by_class_name = OrderedDict()
             for dm in cls.__subclasses__():  # Distance Measure
                 name = dm.__name__
                 if friendly_name:
@@ -212,9 +213,10 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
                         name = dm.__friendly_name__
                     except AttributeError:
                         pass
-                measures[name] = dm
-                measures[dm.__name__] = dm
-            cls.__measures_by_friendly_name__ = measures
+                by_friendly_name[name] = dm
+                by_class_name[dm.__name__] = dm
+            cls.__measures_by_friendly_name__ = by_friendly_name
+            cls.__measures_by_class_name__ = by_class_name
 
         return MonophonicRhythmDistanceMeasure.__measures_by_friendly_name__
 
