@@ -243,18 +243,9 @@ class BSRhythmList(BSAppFrame):
 
         context_menu = ContextMenu(self._tree_view)
         context_menu.add_command(label="Set as target rhythm", command=self._on_set_as_target_rhythm)
-        plot_rhythms_menu = context_menu.add_submenu("Plot rhythms")
-
-        for plot_type_name in BSApp.RHYTHM_PLOT_TYPES_BY_NAME.keys():
-            plot_rhythms_menu.add_command(
-                label=plot_type_name,
-                command=partial(self._on_plot_rhythms, plot_type_name=plot_type_name)
-            )
-
         self._context_menu = context_menu
 
         self._on_request_target_rhythm = no_callback
-        self._on_request_rhythm_plot = no_callback
 
     def redraw(self):
         controller = self.controller
@@ -283,24 +274,10 @@ class BSRhythmList(BSAppFrame):
             raise TypeError("Expected a callback but got \"%s\"" % str(callback))
         self._on_request_target_rhythm = callback
 
-    @property
-    def on_request_rhythm_plot(self):
-        return self._on_request_rhythm_plot
-
-    @on_request_rhythm_plot.setter
-    def on_request_rhythm_plot(self, callback: tp.Callable[[tp.Iterable[int]], None]):
-        if not callable(callback):
-            raise TypeError("Expected a callback but got \"%s\"" % str(callback))
-        self._on_request_rhythm_plot = callback
-
     def _on_set_as_target_rhythm(self):
         selected_rhythms = self._get_selected_rhythm_indices()
         assert len(selected_rhythms) >= 1
         self.on_request_target_rhythm(selected_rhythms[0])
-
-    def _on_plot_rhythms(self, plot_type_name):
-        selected_rhythms = self._get_selected_rhythm_indices()
-        self.on_request_rhythm_plot(selected_rhythms, plot_type_name)
 
     def _fill_tree_view(self):
         controller = self.controller
@@ -398,6 +375,15 @@ class BSTransportControls(BSAppFrame, object):
 
 
 class BSRhythmComparisonStrip(BSAppTtkFrame):
+    RHYTHM_PLOT_TYPES_BY_NAME = OrderedDict((
+        ("Chronotonic", "chronotonic"),
+        ("Polygon", "polygon"),
+        ("Schillinger", "schillinger"),
+        ("Spectral", "spectral"),
+        ("TEDAS", "tedas"),
+        ("IOI Histogram", "inter_onset_interval_histogram"),
+    ))
+
     def __init__(self, app, background_left="#E0E0E0", background_right="#EEEEEE", **kwargs):
         super().__init__(app, **kwargs)
         self.rhythm_plotter = RhythmLoopPlotter()
@@ -419,7 +405,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             header_selection, text="Selected Rhythms", anchor=tk.W, font=BSApp.FONT['header'], bg=background_right)
         combo_label_selection = tk.Label(header_selection, text="Plot type", bg=background_right)
         combo_selection = tkinter.ttk.Combobox(
-            header_selection, values=tuple(BSApp.RHYTHM_PLOT_TYPES_BY_NAME.keys()), state="readonly")
+            header_selection, values=tuple(self.RHYTHM_PLOT_TYPES_BY_NAME.keys()), state="readonly")
         label_selection.pack(side=tk.LEFT, padx=3)
         combo_selection.pack(side=tk.RIGHT, padx=(0, 6))
         combo_label_selection.pack(side=tk.RIGHT, fill=tk.Y, padx=6)
@@ -445,7 +431,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
         # find the index of the current plot function
         plot_function_name = self._rhythm_plot_function.__name__
-        plot_func_names = BSApp.RHYTHM_PLOT_TYPES_BY_NAME.values()
+        plot_func_names = self.RHYTHM_PLOT_TYPES_BY_NAME.values()
         current_plot_func_ix = next(i for i, f in enumerate(plot_func_names) if f == plot_function_name)
 
         # set the combobox to the current plot function
@@ -607,7 +593,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
     def _on_plot_type_combobox(self, event):
         value = event.widget.get()
-        plot_function_name = BSApp.RHYTHM_PLOT_TYPES_BY_NAME[value]
+        plot_function_name = self.RHYTHM_PLOT_TYPES_BY_NAME[value]
         self.set_rhythm_plot_function(plot_function_name)
 
     def _on_rhythm_load(self, source_type):
@@ -693,15 +679,6 @@ class BSApp(tk.Tk, object):
     FRAME_SEARCH = "<Frame-Search>"
     FRAME_RHYTHM_COMPARISON_STRIP = "<Frame-RhythmComparisonStrip>"
 
-    RHYTHM_PLOT_TYPES_BY_NAME = OrderedDict((
-        ("Chronotonic", "chronotonic"),
-        ("Polygon", "polygon"),
-        ("Schillinger", "schillinger"),
-        ("Spectral", "spectral"),
-        ("TEDAS", "tedas"),
-        ("IOI Histogram", "inter_onset_interval_histogram"),
-    ))
-
     FONT = {
         'header': ("Helvetica", 14),
         'normal': ("Helvetica", 12)
@@ -729,7 +706,6 @@ class BSApp(tk.Tk, object):
         self.config(bg=background)
         self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoopLoader()
         self.controller = self._controller = controller
-        self.drum_loop_plotter = RhythmLoopPlotter()
 
         self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
@@ -863,7 +839,6 @@ class BSApp(tk.Tk, object):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
         rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
         rhythms_frame.on_request_target_rhythm = self._handle_target_rhythm_request
-        rhythms_frame.on_request_rhythm_plot = self._handle_rhythm_plot_request
         search_frame.search_command = self.controller.calculate_distances_to_target_rhythm
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
@@ -899,17 +874,6 @@ class BSApp(tk.Tk, object):
         controller = self.controller
         rhythm = controller.get_rhythm_by_index(rhythm_ix)
         controller.set_target_rhythm(rhythm)
-
-    def _handle_rhythm_plot_request(self, rhythm_indices, plot_type_name):
-        controller = self.controller
-        plotter = self.drum_loop_plotter
-        plot_function_name = self.RHYTHM_PLOT_TYPES_BY_NAME[plot_type_name]
-        plot_function = getattr(plotter, plot_function_name)
-        rhythms = iter(controller.get_rhythm_by_index(ix) for ix in rhythm_indices)
-        for rhythm in rhythms:
-            plot_function(rhythm)
-            plt.draw()
-        plt.show()
 
     @staticmethod
     def _on_loading_error(loading_error: BSRhythmLoopLoader.LoadingError):
