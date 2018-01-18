@@ -69,6 +69,7 @@ class plot(object):
 
         # noinspection PyUnresolvedReferences
         draw_f_wrapper.__doc__ = self._draw.__doc__.format(self._title)
+        draw_f_wrapper.__name__ = f_fill_subplot.__name__
         self.draw = draw_f_wrapper
 
         return plot.Descriptor(obj_decorator=self)

@@ -443,13 +443,14 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         self._frame_target = frame_target
         self._frame_selection = frame_selection
 
-        def on_plot_type_combobox(event):
-            value = event.widget.get()
-            plot_function_name = BSApp.RHYTHM_PLOT_TYPES_BY_NAME[value]
-            self.set_rhythm_plot_function(plot_function_name)
+        # find the index of the current plot function
+        plot_function_name = self._rhythm_plot_function.__name__
+        plot_func_names = BSApp.RHYTHM_PLOT_TYPES_BY_NAME.values()
+        current_plot_func_ix = next(i for i, f in enumerate(plot_func_names) if f == plot_function_name)
 
-        combo_selection.current(0)  # select first option
-        combo_selection.bind("<<ComboboxSelected>>", on_plot_type_combobox)
+        # set the combobox to the current plot function
+        combo_selection.current(current_plot_func_ix)
+        combo_selection.bind("<<ComboboxSelected>>", self._on_plot_type_combobox)
 
     class RhythmPlottingCanvas(FigureCanvasTkAgg, object):
         def __init__(self, master, dpi, background="white", figsize=(3, 3), **kwargs):
@@ -603,6 +604,11 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             iter(controller.get_rhythm_by_index(ix) for ix in rhythm_selection),
             plot_function
         )
+
+    def _on_plot_type_combobox(self, event):
+        value = event.widget.get()
+        plot_function_name = BSApp.RHYTHM_PLOT_TYPES_BY_NAME[value]
+        self.set_rhythm_plot_function(plot_function_name)
 
     def _on_rhythm_load(self, source_type):
         controller = self.controller
