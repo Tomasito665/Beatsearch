@@ -336,43 +336,35 @@ class RhythmLoopPlotter(object):
         # add base rhythm circle
         main_radius = 0.3
         main_center = 0.5, 0.5
-        circle = plt.Circle(main_center, main_radius, color=(0, 0, 0, 0))  # circle is transparent for now
+
+        # draws a wedge from the given start pulse to the given end pulse
+        def draw_wedge(pulse_start, pulse_end, center=main_center, radius=main_radius, **kw):
+            theta_1, theta_2 = (((90 - (pulse / n_pulses * 360)) % 360) for pulse in (pulse_end, pulse_start))
+            axes.add_artist(Wedge(center, radius, theta_1, theta_2, **kw))
+
+        unit = kwargs['concrete_unit']
+        rhythm = kwargs['rhythm']
+        n_pulses = kwargs['n_pulses']
+        n_pulses_per_measure = int(rhythm.get_measure_duration(unit))
+
+        try:
+            n_measures = int(n_pulses / n_pulses_per_measure)
+        except ZeroDivisionError:
+            n_measures = 0
+
+        # measure wedges
+        for i_measure in range(0, n_measures, 2):
+            from_pulse = i_measure * n_pulses_per_measure
+            to_pulse = (i_measure + 1) * n_pulses_per_measure
+            draw_wedge(from_pulse, to_pulse, radius=1.0, fc=to_rgba("gray", 0.25))
+
+        # main circle
+        circle = plt.Circle(main_center, main_radius, fc="white")
         axes.add_artist(circle)
 
-        # if the unit is in ticks, don't bother drawing the pulses (since there would
-        # be way to many pulses to draw, that would be a mess)
-        if self.unit == 'ticks':
-            return circle
-
-        max_pulse_circle_count = kwargs['max_pulse_circle_count']
-        unit = kwargs['concrete_unit']
-        n_pulses = kwargs['n_pulses']
-        measure_duration = kwargs['rhythm'].get_measure_duration(unit)
-        draw_pulse_circles = (n_pulses <= max_pulse_circle_count)
-
-        pulse_circle_styles = {
-            'radius': main_radius * 0.05,
-            'linewidth': 2.5,
-            'facecolor': 'white',
-            'edgecolor': 'black'
-        }
-
-        for i in range(n_pulses):
-            is_down_beat = i % measure_duration == 0
-            relative_t = float(i) / n_pulses
-            pos_on_circle = get_coordinates_on_circle(main_center, main_radius, relative_t)
-
-            if draw_pulse_circles:
-                pulse_circle = plt.Circle(pos_on_circle, **pulse_circle_styles)
-                axes.add_artist(pulse_circle)
-
-            axes.plot(
-                [main_center[0], pos_on_circle[0]],
-                [main_center[1], pos_on_circle[1]],
-                color='gray',
-                linewidth=1 if is_down_beat else 0.3,
-                alpha=0.9 if is_down_beat else 0.5
-            )
+        # draw the pulse wedges
+        for i_pulse in range(0, n_pulses, 2):
+            draw_wedge(i_pulse, i_pulse + 1, fc=to_rgba("gray", 0.25))
 
         return circle
 
