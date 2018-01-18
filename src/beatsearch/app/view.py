@@ -17,9 +17,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
-from beatsearch.rhythm import (
-    Unit
-)
+from beatsearch.rhythm import Unit
 from beatsearch.metrics import MonophonicRhythmDistanceMeasure, TRACK_WILDCARDS
 from beatsearch.utils import (
     head_trail_iter,
@@ -29,7 +27,7 @@ from beatsearch.utils import (
     color_variant
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
-from beatsearch.graphics.plot import RhythmLoopPlotter
+from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGrid
 from beatsearch.rhythm import RhythmLoop, Rhythm as Rhythm
 import midi  # after beatsearch imports!
 
@@ -375,68 +373,48 @@ class BSTransportControls(BSAppFrame, object):
 
 
 class BSRhythmComparisonStrip(BSAppTtkFrame):
-    RHYTHM_PLOT_TYPES_BY_NAME = OrderedDict((
-        ("Chronotonic", "chronotonic"),
-        ("Polygon", "polygon"),
-        ("Schillinger", "schillinger"),
-        ("Spectral", "spectral"),
-        ("TEDAS", "tedas"),
-        ("IOI Histogram", "inter_onset_interval_histogram"),
+    PLOT_FUNCTION_NAMES = tuple(f.__name__ for f in (
+        RhythmLoopPlotter.chronotonic,
+        RhythmLoopPlotter.polygon,
+        RhythmLoopPlotter.schillinger,
+        RhythmLoopPlotter.spectral,
+        RhythmLoopPlotter.tedas,
+        RhythmLoopPlotter.inter_onset_interval_histogram
     ))
+
+    PLOT_TYPE_LABELS = tuple(RhythmLoopPlotter.get_plot_function_info(
+        getattr(RhythmLoopPlotter, fname)).title for fname in PLOT_FUNCTION_NAMES)
+
+    PLOT_FUNCTION_NAMES_BY_TYPE_LABELS = OrderedDict(tuple(zip(PLOT_TYPE_LABELS, PLOT_FUNCTION_NAMES)))
+
+    PLOT_TYPE_LABELS_BY_FUNCTION_NAMES = OrderedDict(tuple(zip(PLOT_FUNCTION_NAMES, PLOT_TYPE_LABELS)))
 
     def __init__(self, app, background_left="#E0E0E0", background_right="#EEEEEE", **kwargs):
         super().__init__(app, **kwargs)
-        self.rhythm_plotter = RhythmLoopPlotter()
+        self.rhythm_plotter = RhythmLoopPlotter("eighths")
         self._rhythm_plot_function = self.rhythm_plotter.polygon
+        self._var_snap_to_grid = tk.BooleanVar()
+        self._var_snap_to_grid.trace("w", self._on_btn_snap_to_grid)
+        self._prev_adjustable_snap_to_grid = -1
+        # noinspection PyUnresolvedReferences
+        self._rhythm_plot_unit = Unit.get(self.rhythm_plotter.unit)
 
-        # left panel (target rhythm box)
-        header_target = tk.Frame(self, bg=background_left)
-        label_target = tk.Label(
-            header_target, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_left)
-        target_rhythm_menu_button = tk.Menubutton(header_target, text="Load", relief=tk.FLAT, borderwidth=0)
-        target_rhythm_menu_button.bind("<Button-1>", eat_args(self.redraw_target_rhythm_menu))
-        label_target.pack(side=tk.LEFT, padx=3)
-        target_rhythm_menu_button.pack(side=tk.RIGHT, padx=4, pady=4)
-        frame_target = self.TargetRhythmBox(self, self.dpi, background=background_left)
+        left_header, left_panel, rhythm_menu = self._create_target_rhythm_frame(background_left)
+        right_header, right_panel, btn_snap_to_grid = self._create_selected_rhythms_frame(background_right)
 
-        # right panel (selected rhythm plots)
-        header_selection = tk.Frame(self, bg=background_right)
-        label_selection = tk.Label(
-            header_selection, text="Selected Rhythms", anchor=tk.W, font=BSApp.FONT['header'], bg=background_right)
-        combo_label_selection = tk.Label(header_selection, text="Plot type", bg=background_right)
-        combo_selection = tkinter.ttk.Combobox(
-            header_selection, values=tuple(self.RHYTHM_PLOT_TYPES_BY_NAME.keys()), state="readonly")
-        label_selection.pack(side=tk.LEFT, padx=3)
-        combo_selection.pack(side=tk.RIGHT, padx=(0, 6))
-        combo_label_selection.pack(side=tk.RIGHT, fill=tk.Y, padx=6)
-        frame_selection = BSRhythmComparisonStrip.SelectedRhythmsFrame(
-            self, n_boxes=19, dpi=self.dpi, background=background_right)
+        left_panel.grid(row=1, column=0, sticky="nsew")
+        left_header.grid(row=0, column=0, sticky="nsew")
 
-        # lay out left panel
-        frame_target.grid(row=1, column=0, sticky="nsew")
-        header_target.grid(row=0, column=0, sticky="nsew")
-
-        # lay out right panel
-        frame_selection.grid(row=1, column=1, sticky="nsew")
-        header_selection.grid(row=0, column=1, sticky="nsew")
+        right_panel.grid(row=1, column=1, sticky="nsew")
+        right_header.grid(row=0, column=1, sticky="nsew")
         self.grid_columnconfigure(1, weight=1)  # expand horizontally
 
-        # setup target rhythm menu
-        self._target_rhythm_menu = tk.Menu(target_rhythm_menu_button, tearoff=0)
+        self._frame_target = left_panel
+        self._frame_selection = right_panel
+
+        self._target_rhythm_menu = rhythm_menu
         self._target_rhythm_menu_item_count = 0
-        target_rhythm_menu_button['menu'] = self._target_rhythm_menu
-
-        self._frame_target = frame_target
-        self._frame_selection = frame_selection
-
-        # find the index of the current plot function
-        plot_function_name = self._rhythm_plot_function.__name__
-        plot_func_names = self.RHYTHM_PLOT_TYPES_BY_NAME.values()
-        current_plot_func_ix = next(i for i, f in enumerate(plot_func_names) if f == plot_function_name)
-
-        # set the combobox to the current plot function
-        combo_selection.current(current_plot_func_ix)
-        combo_selection.bind("<<ComboboxSelected>>", self._on_plot_type_combobox)
+        self._btn_snap_to_grid = btn_snap_to_grid
 
     class RhythmPlottingCanvas(FigureCanvasTkAgg, object):
         def __init__(self, master, dpi, background="white", figsize=(3, 3), **kwargs):
@@ -481,17 +459,18 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                 self._mousewheel_callback = None
                 self._mousewheel_callback_id = None
 
-            def redraw(self, rhythm_loop: RhythmLoop, plot_function: tp.Callable):
-                # plot function should be a @plot decorated RhythmLoopPlotter method
-                if (rhythm_loop, plot_function) == self._prev_redraw_args:
+            def redraw(self, rhythm_loop: RhythmLoop, plot_function: tp.Callable,
+                       snap_to_grid=False, force_redraw=False):
+                # plot_function should be a @plot decorated RhythmLoopPlotter method
+                if not force_redraw and (rhythm_loop, plot_function, snap_to_grid) == self._prev_redraw_args:
                     return
 
                 with self._plot.figure_update() as figure:
                     if rhythm_loop is not None:
-                        plot_function(rhythm_loop, figure=figure)
+                        plot_function(rhythm_loop, snap_to_grid=snap_to_grid, figure=figure)
                         figure.suptitle(rhythm_loop.name, fontsize="small", y=0.13)
 
-                self._prev_redraw_args = (rhythm_loop, plot_function)
+                self._prev_redraw_args = (rhythm_loop, plot_function, snap_to_grid)
 
             @property
             def on_mousewheel(self):
@@ -514,7 +493,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                 cid = canvas.mpl_connect("scroll_event", callback)
                 self._mousewheel_callback_id = cid
 
-        def redraw(self, rhythms: tp.Iterable[Rhythm], plot_function: tp.Callable):
+        def redraw(self, rhythms: tp.Iterable[Rhythm], plot_function: tp.Callable, snap_to_grid, force_redraw=False):
             n_boxes = len(self._boxes)
             is_first = True
 
@@ -522,7 +501,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
                 if i >= n_boxes:
                     break
 
-                box.redraw(rhythm, plot_function)
+                box.redraw(rhythm, plot_function, snap_to_grid, force_redraw)
 
                 # Pack at least one box in order to stretch the parent's y
                 # to the correct size
@@ -574,11 +553,37 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
     def set_rhythm_plot_function(self, plot_function_name):
         self._rhythm_plot_function = getattr(self.rhythm_plotter, plot_function_name)
+        self.update_snap_to_grid_btn_state()
         self.redraw_rhythm_plots()
 
-    def redraw_rhythm_plots(self):
+    def update_snap_to_grid_btn_state(self):
+        plot_function = self._rhythm_plot_function
+        plot_function_info = RhythmLoopPlotter.get_plot_function_info(plot_function)
+        btn_snap_to_grid = self._btn_snap_to_grid
+        var_snap_to_grid = self._var_snap_to_grid
+
+        # force the "snap to grid" checkbox state if the current plot type is
+        # not adjustable, otherwise restore the last manually adjusted state
+        if plot_function_info.snaps_to_grid == SnapsToGrid.ADJUSTABLE:
+            btn_snap_to_grid.config(state=tk.NORMAL)
+            if self._prev_adjustable_snap_to_grid >= 0:
+                var_snap_to_grid.set(self._prev_adjustable_snap_to_grid)
+                self._prev_adjustable_snap_to_grid = -1
+        else:
+            self._prev_adjustable_snap_to_grid = var_snap_to_grid.get()
+            var_snap_to_grid.set(plot_function_info.snaps_to_grid == SnapsToGrid.ALWAYS)
+            btn_snap_to_grid.config(state=tk.DISABLED)
+
+    def set_rhythm_plot_unit(self, unit: Unit):
+        self.rhythm_plotter.unit = unit.value
+        # the plot function didn't change and the selected rhythms won't redraw,
+        # that's why we force redraw
+        self.redraw_rhythm_plots(force_redraw=True)
+
+    def redraw_rhythm_plots(self, force_redraw=False):
         controller = self.controller
         plot_function = self._rhythm_plot_function
+        snap_to_grid = self._var_snap_to_grid.get()
 
         target_rhythm_frame = self._frame_target
         target_rhythm = controller.get_target_rhythm()
@@ -588,13 +593,58 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         rhythm_selection = controller.get_rhythm_selection()
         rhythm_selection_frame.redraw(
             iter(controller.get_rhythm_by_index(ix) for ix in rhythm_selection),
-            plot_function
+            plot_function, snap_to_grid, force_redraw
         )
+
+    def _create_target_rhythm_frame(self, background_color):
+        header = tk.Frame(self, bg=background_color)
+        title = tk.Label(header, text="Target Rhythm", anchor=tk.W, font=BSApp.FONT['header'], bg=background_color)
+
+        btn_load_target_rhythm = tk.Menubutton(header, text="load", relief=tk.FLAT, borderwidth=0)
+        btn_load_target_rhythm.bind("<Button-1>", eat_args(self.redraw_target_rhythm_menu))
+
+        rhythm_menu = tk.Menu(btn_load_target_rhythm, tearoff=0)
+        btn_load_target_rhythm['menu'] = rhythm_menu
+
+        title.pack(side=tk.LEFT, padx=3)
+        btn_load_target_rhythm.pack(side=tk.RIGHT, padx=4, pady=4)
+
+        return header, self.TargetRhythmBox(self, self.dpi, background=background_color), rhythm_menu
+
+    def _create_selected_rhythms_frame(self, background_color):
+        header = tk.Frame(self, bg=background_color)
+        title = tk.Label(header, text="Selected Rhythms", anchor=tk.W, font=BSApp.FONT['header'], bg=background_color)
+
+        label_plot_type = tk.Label(header, text="Plot type", bg=background_color)
+        plot_type_labels = self.PLOT_TYPE_LABELS
+        combo_plot_type = tkinter.ttk.Combobox(header, values=plot_type_labels, state="readonly")
+        combo_plot_type.set(self.PLOT_TYPE_LABELS_BY_FUNCTION_NAMES[self._rhythm_plot_function.__name__])
+        combo_plot_type.bind("<<ComboboxSelected>>", self._on_plot_type_combobox)
+
+        combo_plot_unit = tkinter.ttk.Combobox(header, values=Unit.get_unit_names(), state="readonly")
+        combo_plot_unit.set(self._rhythm_plot_unit.name)
+        combo_plot_unit.bind("<<ComboboxSelected>>", self._on_plot_unit_combobox)
+
+        check_btn_snap_to_grid = tk.Checkbutton(header, text="Snap to grid", variable=self._var_snap_to_grid)
+
+        title.pack(side=tk.LEFT, padx=3)
+        check_btn_snap_to_grid.pack(side=tk.RIGHT, padx=(0, 6))
+        combo_plot_unit.pack(side=tk.RIGHT, padx=(0, 6))
+        combo_plot_type.pack(side=tk.RIGHT, padx=(0, 6))
+        label_plot_type.pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+
+        return header, self.SelectedRhythmsFrame(
+            self, n_boxes=19, dpi=self.dpi, background=background_color), check_btn_snap_to_grid
 
     def _on_plot_type_combobox(self, event):
         value = event.widget.get()
-        plot_function_name = self.RHYTHM_PLOT_TYPES_BY_NAME[value]
+        plot_function_name = self.PLOT_FUNCTION_NAMES_BY_TYPE_LABELS[value]
         self.set_rhythm_plot_function(plot_function_name)
+
+    def _on_plot_unit_combobox(self, event):
+        unit_name = event.widget.get()
+        unit = Unit.get_unit_by_name(unit_name)
+        self.set_rhythm_plot_unit(unit)
 
     def _on_rhythm_load(self, source_type):
         controller = self.controller
@@ -602,6 +652,12 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         rhythm = loader.load()
         if rhythm is not None:
             controller.set_target_rhythm(rhythm)
+
+    def _on_btn_snap_to_grid(self, *_):
+        plot_function = self._rhythm_plot_function
+        plot_function_info = RhythmLoopPlotter.get_plot_function_info(plot_function)
+        if plot_function_info.snaps_to_grid == SnapsToGrid.ADJUSTABLE:
+            self.redraw_rhythm_plots(force_redraw=True)
 
     def redraw_target_rhythm_menu(self):
         controller = self.controller

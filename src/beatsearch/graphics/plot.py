@@ -1,17 +1,30 @@
 import math
-from functools import wraps
-
-import matplotlib.pyplot as plt
-from matplotlib import colors
+import enum
 import numpy as np
 import typing as tp
+import matplotlib.pyplot as plt
+from matplotlib import colors
+from matplotlib.colors import to_rgba
+from matplotlib.patches import Wedge
+from itertools import cycle
+from functools import wraps
+from collections import namedtuple
 from beatsearch.rhythm import concretize_unit, Unit, RhythmLoop, Rhythm, Track
 from beatsearch.utils import merge_dicts
-from itertools import cycle
 
 # make room for the labels
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
+
+
+class SnapsToGrid(enum.Enum):
+    ALWAYS = enum.auto()
+    NEVER = enum.auto()
+    ADJUSTABLE = enum.auto()
+    NOT_APPLICABLE = enum.auto()
+
+
+PlotTypeInfo = namedtuple("PlotTypeInfo", ["title", "snaps_to_grid"])
 
 
 # noinspection PyPep8Naming
@@ -23,8 +36,9 @@ class plot(object):
     # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
     colors = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
 
-    def __init__(self, title, subplot_layout='combined', share_axis=None, *_, **kwargs):
+    def __init__(self, title, snaps_to_grid: SnapsToGrid, subplot_layout='combined', share_axis=None, *_, **kwargs):
         self._title = title
+        self._snaps_to_grid = snaps_to_grid
         self._subplot_layout = subplot_layout
         self._share_x, self._share_y = plot.parse_axis_arg_str(share_axis)
         self._named_decorator_args = kwargs
@@ -32,6 +46,9 @@ class plot(object):
         self._f_setup_subplot = None
         self._rhythm_plotter = None
         self.draw = None  # type: tp.Union[tp.Callable, None]
+
+    def get_info(self):
+        return PlotTypeInfo(self._title, self._snaps_to_grid)
 
     class Descriptor(object):
         """
@@ -53,6 +70,9 @@ class plot(object):
         def setup(self, f_setup_subplot):
             self.obj_decorator._f_setup_subplot = f_setup_subplot
             return self
+
+        def get_info(self):
+            return self.obj_decorator.get_info()
 
         def __get__(self, obj, obj_type):
             if obj_type != RhythmLoopPlotter:
@@ -81,7 +101,7 @@ class plot(object):
             figure_kwargs: tp.Dict[str, tp.Any] = None,
             legend_kwargs: tp.Dict[str, tp.Any] = None,
             *args, **kwargs
-    ):
+    ) -> plt.Figure:
         """
         Plots the {0} of the given drum loop on a matplotlib figure and returns the figure object.
 
@@ -236,7 +256,18 @@ class RhythmLoopPlotter(object):
             raise ValueError("Unknown unit: %s" % str(unit))
         self._unit = unit
 
-    @plot("Schillinger Rhythm Notation")
+    @classmethod
+    def get_plot_function_info(cls, plot_function) -> PlotTypeInfo:
+        function_name = plot_function.__name__
+
+        try:
+            plot_descriptor = cls.__dict__[function_name]
+        except KeyError:
+            raise ValueError("no such plot function %s.%s" % (cls.__name__, function_name))
+
+        return plot_descriptor.get_info()
+
+    @plot("Schillinger Rhythm Notation", SnapsToGrid.ALWAYS)
     def schillinger(self, track: Track, **kwargs):
         axes = kwargs['axes']
         axes.yaxis.set_ticklabels([])
@@ -253,15 +284,15 @@ class RhythmLoopPlotter(object):
         schillinger_chain = track.get_binary_schillinger_chain(kwargs['concrete_unit'], (lo_y, hi_y))
         return axes.plot(schillinger_chain, drawstyle='steps-pre', color=kwargs['color'], linewidth=2.5)
 
-    @plot("Chronotonic notation")
+    @plot("Chronotonic notation", SnapsToGrid.ALWAYS)
     def chronotonic(self, track: Track, **kwargs):
         axes = kwargs['axes']
         chronotonic_chain = track.get_chronotonic_chain(kwargs['concrete_unit'])
         self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'])
         return axes.plot(chronotonic_chain, '--.', color=kwargs['color'])
 
-    @plot("Polygon notation", subplot_layout='combined', max_pulse_circle_count=16)
-    def polygon(self, track: Track, quantize=False, **kwargs):
+    @plot("Polygon notation", SnapsToGrid.ADJUSTABLE, subplot_layout='combined')
+    def polygon(self, track: Track, snap_to_grid=False, **kwargs):
         axes = kwargs['axes']
         n_pulses = kwargs['n_pulses']
 
@@ -276,7 +307,7 @@ class RhythmLoopPlotter(object):
         main_radius = kwargs['setup_result'].radius
 
         # retrieve onset times
-        onset_times = track.get_onset_times(kwargs['concrete_unit'], quantize=quantize)
+        onset_times = track.get_onset_times(kwargs['concrete_unit'], quantize=snap_to_grid)
 
         # coordinates of line end points
         coordinates_x = []
@@ -345,23 +376,23 @@ class RhythmLoopPlotter(object):
 
         return circle
 
-    @plot("Spectral notation", subplot_layout='v_stack', share_axis='x')
-    def spectral(self, track: Track, quantize=False, **kwargs):
+    @plot("Spectral notation", SnapsToGrid.ADJUSTABLE, subplot_layout='v_stack', share_axis='x')
+    def spectral(self, track: Track, snap_to_grid=False, **kwargs):
         axes = kwargs['axes']
         axes.xaxis.set_visible(False)
         axes.xaxis.set_ticklabels([])
 
         # compute inter onset intervals and draw bars
         concrete_unit = kwargs['concrete_unit']
-        inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=quantize)
+        inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=snap_to_grid)
         return axes.bar(list(range(len(inter_onsets))), inter_onsets, width=0.95, color=kwargs['color'])
 
-    @plot("TEDAS Notation", subplot_layout='v_stack', share_axis='x')
-    def tedas(self, track: Track, quantize=False, **kwargs):
+    @plot("TEDAS Notation", SnapsToGrid.ADJUSTABLE, subplot_layout='v_stack', share_axis='x')
+    def tedas(self, track: Track, snap_to_grid=False, **kwargs):
         axes = kwargs['axes']
         concrete_unit = kwargs['concrete_unit']
-        inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=quantize)
-        onset_times = track.get_onset_times(concrete_unit, quantize=quantize)
+        inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=snap_to_grid)
+        onset_times = track.get_onset_times(concrete_unit, quantize=snap_to_grid)
 
         styles = {
             'edgecolor': kwargs['color'],
@@ -372,7 +403,7 @@ class RhythmLoopPlotter(object):
         self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'], )
         return axes.bar(onset_times, inter_onsets, width=inter_onsets, align='edge', **styles)
 
-    @plot("Inter-onset interval histogram")
+    @plot("Inter-onset interval histogram", SnapsToGrid.NOT_APPLICABLE)
     def inter_onset_interval_histogram(self, track: Track, **kwargs):
         axes = kwargs['axes']
         occurrences, interval_durations = track.get_interval_histogram(kwargs['concrete_unit'])
