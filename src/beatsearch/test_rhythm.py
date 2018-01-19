@@ -444,6 +444,24 @@ class TestRhythmBase(ITestRhythmBase, TestCase):
         for args in test_info:
             do_subtest(*args)
 
+    #############################
+    # test duration in measures #
+    # ###########################
+
+    @inject_rhythm.no_mock()
+    def test_duration_in_measures(self, rhythm):
+        expected_duration_in_measures = 8
+        measure_duration = 123
+
+        rhythm.get_time_signature = MagicMock(TimeSignature)
+        rhythm.get_measure_duration = MagicMock(return_value=measure_duration)
+        rhythm.get_duration_in_ticks = MagicMock(return_value=measure_duration * expected_duration_in_measures)
+        rhythm.get_duration = MagicMock(return_value=measure_duration * expected_duration_in_measures)
+
+        actual_duration_in_measures = rhythm.get_duration_in_measures()
+        self.assertIsInstance(actual_duration_in_measures, float)
+        self.assertEqual(actual_duration_in_measures, expected_duration_in_measures)
+
 
 def mock_onset(tick=0, velocity=0):
     onset_mock = MagicMock(Onset)

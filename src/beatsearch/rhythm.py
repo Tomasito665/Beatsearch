@@ -466,6 +466,18 @@ class Rhythm(object, metaclass=ABCMeta):
         beat_unit = time_signature.get_beat_unit()
         return convert_time(numerator, beat_unit, unit, quantize=False)
 
+    def get_duration_in_measures(self):
+        """
+        Returns the duration of this rhythm in musical measures as a floating point number.
+
+        :return: the duration of this rhythm in measures as a floating point number
+        :raises TimeSignatureNotSet: if no time signature has been set
+        """
+
+        measure_duration = self.get_measure_duration("ticks")
+        duration = self.get_duration_in_ticks()
+        return duration / measure_duration
+
     ##############
     # Properties #
     ##############

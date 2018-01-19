@@ -148,7 +148,6 @@ class BSSelectedRhythmLoopLoader(BSRhythmLoopLoader):
 
 
 class BSController(object):
-    _rhythm_info_types = None
 
     # actions
     RHYTHM_SELECTION = "<Rhythm-Selection>"
@@ -167,7 +166,8 @@ class BSController(object):
         ("Name", str),
         ("BPM", float),
         ("Timesignature", str),
-        ("Track count", int)
+        ("Track count", int),
+        ("Measure count", int)
     ))
 
     @staticmethod
@@ -334,7 +334,8 @@ class BSController(object):
                     rhythm.name,
                     rhythm.bpm,
                     str(rhythm.time_signature),
-                    rhythm.get_track_count()
+                    rhythm.get_track_count(),
+                    int(rhythm.get_duration_in_measures())
                 )
 
     def set_rhythm_player(self, rhythm_player):  # type: (tp.Union[BSRhythmPlayer, None]) -> None
