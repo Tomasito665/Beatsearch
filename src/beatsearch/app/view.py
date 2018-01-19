@@ -28,7 +28,7 @@ from beatsearch.utils import (
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGrid
-from beatsearch.rhythm import RhythmLoop, Rhythm as Rhythm
+from beatsearch.rhythm import RhythmLoop, MidiRhythm, Rhythm
 import midi  # after beatsearch imports!
 
 
@@ -77,11 +77,10 @@ class BSMidiRhythmLoopLoader(BSRhythmLoopLoader):
         if not os.path.isfile(fpath):
             raise self.LoadingError("No such file: %s" % fpath)
         try:
-            pattern = midi.read_midifile(fpath)
+            rhythm = MidiRhythm(fpath)
         except TypeError as e:
             fname = os.path.basename(fpath)
             raise self.LoadingError("Error loading\"%s\": %s" % (fname, str(e)))
-        rhythm = Rhythm.create_from_midi(pattern, fpath)
         return rhythm
 
 
