@@ -537,11 +537,11 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
             container.pack(padx=3)
 
-        def redraw(self, rhythm_loop: RhythmLoop, plot_function: tp.Callable):
+        def redraw(self, rhythm_loop: RhythmLoop, plot_function: tp.Callable, snap_to_grid: bool):
             with self._plot_canvas.figure_update() as figure:
                 figure.clear()
                 if rhythm_loop is not None:
-                    plot_function(rhythm_loop, figure=figure)
+                    plot_function(rhythm_loop, snap_to_grid=snap_to_grid, figure=figure)
                     figure.suptitle(rhythm_loop.name, fontsize="small", y=0.13)
                     self._screen_main.tkraise()
                 else:
@@ -587,7 +587,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
         target_rhythm_frame = self._frame_target
         target_rhythm = controller.get_target_rhythm()
-        target_rhythm_frame.redraw(target_rhythm, plot_function)
+        target_rhythm_frame.redraw(target_rhythm, plot_function, snap_to_grid)
 
         rhythm_selection_frame = self._frame_selection
         rhythm_selection = controller.get_rhythm_selection()
