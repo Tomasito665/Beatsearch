@@ -474,7 +474,11 @@ class FakeOnset(object):
         return self.tick, self.velocity
 
     def __getitem__(self, item):
-        return self.__iter__()[item]
+        dictionary = {'tick': self.tick, 'velocity': self.velocity}
+        try:
+            return dictionary[item]
+        except KeyError:
+            return self.__iter__()[item]
 
     def __eq__(self, other):
         return self.tick == other[0] and self.velocity == other[1]
@@ -525,19 +529,19 @@ class TestMonophonicRhythmImplementationsMixin(TestCase):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
         expected_binary_ticks = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
         actual_binary_ticks = rhythm.get_binary(unit="ticks")
-        self.assertEqual(actual_binary_ticks, expected_binary_ticks)
+        np.testing.assert_array_equal(actual_binary_ticks, expected_binary_ticks)
 
     def test_pre_note_inter_onset_intervals(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
         expected_ioi_chain = [0, 3, 4, 3, 2]
         actual_ioi_chain = rhythm.get_pre_note_inter_onset_intervals(unit="ticks")
-        self.assertEqual(actual_ioi_chain, expected_ioi_chain)
+        np.testing.assert_array_equal(actual_ioi_chain, expected_ioi_chain)
 
     def test_post_note_inter_onset_intervals(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
         expected_ioi_chain = [3, 4, 3, 2, 4]
         actual_ioi_chain = rhythm.get_post_note_inter_onset_intervals(unit="ticks")
-        self.assertEqual(actual_ioi_chain, expected_ioi_chain)
+        np.testing.assert_array_equal(actual_ioi_chain, expected_ioi_chain)
 
     def test_interval_histogram(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
@@ -546,19 +550,19 @@ class TestMonophonicRhythmImplementationsMixin(TestCase):
             [2, 3, 4]   # intervals
         )
         actual_histogram = rhythm.get_interval_histogram(unit="ticks")
-        self.assertEqual(actual_histogram, expected_histogram)
+        np.testing.assert_array_equal(expected_histogram, actual_histogram)
 
     def test_schillinger_chain(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
         expected_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
         actual_chain = rhythm.get_binary_schillinger_chain(unit="ticks", values=(1, 0))
-        self.assertEqual(actual_chain, expected_chain)
+        np.testing.assert_array_equal(actual_chain, expected_chain)
 
     def test_chronotonic_chain(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
         expected_chain = [3, 3, 3, 4, 4, 4, 4, 3, 3, 3, 2, 2, 4, 4, 4, 4]
         actual_chain = rhythm.get_chronotonic_chain(unit="ticks")
-        self.assertEqual(actual_chain, expected_chain)
+        np.testing.assert_array_equal(actual_chain, expected_chain)
 
     def test_interval_difference_vector(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
@@ -569,16 +573,16 @@ class TestMonophonicRhythmImplementationsMixin(TestCase):
         actual_vector_non_cyclic = rhythm.get_interval_difference_vector(cyclic=False, unit="ticks")
 
         with self.subTest(cyclic=True):
-            self.assertEqual(actual_vector_cyclic, expected_vector_cyclic)
+            np.testing.assert_array_almost_equal(actual_vector_cyclic, expected_vector_cyclic)
 
         with self.subTest(cyclic=False):
-            self.assertEqual(actual_vector_non_cyclic, expected_vector_non_cyclic)
+            np.testing.assert_array_almost_equal(actual_vector_non_cyclic, expected_vector_non_cyclic)
 
     def test_onset_times(self):
         rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
         expected_onset_times = [0, 3, 7, 10, 12]
         actual_onset_times = rhythm.get_onset_times(unit="ticks")
-        self.assertEqual(actual_onset_times, expected_onset_times)
+        np.testing.assert_array_almost_equal(actual_onset_times, expected_onset_times)
 
 
 class TestMonophonicRhythmImpl(TestRhythmBase):

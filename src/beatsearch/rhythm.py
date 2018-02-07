@@ -854,7 +854,9 @@ class OnsetFactory(object, metaclass=ABCMeta):
     __ONSET_PARSERS = tuple(m.__func__ for m in (__from_iterator, __from_dictionary, __from_object, __from_scalar))
 
 
-def rescale_onset_series(onsets: np.ndarray, resolution_from: tp.Union[int, float], resolution_to: tp.Union[int, float]):
+def rescale_onset_series(onsets: np.ndarray,
+                         resolution_from: tp.Union[int, float],
+                         resolution_to: tp.Union[int, float]):
     """Rescales a given onset series from one resolution to another
 
     Rescales the tick position of the onsets in the given onset series from one resolution to another. This function is
@@ -940,16 +942,17 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
         happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
         quarter note) of the binary vector.
 
-        :param unit:
-        :return: the binary representation of the note onsets of the given pitch
+        :param unit: step unit of the chain
+        :return: the binary representation of the note onsets of the given pitch as a numpy array of type np.uint8
         """
 
         resolution = self.get_resolution()
         duration = self.get_duration(unit)
-        binary_string = [0] * int(math.ceil(duration))
+        n_steps = int(math.ceil(duration))
+        binary_string = np.zeros(n_steps, dtype=np.uint8)
 
         for onset in self.onsets:
-            pulse = convert_time(onset.tick, resolution, unit, quantize=True)
+            pulse = convert_time(onset['tick'], resolution, unit, quantize=True)
             try:
                 binary_string[pulse] = 1
             except IndexError:
@@ -968,17 +971,17 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
           X--X---X--X-X---
           0  3   4  3 2
 
-        :return: pre note inter-onset interval vector
+        :return: pre note inter-onset interval vector as a numpy array of type np.float32
         """
 
         resolution = self.get_resolution()
         current_tick = 0
-        intervals = []
+        intervals = np.empty(self.get_onset_count(), dtype=np.float32)
 
-        for onset in self.onsets:
-            delta_tick = onset.tick - current_tick
-            intervals.append(convert_time(delta_tick, resolution, unit))
-            current_tick = onset.tick
+        for i, onset in enumerate(self.onsets):
+            delta_tick = onset['tick'] - current_tick
+            intervals[i] = convert_time(delta_tick, resolution, unit)
+            current_tick = onset['tick']
 
         return intervals
 
@@ -993,22 +996,20 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
           X--X---X--X-X---
           3  4   3  2 4
 
-        :return: post note inter-onset interval vector
+        :return: post note inter-onset interval vector as a numpy array of type np.float32
         """
 
-        intervals = []
-        onset_positions = itertools.chain((onset.tick for onset in self.onsets), [self.duration_in_ticks])
-        last_onset_tick = -1
+        n_onsets = self.get_onset_count()
+        intervals = np.empty(n_onsets, dtype=np.float32)
+        onset_positions = itertools.chain((onset['tick'] for onset in self.onsets), [self.duration_in_ticks])
+        last_onset_tick = next(onset_positions)
 
-        for onset_tick in onset_positions:
-            if last_onset_tick < 0:
-                last_onset_tick = onset_tick
-                continue
-
+        for i in range(n_onsets):
+            onset_tick = next(onset_positions)
             delta_in_ticks = onset_tick - last_onset_tick
             delta_in_units = convert_time(delta_in_ticks, self.get_resolution(), unit, quantize=quantize)
 
-            intervals.append(delta_in_units)
+            intervals[i] = delta_in_units
             last_onset_tick = onset_tick
 
         return intervals
@@ -1025,16 +1026,16 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
             )
 
 
-        :return: an (occurrences, bins) tuple
+        :return: an (occurrences, bins) numpy 2d-array
         """
 
         intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-        histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
-        occurrences = histogram[0].tolist()
-        bins = histogram[1].tolist()[:-1]
-        return occurrences, bins
+        interval_range = int(min(intervals)), int(max(intervals))
+        histogram = np.histogram(intervals, tuple(range(interval_range[0], interval_range[1] + 2)))
+        histogram[1].resize(histogram[1].size - 1)
+        return histogram
 
-    def get_binary_schillinger_chain(self, unit='ticks', values=(1, 0)):
+    def get_binary_schillinger_chain(self, unit="ticks", values=(1, 0)):
         """
         Returns the Schillinger notation of this rhythm where each onset is a change of a "binary note".
 
@@ -1106,16 +1107,21 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
         """
 
         vector = self.get_post_note_inter_onset_intervals(unit, quantize)
+
         if cyclic:
-            vector.append(vector[0])
+            vector.resize((vector.size + 1, ))
+            vector[-1] = vector[0]
+
         i = 0
+
         while i < len(vector) - 1:
             try:
                 vector[i] = vector[i + 1] / float(vector[i])
             except ZeroDivisionError:
                 vector[i] = float('inf')
             i += 1
-        vector.pop()
+
+        vector.resize((vector.size - 1, ))
         return vector
 
     @Rhythm.Precondition.needs_resolution
@@ -1126,10 +1132,12 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
 
         :param unit: the unit of the onset times
         :param quantize: whether or not the onset times must be quantized to the given unit
-        :return: a list with the onset times of this rhythm
+        :return: the onset times of the notes in this rhythm in the given unit as a numpy array of type np.float32
         """
 
-        return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
+        res = self.get_resolution()
+        iterator = (convert_time(onset[0], res, unit, quantize) for onset in self.get_onsets())
+        return np.fromiter(iterator, dtype=np.float32)
 
 
 class MonophonicRhythmBase(MonophonicRhythmRepresentationsMixin, MonophonicRhythm, metaclass=ABCMeta):
@@ -1456,21 +1464,19 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
     # TODO remove duplicate functionality (see MonophonicRhythm.get_interval_histogram)
     def get_interval_histogram(self, unit="ticks") -> (int, int):
         """
-        Returns the interval histogram of all the tracks combined.
+        Returns the interval histogram of all the tracks combined. See MonophonicRhythm.get_interval_histogram.
 
         :return: combined interval histogram of all the tracks in this rhythm
         """
 
-        intervals = []
+        get_track_intervals = (track.get_post_note_inter_onset_intervals(
+            unit, quantize=True) for track in self.get_track_iterator())
+        intervals = np.concatenate(tuple(get_track_intervals))
 
-        for track in self.get_track_iterator():
-            track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=True)
-            intervals.extend(track_intervals)
-
-        histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
-        occurrences = histogram[0].tolist()
-        bins = histogram[1].tolist()[:-1]
-        return occurrences, bins
+        interval_range = int(min(intervals)), int(max(intervals))
+        histogram = np.histogram(intervals, tuple(range(interval_range[0], interval_range[1] + 2)))
+        histogram[1].resize(histogram[1].size - 1)
+        return histogram
 
 
 class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
