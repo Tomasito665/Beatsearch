@@ -709,25 +709,170 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
         return self._duration_in_ticks
 
 
-class Onset(namedtuple("Onset", ["tick", "velocity"])):
-    """Onset in a rhythm
+# TODO Add test to check that all fields of Onset are equal
+Onset = np.dtype([("tick", np.uint32), ("velocity", np.uint32)])
+"""Numpy structured array type for onsets
 
-    Each onset represents a note within rhythm and has the following (read-only) properties:
-       tick      - the absolute tick position of this onset within the rhythm as an integer
-       velocity  - the MIDI velocity of this note with a range of [0, 127] as an integer
+This is a numpy structured array type for numpy onset arrays. Each onset has two properties:
+    tick      - the absolute tick position of this onset within the rhythm as an integer (np.int32)
+    velocity  - the MIDI velocity of this note with a range of [0, 127] as an integer (np.int32)
+"""
+
+
+class OnsetsNotInChronologicalOrder(Exception):
+    """Exception thrown when two adjacent onsets are not in chronological order"""
+
+    def __init__(self, tick_a: int, tick_b: int):
+        msg = "<..., %i, !%i!, ...>" % (tick_a, tick_b)
+        super().__init__(msg)
+
+
+class OnsetFactory(object, metaclass=ABCMeta):
+    """Utility class providing helper methods to create onsets
+
+    This is a utility class that provides functionality to create onsets.
     """
 
-    def scale(self, resolution_from: tp.Union[int, float], resolution_to: tp.Union[int, float]):
-        """
-        Returns a new Onset object with a scaled position.
+    def __init__(self):
+        raise TypeError("this is a utility class and shouldn't be initialized")
 
-        :param resolution_from: original resolution of the onset tick position in PPQ
-        :param resolution_to: resolution of the new onset's tick position in PPQN
-        :return: new Onset object with the given new resolution
+    @classmethod
+    def create(cls, onset_descriptions, default_velocity=100):
+        """Creates a series of onsets, given an iterable with onset descriptions
+
+        Creates and returns a series of onsets, given an iterable with onset descriptions. The onset descriptions must
+        be in chronological order. If not, this method will raise an OnsetsNotInChronologicalOrder exception. Onset
+        descriptions consist of two properties:
+            - tick (required):        absolute tick position of the onset
+            - velocity (optional):    the velocity of the onset
+
+        :param onset_descriptions: an iterable of onset descriptions, where each onset description can be either:
+                                        - list/tuple [tick] or [tick, onset]
+                                        - dictionary {'tick'} or {'tick', 'onset'}
+                                        - object {tick} or {tick, onset}
+                                        - scalar representing the tick
+
+        :param default_velocity: this velocity will be used when an onset description has no velocity specified
+        :return: a numpy ndarray of structured onset arrays (see Onset)
+        :raises: OnsetsNotInChronologicalOrder
         """
 
-        scaled_tick = convert_time(self.tick, resolution_from, resolution_to, quantize=True)
-        return Onset(scaled_tick, self.velocity)
+        n_onsets = len(onset_descriptions)
+
+        def parse_onsets():
+            prev_tick = -1
+            for desc in onset_descriptions:
+                tick, velocity = cls.__parse_onset(desc, default_velocity)
+
+                if tick < 0:
+                    raise ValueError("expected tick equal or greater than zero but got %i" % tick)
+                if velocity < 0:
+                    raise ValueError("expected velocity equal or greater than zero but got %i" % velocity)
+
+                if tick < prev_tick:
+                    raise OnsetsNotInChronologicalOrder(prev_tick, tick)
+
+                yield tick, velocity
+                prev_tick = tick
+
+        return np.fromiter(parse_onsets(), dtype=Onset, count=n_onsets)
+
+    @staticmethod
+    def empty():
+        """Creates an empty onset array
+
+        :return: empty onset array
+        """
+
+        return np.empty(0, dtype=Onset)
+
+    @classmethod
+    def __parse_onset(cls, onset_description, default_velocity):
+        tick, velocity = None, None
+
+        for parse in cls.__ONSET_PARSERS:
+            try:
+                result = parse(onset_description)
+                tick, velocity = (int(x) for x in result)
+            except (TypeError, ValueError):
+                tick, velocity = None, None
+                continue
+            break
+
+        if tick is None:
+            assert velocity is None
+            raise ValueError("failed to parse onset description \"%s\"" % onset_description)
+
+        if velocity < 0:
+            velocity = default_velocity
+
+        return tick, velocity
+
+    @staticmethod
+    def __from_iterator(onset):
+        iterator = iter(onset)
+        try:
+            tick = next(iterator)
+        except StopIteration:
+            raise ValueError("iterator should yield at least one value (tick)")
+        try:
+            velocity = next(iterator)
+        except StopIteration:
+            velocity = -1
+        return tick, velocity
+
+    @staticmethod
+    def __from_dictionary(onset):
+        try:
+            tick = onset['tick']
+        except KeyError:
+            raise TypeError
+        try:
+            velocity = onset['velocity']
+        except KeyError:
+            velocity = -1
+        return tick, velocity
+
+    @staticmethod
+    def __from_object(onset):
+        try:
+            tick = onset.tick
+        except AttributeError:
+            raise TypeError
+        try:
+            velocity = onset.velocity
+        except AttributeError:
+            velocity = -1
+        return tick, velocity
+
+    @staticmethod
+    def __from_scalar(onset):
+        tick = round(onset)
+        return tick, -1
+
+    # noinspection PyUnresolvedReferences
+    __ONSET_PARSERS = tuple(m.__func__ for m in (__from_iterator, __from_dictionary, __from_object, __from_scalar))
+
+
+def rescale_onset_series(onsets: np.ndarray, resolution_from: tp.Union[int, float], resolution_to: tp.Union[int, float]):
+    """Rescales a given onset series from one resolution to another
+
+    Rescales the tick position of the onsets in the given onset series from one resolution to another. This function is
+    destructive.
+
+    :param onsets: a numpy array with dtype Onset
+    :param resolution_from: original resolution of the onset tick position
+    :param resolution_to: new resolution to rescale the onsets to
+    :return: None
+    """
+
+    dtype_tick = Onset[0]  # np.int32
+    flat_view = onsets.view(dtype=dtype_tick)  # [t, v, t, v, ...]
+    ticks_view = flat_view[::2]  # [t, t, t, ...]
+    scale_factor = float(resolution_to) / float(resolution_from)
+
+    # noinspection PyArgumentList
+    np.multiply(ticks_view, scale_factor, out=ticks_view, casting="unsafe")
 
 
 class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
@@ -737,7 +882,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
     """
 
     @abstractmethod
-    def get_onsets(self) -> tp.Tuple[Onset, ...]:
+    def get_onsets(self):
         """
         Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of Onset.
 
@@ -747,7 +892,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def set_onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
+    def set_onsets(self, onsets):  #: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
         """
         Sets the onsets of this rhythm.
 
@@ -758,12 +903,12 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         raise NotImplementedError
 
     @property
-    def onsets(self) -> tp.Tuple[Onset, ...]:
+    def onsets(self):
         """See MonophonicRhythm.get_onsets"""
         return self.get_onsets()
 
     @onsets.setter
-    def onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
+    def onsets(self, onsets):
         """See MonophonicRhythm.set_onsets"""
         self.set_onsets(onsets)
 
@@ -773,7 +918,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
 
     def get_last_onset_tick(self) -> int:  # implements Rhythm.get_last_onset_tick
         try:
-            return self.onsets[-1].tick
+            return self.onsets[-1]['tick']
         except IndexError:
             return -1
 
@@ -997,18 +1142,7 @@ class MonophonicRhythmBase(MonophonicRhythmRepresentationsMixin, MonophonicRhyth
     This class inherits all monophonic rhythm representations from the MonophonicRhythmRepresentationsMixin class.
     """
 
-    class OnsetsNotInChronologicalOrder(Exception):
-        """Exception thrown when two adjacent onsets are not in chronological order"""
-        def __init__(self, tick_a: int, tick_b: int):
-            msg = "<..., %i, !%i!, ...>" % (tick_a, tick_b)
-            super().__init__(msg)
-
-    def __init__(
-            self,
-            onsets: tp.Union[tp.Iterable[Onset],
-                             tp.Iterable[tp.Tuple[int, int]],
-                             tp.Iterable[tp.Sequence[int]]] = None,
-    ):
+    def __init__(self, onsets):
         """
         Creates a new monophonic rhythm from the given onsets. The onsets will be stored as MonophonicOnset.Onset
         named tuples.
@@ -1018,10 +1152,10 @@ class MonophonicRhythmBase(MonophonicRhythmRepresentationsMixin, MonophonicRhyth
         :raises OnsetsNotInChronologicalOrder
         """
 
-        self._onsets = tuple()  # type: tp.Tuple[Onset, ...]
+        self._onsets = OnsetFactory.empty()
         self.set_onsets(onsets)
 
-    def get_onsets(self) -> tp.Tuple[Onset, ...]:
+    def get_onsets(self):
         """
         Returns the onsets within this rhythm as a tuple of onsets, where each onset is an instance of Onset.
 
@@ -1030,51 +1164,32 @@ class MonophonicRhythmBase(MonophonicRhythmRepresentationsMixin, MonophonicRhyth
 
         return self._onsets
 
-    def set_onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]):
-        """
-        Sets the onsets of this rhythm. The given onsets must be in chronological order. If they're not, this method
-        will raise an OnsetsNotInChronologicalOrder exception.
+    def set_onsets(self, onset_descriptions):
+        """Sets the onsets of this rhythm
 
-        :param onsets: onsets as an iterable of (absolute tick, velocity) tuples or as Onset objects or false value to
-                       remove the onsets
+        Sets the onsets of this rhythm. The given onsets must be in chronological order. If not, this method will raise
+        an OnsetsNotInChronologicalOrder exception.
+
+        :param onset_descriptions: an iterable of onset descriptions (see OnsetFactory.create) or None to remove the
+                                   onsets
         :return: None
         :raises OnsetsNotInChronologicalOrder
         """
 
-        if not onsets:
-            self._onsets = tuple()
-            return
-
-        def validate_onsets_generator():
-            prev_tick = -1
-            for onset in onsets:
-                try:
-                    tick, velocity, *_ = onset
-                except (TypeError, ValueError):
-                    raise ValueError("onset should be iterable of at least two "
-                                     "elements (tick, velocity) but got %s" % str(onset))
-                if tick < prev_tick:
-                    raise self.OnsetsNotInChronologicalOrder(prev_tick, tick)
-                yield Onset(tick, velocity)
-                prev_tick = tick
-
-        self._onsets = tuple(validate_onsets_generator())
+        if onset_descriptions is None:
+            self._onsets = OnsetFactory.empty()
+        else:
+            self._onsets = OnsetFactory.create(onset_descriptions)
 
     # implements Rhythm.__rescale_onset_ticks__
     def __rescale_onset_ticks__(self, old_resolution: int, new_resolution: int):
-        self._onsets = tuple(onset.scale(old_resolution, new_resolution) for onset in self._onsets)
+        rescale_onset_series(self._onsets, old_resolution, new_resolution)
 
 
 class MonophonicRhythmImpl(RhythmBase, MonophonicRhythmBase):
     """Implements both rhythm base and monophonic rhythm base"""
 
-    def __init__(
-            self,
-            onsets: tp.Union[tp.Iterable[Onset],
-                             tp.Iterable[tp.Tuple[int, int]],
-                             tp.Iterable[tp.Sequence[int]]] = None,
-            **kwargs
-    ):
+    def __init__(self, onsets=None, **kwargs):
         """
         Creates a new monophonic rhythm with the given onsets.
 
@@ -1236,12 +1351,7 @@ class Track(MonophonicRhythmBase, SlavedRhythmBase):
     instance of this class. A track is a slaved rhythm, parented to the polyphonic rhythm to which it belongs.
     """
 
-    def __init__(
-            self, onsets: tp.Union[tp.Iterable[Onset],
-                                   tp.Iterable[tp.Tuple[int, int]],
-                                   tp.Iterable[tp.Sequence[int]]] = None,
-            track_name: str = "", parent: Rhythm = None
-    ):
+    def __init__(self, onsets=None, track_name: str = "", parent: Rhythm = None):
         """
         Creates a new rhythm track.
 

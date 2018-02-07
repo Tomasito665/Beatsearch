@@ -1,4 +1,5 @@
 import enum
+import numpy as np
 import typing as tp
 from functools import wraps, partial
 from unittest import TestCase, main
@@ -15,7 +16,8 @@ from beatsearch.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
 from beatsearch.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
 
 # misc
-from beatsearch.rhythm import TimeSignature, Onset, MidiMapping, MidiKey, MonophonicRhythmRepresentationsMixin
+from beatsearch.rhythm import TimeSignature, Onset, MidiMapping, MidiKey, \
+    MonophonicRhythmRepresentationsMixin, OnsetsNotInChronologicalOrder
 import midi
 
 
@@ -463,13 +465,23 @@ class TestRhythmBase(ITestRhythmBase, TestCase):
         self.assertEqual(actual_duration_in_measures, expected_duration_in_measures)
 
 
+class FakeOnset(object):
+    def __init__(self, tick, velocity):
+        self.tick = tick
+        self.velocity = velocity
+
+    def __iter__(self):
+        return self.tick, self.velocity
+
+    def __getitem__(self, item):
+        return self.__iter__()[item]
+
+    def __eq__(self, other):
+        return self.tick == other[0] and self.velocity == other[1]
+
+
 def mock_onset(tick=0, velocity=0):
-    onset_mock = MagicMock(Onset)
-    onset_mock.tick = tick
-    onset_mock.velocity = velocity
-    onset_mock.__iter__.return_value = (tick, velocity)
-    onset_mock.__eq__ = lambda self, other: self.tick == other.tick and self.velocity == other.velocity
-    onset_mock.__getitem__ = lambda self, i: self.tick if i == 0 else self.velocity
+    onset_mock = FakeOnset(tick, velocity)
     return onset_mock
 
 
@@ -484,9 +496,9 @@ class TestMonophonicRhythmImplementationsMixin(TestCase):
             RhythmMockedGetters.__init__(self)
             self.get_onsets = MagicMock()
 
-        def get_onsets(self) -> tp.Tuple[Onset, ...]: pass
+        def get_onsets(self): pass
 
-        def set_onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]): pass
+        def set_onsets(self, onsets): pass
 
     @classmethod
     def _get_rhythm_mock_with_23_rumba_clave_onsets(cls, resolution):
@@ -625,14 +637,14 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     @inject_rhythm.no_mock()
     def test_onsets_setter_raises_onsets_not_in_chronological_order(self, rhythm):
         onsets = ((1, 0), (2, 0), (3, 0), (2, 0), (4, 0))
-        self.assertRaises(MonophonicRhythmBase.OnsetsNotInChronologicalOrder, rhythm.set_onsets, onsets)
+        self.assertRaises(OnsetsNotInChronologicalOrder, rhythm.set_onsets, onsets)
 
     @inject_rhythm.no_mock()
     def test_onsets_setter_raises_value_error_on_invalid_input(self, rhythm):
         onset_inputs = {
-            'on_missing_velocity': ((1, 0), (2, 0), (3, 0), 4),
+            'on_missing_tick': {'velocity': 10},
             'on_string': "this is not a valid onset chain",
-            'on_1d_tuple': (1, 2, 3, 4, 5)
+            'on_negative_tick': [(-3, 10), (0, 20)]
         }
 
         for test_name, onsets in onset_inputs.items():
@@ -643,52 +655,39 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     # onsets setter/getter #
     ########################
 
-    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
-    def test_onsets_setter_getter_with_onset_objects(self, rhythm, _):
-        onsets = (mock_onset(0, 80), mock_onset(5, 14), mock_onset(6, 40), mock_onset(8, 95))
-        rhythm.set_onsets(onsets)
+    def test_onsets_setter_getter_with_onset_objects(self, rhythm):
+        onset_input = (mock_onset(0, 80), mock_onset(5, 14), mock_onset(6, 40), mock_onset(8, 95))
+        expected_onsets = np.array([(0, 80), (5, 14), (6, 40), (8, 95)], dtype=Onset)
+        rhythm.set_onsets(onset_input)
         actual_onsets = rhythm.get_onsets()
-        self.assertEqual(actual_onsets, onsets)
-        self.assertIsNot(actual_onsets, onsets, "set_onsets should deep copy/convert the given onsets")
+        self.assertIsNot(actual_onsets, onset_input, "set_onsets should deep copy/convert the given onsets")
+        np.testing.assert_array_equal(actual_onsets, expected_onsets)
 
-    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
-    def test_onsets_setter_getter_with_mixed_onset_formats(self, rhythm, _):
-        onsets = ([0, 80], (5, 14, 14), mock_onset(6, 40), iter([8, 95]))
-        rhythm.set_onsets(onsets)
-        expected_onsets = (mock_onset(0, 80), mock_onset(5, 14), mock_onset(6, 40), mock_onset(8, 95))
+    def test_onsets_setter_getter_with_mixed_onset_formats(self, rhythm):
+        onset_input = ([0, 80], (5, 14, 14), mock_onset(6, 40), iter([8, 95]), {'velocity': 23, 'tick': 10})
+        rhythm.set_onsets(onset_input)
+        expected_onsets = np.array([(0, 80), (5, 14), (6, 40), (8, 95), (10, 23)], dtype=Onset)
         actual_onsets = rhythm.get_onsets()
-        self.assertEqual(actual_onsets, expected_onsets)
         self.assertIsNot(actual_onsets, expected_onsets, "set_onsets should deep copy/convert the given onsets")
+        np.testing.assert_array_equal(actual_onsets, expected_onsets)
 
     ###################
     # onset rescaling #
     ###################
 
-    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
-    def test_rescale_onsets_scales_onsets(self, rhythm, _):
-        original_onsets = (mock_onset(0, 80), mock_onset(3, 80), mock_onset(7, 80), mock_onset(10, 80))
-        expected_scaled_onsets = ("scaled-1", "scaled-2", "scaled-3", "scaled-4")
+    def test_rescale_onsets_scales_onsets(self, rhythm):
+        res_from, res_to = 16, 32
+        original_onsets = np.array([(0, 80), (3, 80), (7, 80), (10, 80)], dtype=Onset)
+        expected_scaled_onsets = np.array([(0, 80), (6, 80), (14, 80), (20, 80)], dtype=Onset)
 
-        rhythm.set_onsets(original_onsets)
-        assert rhythm.get_onsets() == original_onsets
-        original_onsets = rhythm.get_onsets()
+        rhythm.onsets = original_onsets
+        rhythm.__rescale_onset_ticks__(res_from, res_to)
+        actual_scaled_onsets = rhythm.onsets
 
-        for onset, scaled_onset in zip(original_onsets, expected_scaled_onsets):
-            onset.scale.return_value = scaled_onset
-
-        scale_args = (16, 32)
-        rhythm.__rescale_onset_ticks__(*scale_args)
-        actual_scaled_onsets = rhythm.get_onsets()
-
-        for i, [original_onset, expected_onset, actual_onset] in enumerate(zip(original_onsets,
-                                                                               expected_scaled_onsets,
-                                                                               actual_scaled_onsets)):
-            with self.subTest(onset_ix=i):
-                self.assertEqual(actual_onset, expected_onset)
-                original_onset.scale.assert_called_once_with(*scale_args)
+        np.testing.assert_array_equal(actual_scaled_onsets, expected_scaled_onsets)
 
     ###############
     # onset count #
@@ -698,9 +697,8 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     def test_onset_count_zero_when_no_onsets(self, rhythm):
         self.assertEqual(0, rhythm.get_onset_count())
 
-    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
-    def test_onset_count_with_onsets(self, rhythm, _):
+    def test_onset_count_with_onsets(self, rhythm):
         rhythm.set_onsets((mock_onset(1, 80), mock_onset(2, 80), mock_onset(3, 80), mock_onset(4, 80), mock_onset(5, 80), mock_onset(6, 80)))
         self.assertEqual(rhythm.get_onset_count(), 6)
 
@@ -712,9 +710,8 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     def test_last_onset_tick_minus_one_when_no_onsets(self, rhythm):
         self.assertEqual(rhythm.get_last_onset_tick(), -1)
 
-    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.no_mock()
-    def test_last_onset_tick_with_onsets(self, rhythm, _):
+    def test_last_onset_tick_with_onsets(self, rhythm):
         rhythm.set_onsets((mock_onset(12, 80), mock_onset(43, 80), mock_onset(56, 80), mock_onset(98, 80), mock_onset(101, 80), mock_onset(106, 80)))
         self.assertEqual(rhythm.get_last_onset_tick(), 106)
 
@@ -1182,15 +1179,14 @@ class TestMidiRhythm(TestRhythmLoop):
     # from/to midi pattern integration tests #
     ##########################################
 
-    @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
     @inject_rhythm.mocked_setters(midi_mapping=MagicMock(MidiMapping))
-    def test_load_midi_pattern(self, rhythm, _):
+    def test_load_midi_pattern(self, rhythm):
         kick, snare = 36, 38
 
         expected_ts = TimeSignature(6, 8)
         expected_bpm = 180
-        expected_kick_onsets = (mock_onset(0, 80), mock_onset(3, 40), mock_onset(7, 80), mock_onset(12, 80))
-        expected_snare_onsets = (mock_onset(2, 80), mock_onset(10, 60))
+        expected_kick_onsets = np.array([(0, 80), (3, 40), (7, 80), (12, 80)], dtype=Onset)
+        expected_snare_onsets = np.array([(2, 80), (10, 60)], dtype=Onset)
         expected_resolution = 16
 
         kick_key_mock = self._create_midi_key_mock("kick", kick, "kck")
@@ -1200,31 +1196,36 @@ class TestMidiRhythm(TestRhythmLoop):
             "something went wrong in the constructor, midi_mapping was not set"
         rhythm.midi_mapping.find_by_pitch = lambda pitch: kick_key_mock if pitch == kick else snare_key_mock
 
+        tick_ix, velocity_ix = 0, 1
+
         midi_track = midi.Track([
             self._create_midi_time_signature_mock_event(expected_ts.numerator, expected_ts.denominator),
             self._create_midi_set_tempo_mock_event(expected_bpm),
-            midi.NoteOnEvent(tick=0, pitch=kick, velocity=expected_kick_onsets[0].velocity),
-            midi.NoteOnEvent(tick=2, pitch=snare, velocity=expected_snare_onsets[0].velocity),
-            midi.NoteOnEvent(tick=1, pitch=kick, velocity=expected_kick_onsets[1].velocity),
-            midi.NoteOnEvent(tick=4, pitch=kick, velocity=expected_kick_onsets[2].velocity),
-            midi.NoteOnEvent(tick=3, pitch=snare, velocity=expected_snare_onsets[1].velocity),
-            midi.NoteOnEvent(tick=2, pitch=kick, velocity=expected_kick_onsets[3].velocity)
+            midi.NoteOnEvent(tick=0, pitch=kick, velocity=expected_kick_onsets[0][velocity_ix]),
+            midi.NoteOnEvent(tick=2, pitch=snare, velocity=expected_snare_onsets[0][velocity_ix]),
+            midi.NoteOnEvent(tick=1, pitch=kick, velocity=expected_kick_onsets[1][velocity_ix]),
+            midi.NoteOnEvent(tick=4, pitch=kick, velocity=expected_kick_onsets[2][velocity_ix]),
+            midi.NoteOnEvent(tick=3, pitch=snare, velocity=expected_snare_onsets[1][velocity_ix]),
+            midi.NoteOnEvent(tick=2, pitch=kick, velocity=expected_kick_onsets[3][velocity_ix])
         ])
 
         pattern = midi.Pattern([midi_track], resolution=expected_resolution)
         rhythm.load_midi_pattern(pattern)
         kick_track, snare_track = tuple(rhythm.get_track_iterator())
 
-        with self.subTest("track_onsets_set_correctly"):
-            self.assertEqual(kick_track.get_onsets(), expected_kick_onsets)
-            self.assertEqual(snare_track.get_onsets(), expected_snare_onsets)
+        actual_kick_onsets = kick_track.get_onsets()
+        actual_snare_onsets = snare_track.get_onsets()
 
-        with self.subTest("track_onsets_tick_positions_are_integers"):
-            for kick_onset, snare_onset in zip(kick_track.get_onsets(), snare_track.get_onsets()):
-                self.assertIsInstance(
-                    kick_onset.tick, int, "kick onset tick position \"%s\" is not an int" % str(kick_onset.tick))
-                self.assertIsInstance(
-                    snare_onset.tick, int, "snare onset tick position \"%s\" is not an int" % str(snare_onset.tick))
+        with self.subTest("track_onsets_set_correctly"):
+            np.testing.assert_array_equal(actual_kick_onsets, expected_kick_onsets)
+            np.testing.assert_array_equal(actual_snare_onsets, expected_snare_onsets)
+
+        with self.subTest("track_onsets_tick_positions_are_unsigned_integers"):
+            for kick_onset, snare_onset in zip(actual_kick_onsets, actual_snare_onsets):
+                self.assertIsInstance(kick_onset[tick_ix], np.uint32,
+                                      "kick onset tick position \"%s\" is not an int" % str(kick_onset[tick_ix]))
+                self.assertIsInstance(snare_onset[tick_ix], np.uint32,
+                                      "snare onset tick position \"%s\" is not an int" % str(snare_onset[tick_ix]))
 
         with self.subTest("track_names_set_correctly"):
             self.assertEqual(kick_track.get_name(), kick_key_mock.abbreviation)
@@ -1328,36 +1329,34 @@ class TestMidiRhythm(TestRhythmLoop):
 
 # TODO Add tests for MonophonicRhythmFactory
 
-class TestOnset(TestCase):
-    def test_properties_equal_constructor_args(self):
-        args = (123, 75)
-        onset = Onset(*args)
+class TestOnsetStructuredArray(TestCase):
 
-        with self.subTest(prop="tick"):
-            expected_tick = args[0]
-            self.assertEqual(onset.tick, expected_tick)
+    def test_property_names(self):
+        self.assertEqual(Onset.names, ("tick", "velocity"))
 
-        with self.subTest(prop="velocity"):
-            expected_velocity = args[1]
-            self.assertEqual(onset.velocity, expected_velocity)
+    def test_properties_are_unsigned_int(self):
+        types = tuple(info[0] for info in Onset.fields.values())
+        self.assertEqual(types, (np.uint32, np.uint32))
 
-    def test_scale_doesnt_affect_velocity(self):
-        onset = Onset(123, 75)
-        onset.scale(10, 20)
-        self.assertEqual(onset.velocity, 75)
+    # TODO Port these scaling tests to a function test for rescale_onset_series()
 
-    def test_scale_tick_zero_stays_zero(self):
-        onset = Onset(0, 75)
-        onset.scale(10, 20)
-        self.assertEqual(onset.tick, 0)
-
-    def test_scale_tick_rounds_down(self):
-        onset = Onset(2, 75).scale(10, 16)  # scale factor of 1.6
-        self.assertEqual(onset.tick, 3)     # 2 * 1.6 = 3.2
-
-    def test_scale_tick_rounds_up(self):
-        onset = Onset(3, 75).scale(10, 16)  # scale factor of  1.6
-        self.assertEqual(onset.tick, 5)     # 3 * 1.6 = 4.8
+    # def test_scale_doesnt_affect_velocity(self):
+    #     onset = Onset(123, 75)
+    #     onset.scale(10, 20)
+    #     self.assertEqual(onset.velocity, 75)
+    #
+    # def test_scale_tick_zero_stays_zero(self):
+    #     onset = Onset(0, 75)
+    #     onset.scale(10, 20)
+    #     self.assertEqual(onset.tick, 0)
+    #
+    # def test_scale_tick_rounds_down(self):
+    #     onset = Onset(2, 75).scale(10, 16)  # scale factor of 1.6
+    #     self.assertEqual(onset.tick, 3)     # 2 * 1.6 = 3.2
+    #
+    # def test_scale_tick_rounds_up(self):
+    #     onset = Onset(3, 75).scale(10, 16)  # scale factor of  1.6
+    #     self.assertEqual(onset.tick, 5)     # 3 * 1.6 = 4.8
 
 
 if __name__ == "__main__":
