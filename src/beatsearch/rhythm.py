@@ -1115,10 +1115,10 @@ class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
         i = 0
 
         while i < len(vector) - 1:
-            try:
+            if vector[i] == 0:
+                vector[i] = vector[i] / float('inf')
+            else:
                 vector[i] = vector[i + 1] / float(vector[i])
-            except ZeroDivisionError:
-                vector[i] = float('inf')
             i += 1
 
         vector.resize((vector.size - 1, ))

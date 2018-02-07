@@ -388,7 +388,7 @@ class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
             x = cx[i % len(cx)]
             y = cy[i % len(cy)]
             # assuming that each pulse is a unit
-            chronotonic_distance += abs(x - y)
+            chronotonic_distance += abs(int(x) - int(y))  # cast to int from uint
             i += 1
         return chronotonic_distance
 
