@@ -24,7 +24,8 @@ from beatsearch.utils import (
     no_callback,
     type_check_and_instantiate_if_necessary,
     eat_args,
-    color_variant
+    color_variant,
+    get_beatsearch_dir
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGrid
@@ -712,7 +713,8 @@ class BSMainMenu(tk.Menu, object):
         fname = tkinter.filedialog.askopenfilename(
             title="Open rhythm corpus file",
             filetypes=[("Pickle files", "*.pkl")],
-            parent=self.master
+            parent=self.master,
+            initialdir=get_beatsearch_dir(True)
         )
 
         if not os.path.isfile(fname):
@@ -722,7 +724,7 @@ class BSMainMenu(tk.Menu, object):
 
 
 class BSApp(tk.Tk, object):
-    WINDOW_TITLE = "BeatSearch search tool"
+    WINDOW_TITLE = "BeatSearch"
 
     STYLES = {
         'inner-pad-x': 0,
@@ -860,6 +862,9 @@ class BSApp(tk.Tk, object):
         if controller.is_rhythm_player_set():  # bind space for whole application
             self.bind_all("<space>", eat_args(self._toggle_rhythm_playback))
 
+        # update window title on new corpus loaded
+        controller.bind(BSController.CORPUS_LOADED, self.update_window_title)
+
         # add rhythm loader from MIDI file with dialog
         controller.register_rhythm_loader(self._midi_rhythm_loader_by_dialog)
 
@@ -868,6 +873,10 @@ class BSApp(tk.Tk, object):
             loader.on_loading_error = self._on_loading_error
 
         self._controller = controller
+
+        # force-update the window title as we might have missed the CORPUS_LOADED event if the corpus has been loaded
+        # before the controller is set
+        self.update_window_title()
 
     def redraw_frames(self, *frame_names):
         if not frame_names:
@@ -889,6 +898,11 @@ class BSApp(tk.Tk, object):
         self.quit()
         self.destroy()
         self.is_closed = True
+
+    def update_window_title(self):
+        corpus_fname = self.controller.get_corpus_fname() or "[Empty]"
+        title = "%s - %s" % (corpus_fname, self.WINDOW_TITLE)
+        self.wm_title(title)
 
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]

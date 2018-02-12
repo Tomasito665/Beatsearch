@@ -252,6 +252,18 @@ class BSController(object):
         except AttributeError:
             return ""
 
+    def get_corpus_fname(self):
+        """
+        Returns the filename (including its extension) of the current corpus or an empty string if no corpus is set.
+
+        :return: filename of the current corpus or an empty string
+        """
+
+        try:
+            return self._corpus.fname
+        except AttributeError:
+            return ""
+
     def get_rhythm_count(self):
         """
         Returns the number of rhythms in the current rhythm corpus.
