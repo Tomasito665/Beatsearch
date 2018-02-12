@@ -2,6 +2,7 @@ import os
 import pickle
 import sys
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
+from beatsearch.utils import get_default_beatsearch_rhythms_fpath
 from beatsearch.rhythm import MidiRhythm
 
 
@@ -26,7 +27,7 @@ if __name__ == '__main__':
     try:
         output = sys.argv[2]
     except IndexError:
-        output = "./data/rhythms.pkl"
+        output = get_default_beatsearch_rhythms_fpath()
 
     rhythms = []
     n_midi_files = 0

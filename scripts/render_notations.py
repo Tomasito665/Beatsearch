@@ -7,14 +7,14 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src")
 from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.rhythm import Unit
 from beatsearch.graphics.plot import RhythmLoopPlotter
-from beatsearch.utils import print_progress_bar
+from beatsearch.utils import print_progress_bar, get_default_beatsearch_rhythms_fpath
 
 
 if __name__ == '__main__':
     try:
         corpus_binary = sys.argv[1]
     except IndexError:
-        corpus_binary = "./data/rhythms.pkl"
+        corpus_binary = get_default_beatsearch_rhythms_fpath()
 
     try:
         target_dir = sys.argv[2]

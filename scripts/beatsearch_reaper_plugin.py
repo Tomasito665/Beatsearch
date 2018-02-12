@@ -18,6 +18,7 @@ sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoopLoader
 from beatsearch.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit
 from beatsearch.app.view import BSApp
+from beatsearch.utils import get_default_beatsearch_rhythms_fpath
 # noinspection PyUnresolvedReferences
 import midi
 # noinspection PyUnresolvedReferences
@@ -55,7 +56,7 @@ def main(input_track_name, output_track_name):
 
     print("Initializing controller...")
     controller = BSController(rhythm_player=player)
-    controller.set_corpus(os.path.join(BS_ROOT, "data", "rhythms.pkl"))
+    controller.set_corpus(get_default_beatsearch_rhythms_fpath())
     controller.register_rhythm_loader(rhythm_loader)
 
     print("Initializing view...")

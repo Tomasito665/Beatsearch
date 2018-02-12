@@ -6,14 +6,14 @@ from time import time
 from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.rhythmcorpus import RhythmCorpus
-from beatsearch.utils import print_progress_bar
+from beatsearch.utils import print_progress_bar, get_default_beatsearch_rhythms_fpath
 
 
 def get_args():
     parser = argparse.ArgumentParser(description="Exports rhythms to MIDI files")
     parser.add_argument("--corpus", type=argparse.FileType('r'),
                         help="The *.pkl file containing the rhythms to export to MIDI",
-                        default="./data/rhythms.pkl")
+                        default=get_default_beatsearch_rhythms_fpath())
     parser.add_argument("--dir", default="./output/midi",
                         help="Directory to save the MIDI files to")
     return parser.parse_args()

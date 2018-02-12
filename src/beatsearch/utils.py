@@ -88,7 +88,7 @@ def err_print(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
-def make_dirs_if_not_exist(directory):
+def make_dir_if_not_exist(directory):
     """
     Creates a directory if it doesn't exist yet.
 
@@ -97,7 +97,7 @@ def make_dirs_if_not_exist(directory):
     """
 
     if not os.path.isdir(directory):
-        os.makedirs(directory)
+        os.mkdir(directory)
     return directory
 
 
@@ -117,7 +117,7 @@ def head_trail_iter(iterable):
 
 
 def get_beatsearch_dir(mkdir=True):
-    """
+    """Returns the beatsearch directory
     Returns the beatsearch directory. This directory is used to store *.ini files and output various beatsearch output
     data.
 
@@ -130,6 +130,19 @@ def get_beatsearch_dir(mkdir=True):
     if not os.path.isdir(beatsearch_dir) and mkdir:
         os.mkdir(beatsearch_dir)
     return beatsearch_dir
+
+
+def get_default_beatsearch_rhythms_fpath(mkdir=True):
+    """Returns the default path to the rhythms pickle file
+
+    Returns the default path to the rhythms pickle file. This path will be ${BSHome}/data/rhythms.pkl, where BSHome
+    is the beatsearch directory returned by get_beatsearch_dir.
+
+    :return: default path to the rhythms pickle file as a string
+    """
+
+    beatsearch_dir = get_beatsearch_dir(mkdir)
+    return os.path.join(beatsearch_dir, "rhythms.pkl")
 
 
 def no_callback(*_, **__):

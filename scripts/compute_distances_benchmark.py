@@ -3,10 +3,11 @@ from time import time
 from collections import OrderedDict
 from beatsearch.app.control import BSController
 from beatsearch.metrics import MonophonicRhythmDistanceMeasure
+from beatsearch.utils import get_default_beatsearch_rhythms_fpath
 measures = MonophonicRhythmDistanceMeasure.get_measures()
 
 ITERATIONS_PER_MEASURE = 15
-CORPUS = "./data/rhythms.pkl"
+CORPUS = get_default_beatsearch_rhythms_fpath()
 
 
 def get_git_revision_short_hash():

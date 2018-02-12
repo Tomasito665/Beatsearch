@@ -8,7 +8,7 @@ from openpyxl.styles import colors
 from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.rhythmcorpus import RhythmCorpus
-from beatsearch.utils import print_progress_bar
+from beatsearch.utils import print_progress_bar, get_default_beatsearch_rhythms_fpath
 from beatsearch.metrics import MonophonicRhythmDistanceMeasure
 
 SIM_MEASURES = MonophonicRhythmDistanceMeasure.get_measures()
@@ -31,7 +31,7 @@ def get_args():
                         help="The output *.xls file")
     parser.add_argument("--corpus", type=argparse.FileType('r'),
                         help="The *.pkl file containing the rhythms",
-                        default="./data/rhythms.pkl")
+                        default=get_default_beatsearch_rhythms_fpath())
     parser.add_argument("--track", type=int, default=36,
                         help="The rhythm track to compare")
     return parser.parse_args()
