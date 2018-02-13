@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from functools import wraps
 import typing as tp
+import numpy as np
 import threading
 from sortedcollections import OrderedSet
 from beatsearch.rhythm import (
@@ -14,11 +15,8 @@ from beatsearch.metrics import (
     SummedMonophonicRhythmDistance,
     Quantizable
 )
-from beatsearch.config import __USE_NUMPY__
 from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
-if __USE_NUMPY__:
-    import numpy
 
 
 class BSRhythmPlayer(object):
@@ -185,10 +183,7 @@ class BSController(object):
             rhythm_player: tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None] = None
     ):
         self._corpus = None
-        if __USE_NUMPY__:
-            self._distances_to_target = numpy.empty(0)
-        else:
-            self._distances_to_target = []
+        self._distances_to_target = np.empty(0)
         self._distances_to_target_rhythm_are_stale = False
         self._rhythm_measure = SummedMonophonicRhythmDistance()  # type: SummedMonophonicRhythmDistance
         self._rhythm_selection = OrderedSet()
@@ -631,17 +626,9 @@ class BSController(object):
     def _reset_distances_to_target_rhythm(self):  # Note: the caller should acquire the lock
         n_rhythms = self.get_rhythm_count()
         if len(self._distances_to_target) == n_rhythms:
-            if __USE_NUMPY__:
-                # noinspection PyUnresolvedReferences
-                self._distances_to_target.fill(numpy.inf)
-            else:
-                for i in range(n_rhythms):
-                    self._distances_to_target[i] = 0
+            self._distances_to_target.fill(np.inf)
         else:
-            if __USE_NUMPY__:
-                self._distances_to_target = numpy.full(n_rhythms, numpy.inf)
-            else:
-                self._distances_to_target = [float("inf")] * n_rhythms
+            self._distances_to_target = np.full(n_rhythms, np.inf)
 
     def _dispatch(self, action, *args, **kwargs):
         self._precondition_check_action(action)

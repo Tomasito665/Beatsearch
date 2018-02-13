@@ -5,11 +5,7 @@ import typing as tp
 from time import time
 from inspect import isclass
 from functools import wraps
-from beatsearch.config import __USE_NUMPY__
 from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
-
-if __USE_NUMPY__:
-    import numpy as np
 
 
 def merge_dicts(x, y):
@@ -174,24 +170,6 @@ def type_check_and_instantiate_if_necessary(thing, thing_base_type, allow_none=T
                         "an instance but got \"%s\"" % (thing_base_type, str(thing)))
 
     return thing(*args, **kwargs)
-
-
-def inject_numpy(func):
-    """
-    Adds a named "numpy" argument to the decorated function. If the __USE_NUMPY__ option is False, calling the
-    decorated function will raise an exception.
-
-    :param func: function to decorate
-    :return: decorated function
-    """
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not __USE_NUMPY__:
-            raise Exception("%s needs numpy" % func.__name__)
-        kwargs['numpy'] = np
-        return func(*args, **kwargs)
-    return wrapper
 
 
 def eat_args(func):
