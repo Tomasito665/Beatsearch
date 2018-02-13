@@ -682,7 +682,7 @@ class BSMainMenu(tk.Menu, object):
     def __init__(self, root, **kwargs):
         tk.Menu.__init__(self, root, **kwargs)
         f_menu = tk.Menu(self, tearoff=0)
-        f_menu.add_command(label="Choose rhythms directory", command=self._show_set_rhythms_dir_file_dialog)
+        f_menu.add_command(label="Choose rhythms directory", command=self._show_rhythms_directory_dialog)
         f_menu.add_separator()
         f_menu.add_command(label="Exit", command=lambda *_: self.on_request_exit())
         self.add_cascade(label="File", menu=f_menu)
@@ -709,7 +709,8 @@ class BSMainMenu(tk.Menu, object):
             raise Exception("Expected callable but got \"%s\"" % str(callback))
         self._on_request_exit = callback
 
-    def _show_set_rhythms_dir_file_dialog(self):
+    def _show_rhythms_directory_dialog(self):
+        # NOTE: askdirectory returns the path with forward slashes, even on Windows!
         directory = tkinter.filedialog.askdirectory(
             title="Choose rhythm directory",
             parent=self.master

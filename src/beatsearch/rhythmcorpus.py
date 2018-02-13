@@ -4,7 +4,7 @@ import pickle
 import typing as tp
 from collections import namedtuple
 from beatsearch.rhythm import MidiRhythm
-from beatsearch.utils import get_beatsearch_dir, get_midi_files_in_directory
+from beatsearch.utils import get_midi_files_in_directory
 from beatsearch.config import BeatsearchConfig
 
 
@@ -15,7 +15,7 @@ class RhythmCorpus(object):
     RHYTHM_IX = 0
     FILE_DATA_IX = 1
 
-    def __init__(self, root_dir, config, ignore_pickle_file=False, resolution=960):
+    def __init__(self, root_dir, config: BeatsearchConfig, ignore_pickle_file=False, resolution=960):
         root_dir = str(root_dir)
 
         if not os.path.isdir(root_dir):
@@ -32,7 +32,7 @@ class RhythmCorpus(object):
             print("Parsing MIDI files: %s" % root_dir)
             self.__load_from_root_dir()
             pickle_file = self.__write_pickle()
-            config.set_rhythm_corpus_pickle_file(self._root_dir, pickle_file)
+            config.set_rhythm_corpus_pickle_name(self._root_dir, pickle_file)
             config.save()
 
     @property
@@ -50,13 +50,16 @@ class RhythmCorpus(object):
     def __load_from_pickle_file(self):
         config = self._config
         root_dir = self._root_dir
-        pickle_fpath = config.get_rhythm_corpus_pickle_file(root_dir)
+        pickle_data_dir = self.get_rhythm_pickle_directory()
+        pickle_name = config.get_rhythm_corpus_pickle_name(root_dir)
+        pickle_fname = "%s.pkl" % pickle_name if pickle_name else ""
+        pickle_fpath = os.path.join(pickle_data_dir, pickle_fname)
 
         def remove_pickle_file():
-            config.set_rhythm_corpus_pickle_file(root_dir, None)
+            config.set_rhythm_corpus_pickle_name(root_dir, None)
             os.remove(pickle_fpath)
 
-        if not pickle_fpath:
+        if not pickle_name:
             print("No pickle file found")
             return False
 
@@ -120,13 +123,14 @@ class RhythmCorpus(object):
         self._rhythm_data = tuple(get_rhythm_data())
 
     def __write_pickle(self):
+        pickle_file_dir = self.get_rhythm_pickle_directory(True)
+
         def generate_pickle_fpath():
-            fname = "rhythms_%s.pkl" % str(uuid.uuid4())
-            return os.path.join(get_beatsearch_dir(mkdir=True), fname)
+            f_name = "rhythms_%s.pkl" % str(uuid.uuid4())
+            return os.path.join(pickle_file_dir, f_name)
 
+        # loop in case that there already exists a file with the generated path
         f_path = generate_pickle_fpath()
-
-        # in case that there already exists a file with the generated path
         while os.path.isfile(f_path):
             f_path = generate_pickle_fpath()
 
@@ -139,7 +143,15 @@ class RhythmCorpus(object):
 
             pickle.dump(pickle_data, f)
 
-        return f_path
+        basename = os.path.basename(f_path)
+        return os.path.splitext(basename)[0]
+
+    def get_rhythm_pickle_directory(self, mkdir=True):
+        ini_file_dir = self._config.root_dir
+        pickle_file_dir = os.path.join(ini_file_dir, "data")
+        if mkdir and not os.path.isdir(pickle_file_dir):
+            os.mkdir(pickle_file_dir)
+        return pickle_file_dir
 
     def __getitem__(self, item):
         return self._rhythm_data[item][self.RHYTHM_IX]

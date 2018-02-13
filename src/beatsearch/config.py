@@ -20,9 +20,10 @@ class BeatsearchConfig(object):
             with open(ini_file, "r", encoding="utf8") as f:
                 self._parser.read_file(f)
 
-    def set_rhythm_corpus_pickle_file(self, corpus_root_dir, pickle_file):
-        corpus_root_dir = str(corpus_root_dir)
-        pickle_file = str(pickle_file)
+    def set_rhythm_corpus_pickle_name(self, corpus_root_dir, pickle_name):
+        corpus_root_dir = os.path.normpath(corpus_root_dir)
+        corpus_root_dir = corpus_root_dir.replace("\\", "/")
+        pickle_file = str(pickle_name)
 
         if self.SERIALIZED_RHYTHM_CORPORA not in self._parser:
             self._parser[self.SERIALIZED_RHYTHM_CORPORA] = {}
@@ -33,8 +34,9 @@ class BeatsearchConfig(object):
         else:
             del self._parser[self.SERIALIZED_RHYTHM_CORPORA][corpus_root_dir]
 
-    def get_rhythm_corpus_pickle_file(self, corpus_root_dir):
+    def get_rhythm_corpus_pickle_name(self, corpus_root_dir):
         corpus_root_dir = os.path.normpath(corpus_root_dir)
+        corpus_root_dir = corpus_root_dir.replace("\\", "/")  # always forward slashes, also on Windows
 
         try:
             return self._parser[self.SERIALIZED_RHYTHM_CORPORA][corpus_root_dir]
@@ -44,3 +46,7 @@ class BeatsearchConfig(object):
     def save(self):
         with open(self._ini_file, "w", encoding="utf-8") as configfile:
             self._parser.write(configfile)
+
+    @property
+    def root_dir(self):
+        return os.path.dirname(self._ini_file)
