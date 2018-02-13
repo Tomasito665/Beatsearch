@@ -56,7 +56,6 @@ def main(input_track_name, output_track_name):
 
     print("Initializing controller...")
     controller = BSController(rhythm_player=player)
-    controller.set_corpus(get_default_beatsearch_rhythms_fpath())
     controller.register_rhythm_loader(rhythm_loader)
 
     print("Initializing view...")

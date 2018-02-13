@@ -213,3 +213,19 @@ def color_variant(color, brightness_offset=0):
         return to_hex(new_rgb)
 
     return new_rgb
+
+
+def get_midi_files_in_directory(directory):
+    """Iterates over the midi files in the given directory
+
+    Recursively iterates oer the midi files in the given directory yielding the full MIDI-file paths.
+
+    :param directory: directory to iterate over
+    :return: generator yielding paths to the MIDI files
+    """
+
+    for directory, subdirectories, files in os.walk(directory):
+        for f_name in files:
+            if os.path.splitext(f_name)[1] != ".mid":
+                continue
+            yield os.path.join(directory, directory, f_name)

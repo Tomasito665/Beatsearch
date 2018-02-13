@@ -237,7 +237,7 @@ class BSRhythmList(BSAppFrame):
         if v_scroll:
             scrollbars[tk.Y].grid(column=1, row=0, sticky="ns", in_=self)
 
-        self._corpus_name = None
+        self._corpus_id = ""
 
         context_menu = ContextMenu(self._tree_view)
         context_menu.add_command(label="Set as target rhythm", command=self._on_set_as_target_rhythm)
@@ -295,15 +295,15 @@ class BSRhythmList(BSAppFrame):
                 if self._tree_view.column(column_headers[ix], width=None) < col_w:
                     self._tree_view.column(column_headers[ix], width=col_w)
 
-        self._corpus_name = controller.get_corpus_name()
+        self._corpus_id = controller.get_corpus_id()
 
     def _clear_tree_view(self):
         tv = self._tree_view
         tv.delete(*tv.get_children())
 
     def _corpus_changed(self):  # TODO get rid of assumption that corpora won't be named alike
-        corpus_name = self.controller.get_corpus_name()
-        return self._corpus_name != corpus_name
+        corpus_id = self.controller.get_corpus_id()
+        return self._corpus_id != corpus_id
 
     def _on_mousewheel(self, event):
         self._tree_view.yview_scroll(-1 * (event.delta // 15), tk.UNITS)
@@ -682,7 +682,7 @@ class BSMainMenu(tk.Menu, object):
     def __init__(self, root, **kwargs):
         tk.Menu.__init__(self, root, **kwargs)
         f_menu = tk.Menu(self, tearoff=0)
-        f_menu.add_command(label="Load corpus", command=self._show_open_corpus_file_dialog)
+        f_menu.add_command(label="Choose rhythms directory", command=self._show_set_rhythms_dir_file_dialog)
         f_menu.add_separator()
         f_menu.add_command(label="Exit", command=lambda *_: self.on_request_exit())
         self.add_cascade(label="File", menu=f_menu)
@@ -709,18 +709,16 @@ class BSMainMenu(tk.Menu, object):
             raise Exception("Expected callable but got \"%s\"" % str(callback))
         self._on_request_exit = callback
 
-    def _show_open_corpus_file_dialog(self):
-        fname = tkinter.filedialog.askopenfilename(
-            title="Open rhythm corpus file",
-            filetypes=[("Pickle files", "*.pkl")],
-            parent=self.master,
-            initialdir=get_beatsearch_dir(True)
+    def _show_set_rhythms_dir_file_dialog(self):
+        directory = tkinter.filedialog.askdirectory(
+            title="Choose rhythm directory",
+            parent=self.master
         )
 
-        if not os.path.isfile(fname):
+        if not os.path.isdir(directory):
             return
 
-        self.on_request_load_corpus(fname)
+        self.on_request_load_corpus(directory)
 
 
 class BSApp(tk.Tk, object):
@@ -900,7 +898,7 @@ class BSApp(tk.Tk, object):
         self.is_closed = True
 
     def update_window_title(self):
-        corpus_fname = self.controller.get_corpus_fname() or "[Empty]"
+        corpus_fname = self.controller.get_corpus_rootdir_name() or "<No rhythms directory set>"
         title = "%s - %s" % (corpus_fname, self.WINDOW_TITLE)
         self.wm_title(title)
 

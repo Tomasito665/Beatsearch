@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 from functools import wraps
 import typing as tp
@@ -16,7 +17,8 @@ from beatsearch.metrics import (
     Quantizable
 )
 from beatsearch.rhythmcorpus import RhythmCorpus
-from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
+from beatsearch.config import BeatsearchConfig
+from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, get_beatsearch_dir
 
 
 class BSRhythmPlayer(object):
@@ -182,7 +184,8 @@ class BSController(object):
             self, distance_measure: MonophonicRhythmDistanceMeasure = HammingDistanceMeasure,
             rhythm_player: tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None] = None
     ):
-        self._corpus = None
+        self._config = BeatsearchConfig(os.path.join(get_beatsearch_dir(), "settings.ini"))
+        self._corpus = None  # type: RhythmCorpus
         self._distances_to_target = np.empty(0)
         self._distances_to_target_rhythm_are_stale = False
         self._rhythm_measure = SummedMonophonicRhythmDistance()  # type: SummedMonophonicRhythmDistance
@@ -208,17 +211,28 @@ class BSController(object):
         self.register_rhythm_loader(BSSelectedRhythmLoopLoader(self))
 
     def set_corpus(self, corpus):
+        """Sets the corpus
+
+        Sets the rhythm corpus. The given corpus may either be a:
+
+            string: the root directory containing the rhythm MIDI files
+            RhythmCorpus: the RhythmCorpus object
+            false value: to remove the corpus (is_corpus_set will return False afterwards)
+
+        :param corpus: either a string or a RhythmCorpus object
+        :return: None
         """
-        Sets the rhythm corpus. If the given corpus is a filename or a file handle, this method will try to load a new
-        corpus and set that.
 
-        :param corpus: a rhythm corpus or a file(name) of a rhythm corpus file or None
-        """
+        if not corpus:
+            self._corpus = None
+            return
 
-        if not isinstance(corpus, RhythmCorpus) and corpus is not None:
-            corpus = RhythmCorpus.load(corpus)
+        if isinstance(corpus, RhythmCorpus):
+            self._corpus = corpus
+            return
 
-        self._corpus = corpus
+        corpus = str(corpus)  # assuming that corpus is the MIDI file root directory
+        self._corpus = RhythmCorpus(corpus, self._config)
 
         with self._lock:
             self._reset_distances_to_target_rhythm()
@@ -235,28 +249,47 @@ class BSController(object):
 
         return self._corpus is not None
 
-    def get_corpus_name(self):
-        """
-        Returns the name of the current corpus or an empty string if no corpus is set.
+    def get_corpus_id(self):
+        """Returns the id of the current rhythm corpus
 
-        :return: name of current corpus or an empty string
+        Returns the id of the current rhythm corpus or an empty string if no corpus has been set.
+
+        :return: id of current rhythm corpus
         """
 
         try:
-            return self._corpus.name
+            return self._corpus.id
         except AttributeError:
             return ""
 
-    def get_corpus_fname(self):
-        """
-        Returns the filename (including its extension) of the current corpus or an empty string if no corpus is set.
+    def get_corpus_rootdir(self):
+        """Returns the root directory of the rhythm corpus
 
-        :return: filename of the current corpus or an empty string
+        Returns the path to the root directory of the current rhythm corpus. Returns an empty string if no corpus has
+        been set.
+
+        :return: root directory of current rhythm corpus or empty string
         """
 
         try:
-            return self._corpus.fname
+            return self._corpus.root_directory
         except AttributeError:
+            return ""
+
+    def get_corpus_rootdir_name(self):
+        """Returns the name of the current rhythm corpus' root directory
+
+        Returns the directory name of the current rhythm corpus' root directory. Returns an empty string if no corpus
+        has been set.
+
+        :return: root directory name of current rhythm corpus or empty string
+        """
+
+        rootdir = self.get_corpus_rootdir()
+
+        try:
+            return os.path.split(rootdir)[-1]
+        except IndexError:
             return ""
 
     def get_rhythm_count(self):
@@ -331,6 +364,9 @@ class BSController(object):
 
         :return: iteration yielding rhythm info
         """
+
+        if not self._corpus:
+            return
 
         with self._lock:
             for i, rhythm in enumerate(self._corpus):
