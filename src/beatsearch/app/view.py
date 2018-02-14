@@ -207,43 +207,49 @@ class BSRhythmList(BSAppFrame):
     def __init__(self, app, h_scroll=False, v_scroll=True, background="white", **kwargs):
         BSAppFrame.__init__(self, app, **kwargs)
         column_headers = BSController.get_rhythm_data_attr_names()
-        self._tree_view = tkinter.ttk.Treeview(columns=column_headers, show="headings")
+        tv_container = tk.Frame(self, bd=1, relief=tk.FLAT, bg="gray")
+        tree_view = tkinter.ttk.Treeview(tv_container, columns=column_headers, show="headings")
 
         # set treeview background
         style = ttk.Style(self)
+        style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])  # get rid of tree-view border
         style.configure("Treeview", background=background)
 
         scrollbars = {
-            tk.X: tkinter.ttk.Scrollbar(orient="horizontal", command=self._tree_view.xview),
-            tk.Y: tkinter.ttk.Scrollbar(orient="vertical", command=self._tree_view.yview)
+            tk.X: tkinter.ttk.Scrollbar(self, orient="horizontal", command=tree_view.xview),
+            tk.Y: tkinter.ttk.Scrollbar(self, orient="vertical", command=tree_view.yview)
         }
 
-        self.bind("<MouseWheel>", self._on_mousewheel)
-
-        self._tree_view.bind("<<TreeviewSelect>>", self._on_tree_select)
-        self._tree_view.bind("<Double-Button-1>", self._on_double_click)
-
-        self._tree_view.configure(
-            xscrollcommand=scrollbars[tk.X].set,
-            yscrollcommand=scrollbars[tk.Y].set
-        )
-
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self._tree_view.grid(column=0, row=0, sticky="nsew", in_=self)
-
         if h_scroll:
-            scrollbars[tk.X].grid(column=0, row=1, sticky="ew", in_=self)
+            scrollbars[tk.X].pack(side=tk.BOTTOM, fill=tk.X)
+
         if v_scroll:
-            scrollbars[tk.Y].grid(column=1, row=0, sticky="ns", in_=self)
+            scrollbars[tk.Y].pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._corpus_id = ""
+        tree_view.configure(xscrollcommand=scrollbars[tk.X].set)
+        tree_view.configure(yscrollcommand=scrollbars[tk.Y].set)
+        tree_view.pack(fill=tk.BOTH, expand=True)
+        tv_container.pack(fill=tk.BOTH, expand=True)
 
-        context_menu = ContextMenu(self._tree_view)
+        # set treeview column headers
+        for col in column_headers:
+            tree_view.heading(col, text=col, command=lambda c=col: self._sort_tree_view(c, False))
+            tree_view.column(col, width=tkinter.font.Font().measure(col))  # adjust column width to header string
+
+        # right-click menu
+        context_menu = ContextMenu(tree_view)
         context_menu.add_command(label="Set as target rhythm", command=self._on_set_as_target_rhythm)
-        self._context_menu = context_menu
 
+        # bind events
+        self.bind("<MouseWheel>", self._on_mousewheel)
+        tree_view.bind("<<TreeviewSelect>>", self._on_tree_select)
+        tree_view.bind("<Double-Button-1>", self._on_double_click)
+
+        # attributes
         self._on_request_target_rhythm = no_callback
+        self._tree_view = tree_view
+        self._context_menu = context_menu
+        self._corpus_id = ""
 
     def redraw(self):
         controller = self.controller
@@ -279,29 +285,15 @@ class BSRhythmList(BSAppFrame):
 
     def _fill_tree_view(self):
         controller = self.controller
-        column_headers = controller.get_rhythm_data_attr_names()
-
-        for col in column_headers:
-            self._tree_view.heading(col, text=col, command=lambda c=col: self._sort_tree_view(c, False))
-            # adjust column width to header string
-            self._tree_view.column(col, width=tkinter.font.Font().measure(col))
-
         for item in controller.get_rhythm_data():
             self._tree_view.insert("", tk.END, values=item)
-
-            # adjust column width if necessary to fit each value
-            for ix, val in enumerate(item):
-                col_w = tkinter.font.Font().measure(val)
-                if self._tree_view.column(column_headers[ix], width=None) < col_w:
-                    self._tree_view.column(column_headers[ix], width=col_w)
-
         self._corpus_id = controller.get_corpus_id()
 
     def _clear_tree_view(self):
         tv = self._tree_view
         tv.delete(*tv.get_children())
 
-    def _corpus_changed(self):  # TODO get rid of assumption that corpora won't be named alike
+    def _corpus_changed(self):
         corpus_id = self.controller.get_corpus_id()
         return self._corpus_id != corpus_id
 
