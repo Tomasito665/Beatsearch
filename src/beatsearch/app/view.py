@@ -33,26 +33,30 @@ from beatsearch.rhythm import RhythmLoop, MidiRhythm, Rhythm
 import midi  # after beatsearch imports!
 
 
-class BSAppFrame(tk.Frame):
-    def __init__(self, app, **kwargs):
+class BSAppWidgetMixin(object):
+    def __init__(self, app):
         if not isinstance(app, BSApp):
-            raise TypeError("Expected a BSApp but got '%s'" % app)
-        tk.Frame.__init__(self, app, **kwargs)
+            raise TypeError("Expected a BSApp but got \"%s\"'" % app)
         self.controller = app.controller
         self.dpi = app.winfo_fpixels("1i")
 
-    def redraw(self):
-        raise NotImplementedError
 
-
-# TODO Remove duplicated functionality
-class BSAppTtkFrame(ttk.Frame):
+class BSAppFrame(tk.Frame, BSAppWidgetMixin):
     def __init__(self, app, **kwargs):
-        if not isinstance(app, BSApp):
-            raise TypeError("Expected a BSApp but got '%s'" % app)
-        ttk.Frame.__init__(self, app, **kwargs)
-        self.controller = app.controller
-        self.dpi = app.winfo_fpixels("1i")
+        tk.Frame.__init__(self, master=app, **kwargs)
+        BSAppWidgetMixin.__init__(self, app)
+
+
+class BSAppTtkFrame(ttk.Frame, BSAppWidgetMixin):
+    def __init__(self, app, **kwargs):
+        ttk.Frame.__init__(self, master=app, **kwargs)
+        BSAppWidgetMixin.__init__(self, app)
+
+
+class BSAppWindow(tk.Toplevel, BSAppWidgetMixin):
+    def __init__(self, app, cnf=None, **kwargs):
+        tk.Toplevel.__init__(self, master=app, cnf=cnf or dict(), **kwargs)
+        BSAppWidgetMixin.__init__(self, app)
 
 
 class BSMidiRhythmLoopLoader(BSRhythmLoopLoader):
@@ -671,10 +675,11 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
 
 class BSMainMenu(tk.Menu, object):
-    def __init__(self, root, **kwargs):
+    def __init__(self, root, show_settings_window, **kwargs):
         tk.Menu.__init__(self, root, **kwargs)
         f_menu = tk.Menu(self, tearoff=0)
         f_menu.add_command(label="Choose rhythms directory", command=self._show_rhythms_directory_dialog)
+        f_menu.add_command(label="Settings", command=show_settings_window)
         f_menu.add_separator()
         f_menu.add_command(label="Exit", command=lambda *_: self.on_request_exit())
         self.add_cascade(label="File", menu=f_menu)
@@ -701,6 +706,7 @@ class BSMainMenu(tk.Menu, object):
             raise Exception("Expected callable but got \"%s\"" % str(callback))
         self._on_request_exit = callback
 
+    # TODO make this a "request" and redirect it to BSApp, open the dialog from there (same for _show_settings_window)
     def _show_rhythms_directory_dialog(self):
         # NOTE: askdirectory returns the path with forward slashes, even on Windows!
         directory = tkinter.filedialog.askdirectory(
@@ -712,6 +718,17 @@ class BSMainMenu(tk.Menu, object):
             return
 
         self.on_request_load_corpus(directory)
+
+
+class BSSettingsWindow(BSAppWindow):
+    TITLE = "Settings"
+
+    def __init__(self, app, **kwargs):
+        super().__init__(app, **kwargs)
+        self.wm_title(self.TITLE)
+        label = tk.Label(self, text="This is the settings window.\n"
+                                    "Yes, it is completely useless for now.")
+        label.pack()
 
 
 class BSApp(tk.Tk, object):
@@ -755,7 +772,14 @@ class BSApp(tk.Tk, object):
         self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoopLoader()
         self.controller = self._controller = controller
 
-        self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
+        self._menubar = type_check_and_instantiate_if_necessary(
+            main_menu,
+            BSMainMenu,
+            allow_none=True,
+            root=self,
+            show_settings_window=self.show_settings_window
+        )
+
         self.frames = OrderedDict()
 
         # frame name, frame class, instantiation args, pack args
@@ -894,6 +918,9 @@ class BSApp(tk.Tk, object):
         corpus_fname = self.controller.get_corpus_rootdir_name() or "<No rhythms directory set>"
         title = "%s - %s" % (corpus_fname, self.WINDOW_TITLE)
         self.wm_title(title)
+
+    def show_settings_window(self):
+        BSSettingsWindow(self)
 
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
