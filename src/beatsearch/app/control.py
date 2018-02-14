@@ -17,7 +17,7 @@ from beatsearch.metrics import (
     Quantizable
 )
 from beatsearch.rhythmcorpus import RhythmCorpus
-from beatsearch.config import BeatsearchConfig
+from beatsearch.config import BSConfig
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, get_beatsearch_dir
 
 
@@ -184,8 +184,9 @@ class BSController(object):
             self, distance_measure: MonophonicRhythmDistanceMeasure = HammingDistanceMeasure,
             rhythm_player: tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None] = None
     ):
-        self._config = BeatsearchConfig(os.path.join(get_beatsearch_dir(), "settings.ini"))
+        self._config = BSConfig(os.path.join(get_beatsearch_dir(), "settings.ini"))
         self._corpus = None  # type: RhythmCorpus
+        self._corpus_resolution = -1
         self._distances_to_target = np.empty(0)
         self._distances_to_target_rhythm_are_stale = False
         self._rhythm_measure = SummedMonophonicRhythmDistance()  # type: SummedMonophonicRhythmDistance
@@ -209,9 +210,10 @@ class BSController(object):
         self.set_distance_measure(distance_measure)
         # automatically register a loader for the currently selected rhythm
         self.register_rhythm_loader(BSSelectedRhythmLoopLoader(self))
+        self.apply_settings()
 
     def set_corpus(self, corpus):
-        """Sets the corpus
+        """Sets the rhythm corpus
 
         Sets the rhythm corpus. The given corpus may either be a:
 
@@ -232,6 +234,9 @@ class BSController(object):
             return
 
         corpus = str(corpus)  # assuming that corpus is the MIDI file root directory
+        corpus_kwargs = {
+            'config'
+        }
         self._corpus = RhythmCorpus(corpus, self._config)
 
         with self._lock:
@@ -239,6 +244,19 @@ class BSController(object):
 
         self.clear_rhythm_selection()
         self._dispatch(self.CORPUS_LOADED)
+
+    def set_corpus_resolution(self, resolution):
+        """Sets the rhythm corpus resolution
+
+        :param resolution: rhythm resolution in PPQN
+        :return: None
+        """
+
+        config = self._config
+        config.set_rhythm_resolution(resolution)
+
+        if self.is_corpus_set():
+            self._corpus.rhythm_resolution = resolution
 
     def is_corpus_set(self):
         """
@@ -471,6 +489,9 @@ class BSController(object):
         self._distances_to_target_rhythm_are_stale = True
         self._dispatch(self.DISTANCE_MEASURE_SET)
 
+    def get_config(self):
+        return self._config
+
     def is_current_distance_measure_quantizable(self):
         return isinstance(self._rhythm_measure.monophonic_measure, Quantizable)
 
@@ -535,6 +556,28 @@ class BSController(object):
         self._distances_to_target_rhythm_are_stale = False
         self._target_rhythm_prev_update = target_rhythm
         self._dispatch(self.DISTANCES_TO_TARGET_UPDATED)
+
+    def apply_settings(self, clean=True):
+        """Sets the state according to the settings in the config ini file
+
+        :param clean: when True, this method will remove invalid settings from the ini file
+        :return: None
+        """
+
+        config = self._config
+        root_dir = config.get_rhythm_root_directory()
+        resolution = config.get_rhythm_resolution()
+
+        if os.path.isdir(root_dir) or not root_dir:
+            self.set_corpus(root_dir)
+        else:
+            if clean:
+                config.set_rhythm_root_directory(None)
+            if resolution > 0:
+                self.set_corpus_resolution(resolution)
+
+        if resolution <= 0 and clean:
+            config.set_rhythm_resolution(None)
 
     def set_rhythm_selection(self, selected_rhythms):
         """

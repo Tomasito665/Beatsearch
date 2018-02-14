@@ -5,7 +5,7 @@ import typing as tp
 from collections import namedtuple
 from beatsearch.rhythm import MidiRhythm
 from beatsearch.utils import get_midi_files_in_directory
-from beatsearch.config import BeatsearchConfig
+from beatsearch.config import BSConfig
 
 
 RhythmFileInfo = namedtuple("RhythmFileInfo", ["path", "modified_time"])
@@ -14,16 +14,18 @@ RhythmFileInfo = namedtuple("RhythmFileInfo", ["path", "modified_time"])
 class RhythmCorpus(object):
     RHYTHM_IX = 0
     FILE_DATA_IX = 1
+    DEFAULT_RESOLUTION = 960
 
-    def __init__(self, root_dir, config: BeatsearchConfig, ignore_pickle_file=False, resolution=960):
+    def __init__(self, root_dir, config: BSConfig, ignore_pickle_file=False):
         root_dir = str(root_dir)
+        resolution = config.get_rhythm_resolution() or self.DEFAULT_RESOLUTION
 
         if not os.path.isdir(root_dir):
             raise IOError("no such directory: %s" % root_dir)
 
         print("Loading rhythms from: %s" % root_dir)
         self._root_dir = root_dir             # type: str
-        self._config = config                 # type: BeatsearchConfig
+        self._config = config                 # type: BSConfig
         self._rhythm_resolution = resolution  # type: int
         self._rhythm_data = tuple()           # type: tp.Tuple[tp.Tuple[MidiRhythm, RhythmFileInfo], ...]
         self._uuid = uuid.uuid4()             # type: uuid.UUID
@@ -42,6 +44,18 @@ class RhythmCorpus(object):
     @property
     def rhythm_resolution(self):
         return self._rhythm_resolution
+
+    @rhythm_resolution.setter
+    def rhythm_resolution(self, resolution):
+        resolution = int(resolution)
+        if resolution <= 0:
+            raise ValueError("rhythm resolution should be greater than zero")
+        old_res = self._rhythm_resolution
+        if old_res == resolution:
+            return
+        print("Rescaling corpus from %i PPQN to %i PPQN" % (self._rhythm_resolution, resolution))
+        for rhythm in self:
+            rhythm.set_resolution(resolution)
 
     @property
     def id(self):

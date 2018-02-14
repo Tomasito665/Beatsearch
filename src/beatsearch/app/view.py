@@ -1,6 +1,7 @@
 import os
 import signal
 import tkinter.ttk
+from abc import ABCMeta, abstractmethod
 # noinspection PyPep8Naming
 import tkinter as tk
 import tkinter.font
@@ -25,11 +26,12 @@ from beatsearch.utils import (
     type_check_and_instantiate_if_necessary,
     eat_args,
     color_variant,
-    get_beatsearch_dir
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGrid
 from beatsearch.rhythm import RhythmLoop, MidiRhythm, Rhythm
+from beatsearch.config import BSConfig
+from beatsearch.rhythmcorpus import RhythmCorpus
 import midi  # after beatsearch imports!
 
 
@@ -723,12 +725,232 @@ class BSMainMenu(tk.Menu, object):
 class BSSettingsWindow(BSAppWindow):
     TITLE = "Settings"
 
-    def __init__(self, app, **kwargs):
+    class Input(object, metaclass=ABCMeta):
+        class InvalidInput(Exception):
+            pass
+
+        def __init__(self, master: tk.Widget):
+            self.master = master
+
+        @abstractmethod
+        def get_widget(self) -> tk.Widget:
+            """Returns the widget containing the input controls
+
+            :return: widget containing the input controls
+            """
+
+            raise NotImplementedError
+
+        @abstractmethod
+        def get_name(self) -> str:
+            """Returns the name of this input
+
+            The name returned by this method will be used as a label.
+
+            :return: name of the input
+            """
+
+            raise NotImplementedError
+
+        @abstractmethod
+        def get_value(self) -> tp.Any:
+            """Returns the value of this input
+
+            :return: value of this input
+            """
+
+            raise NotImplementedError
+
+        @abstractmethod
+        def check_input(self) -> None:
+            """Checks the input variable and raises InvalidInput if not valid
+
+            This method should check the variable returned by get_variable and raise an InvalidInput exception if the
+            input variable is not valid. If it is valid, this method shouldn't do anything.
+
+            :return: None
+            :raises InvalidInput
+            """
+
+            raise NotImplementedError
+
+        @abstractmethod
+        def reset(self, config: BSConfig):
+            """Resets the value of this input
+
+            Resets the value of this input according to the given beatsearch config or to a default value if the
+            given config doesn't contain useful info.
+
+            :return: None
+            """
+
+            raise NotImplementedError
+
+    class RhythmsRootDirInput(Input):
+        NAME = "Rhythms root directory"
+
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            self._var_root_dir = tk.StringVar()
+            self._container = tk.Frame(self.master)
+            tk.Entry(self._container, textvariable=self._var_root_dir).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            tk.Button(self._container, text="Browse", command=self._on_btn_browse, width=12)\
+                .pack(side=tk.RIGHT, padx=(3, 0))
+
+        def get_widget(self) -> tk.Widget:
+            return self._container
+
+        def get_name(self) -> str:
+            return self.NAME
+
+        def get_value(self) -> tk.Variable:
+            return self._var_root_dir.get()
+
+        def check_input(self) -> None:
+            directory = self._var_root_dir.get()
+            if directory and not os.path.isdir(directory):
+                raise self.InvalidInput("No such directory: %s" % directory)
+
+        def reset(self, config: BSConfig):
+            root_dir = config.get_rhythm_root_directory()
+            if root_dir:
+                assert os.path.isdir(root_dir), "directory doesn't exist: %s" % root_dir  # TODO handle this properly
+            self._var_root_dir.set(root_dir)
+
+        def _on_btn_browse(self):
+            current_root_dir = self._var_root_dir.get()
+
+            # NOTE: askdirectory returns the path with forward slashes, even on Windows!
+            directory = tkinter.filedialog.askdirectory(
+                title="Choose rhythm directory",
+                parent=self.master,
+                initialdir=current_root_dir
+            )
+
+            if not os.path.isdir(directory):
+                return
+
+            self._var_root_dir.set(directory)
+
+    class RhythmResolutionInput(Input):
+        NAME = "Rhythm resolution"
+
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            self._var_resolution = tk.StringVar()
+            self._entry = tk.Entry(self.master, textvariable=self._var_resolution)
+
+        def get_widget(self) -> tk.Widget:
+            return self._entry
+
+        def get_name(self) -> str:
+            return self.NAME
+
+        def get_value(self) -> tk.Variable:
+            return self._var_resolution.get()
+
+        def check_input(self) -> None:
+            resolution_str = self._var_resolution.get()
+            if not resolution_str:
+                raise self.InvalidInput("Please set a resolution")
+            try:
+                resolution = int(resolution_str)
+            except ValueError:
+                raise self.InvalidInput("How is \"%s\" a number? :-)" % resolution_str)
+            if resolution <= 0:
+                raise self.InvalidInput("Resolution should be greater than zero")
+
+        def reset(self, config: BSConfig):
+            resolution = config.get_rhythm_resolution() or RhythmCorpus.DEFAULT_RESOLUTION
+            self._var_resolution.set(resolution)
+
+    def __init__(self, app, min_width=360, min_height=60, **kwargs):
         super().__init__(app, **kwargs)
         self.wm_title(self.TITLE)
-        label = tk.Label(self, text="This is the settings window.\n"
-                                    "Yes, it is completely useless for now.")
-        label.pack()
+        self.minsize(min_width, min_height)
+
+        main_container = tk.Frame(self)
+        main_container.pack(fill=tk.BOTH, padx=6, pady=6)
+        config = self.controller.get_config()
+
+        self._inputs = {
+            self.RhythmsRootDirInput: None,
+            self.RhythmResolutionInput: None
+        }  # type: tp.Dict[tp.Type[BSSettingsWindow.Input], BSSettingsWindow.Input]
+
+        self._initial_values = {}
+
+        for input_field_cls in self._inputs.keys():
+            input_container = tk.Frame(main_container)
+            input_field_obj = input_field_cls(input_container)
+            input_field_obj.reset(config)
+            self._initial_values[input_field_cls] = input_field_obj.get_value()
+            tk.Label(input_container, text=input_field_obj.get_name(), anchor=tk.W).pack(fill=tk.X)
+            input_field_obj.get_widget().pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+            input_container.pack(fill=tk.X)
+            self._inputs[input_field_cls] = input_field_obj
+
+        bottom_btn_bar = tk.Frame(self)
+
+        btn_ok = tk.Button(bottom_btn_bar, text="OK", command=self._handle_ok)
+        btn_cancel = tk.Button(bottom_btn_bar, text="Cancel", command=self.destroy)
+        btn_apply = tk.Button(bottom_btn_bar, text="Apply", command=self._handle_apply, state=tk.DISABLED)
+
+        buttons = (btn_ok, btn_cancel, btn_apply)
+        largest_btn_text = max(len(btn.cget("text")) for btn in buttons)
+
+        for btn in reversed(buttons):
+            btn.configure(width=largest_btn_text)
+            btn.pack(side=tk.RIGHT, padx=(0, 3))
+
+        bottom_btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=6, padx=3)
+
+        self._btn_apply = btn_apply
+        for seq in ("<Any-KeyPress>", "<Any-ButtonPress>"):
+            self.bind(seq, self._update_btn_apply_state)
+
+    def _handle_apply(self):
+        config = self.controller.get_config()
+        controller = self.controller
+        inputs = self._inputs
+
+        for inp in inputs.values():
+            try:
+                inp.check_input()
+            except self.Input.InvalidInput as e:
+                messagebox.showerror(
+                    parent=self,
+                    title=inp.get_name(),
+                    message=str(e)
+                )
+                return
+
+        rhythms_root_dir = inputs[self.RhythmsRootDirInput].get_value()
+        rhythm_resolution = inputs[self.RhythmResolutionInput].get_value()
+        controller.set_corpus(rhythms_root_dir)
+
+        config.set_rhythm_resolution(rhythm_resolution)
+        config.set_rhythm_root_directory(rhythms_root_dir)
+        config.save()
+
+        self._initial_values = dict(tuple((inp.__class__, inp.get_value()) for inp in inputs.values()))
+        self._update_btn_apply_state()
+
+    def _handle_ok(self):
+        if self._settings_changed():
+            self._handle_apply()
+        self.destroy()
+
+    def _settings_changed(self):
+        for input_cls, input_obj in self._inputs.items():
+            initial_value = self._initial_values[input_cls]
+            curr_value = input_obj.get_value()
+            if initial_value != curr_value:
+                return True
+        return False
+
+    def _update_btn_apply_state(self, _=None):
+        self._btn_apply.config(state=tk.NORMAL if self._settings_changed() else tk.DISABLED)
 
 
 class BSApp(tk.Tk, object):
