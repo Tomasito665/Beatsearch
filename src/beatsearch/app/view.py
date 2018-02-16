@@ -677,49 +677,42 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
 
 
 class BSMainMenu(tk.Menu, object):
-    def __init__(self, root, show_settings_window, **kwargs):
+    def __init__(self, root, **kwargs):
         tk.Menu.__init__(self, root, **kwargs)
         f_menu = tk.Menu(self, tearoff=0)
-        f_menu.add_command(label="Choose rhythms directory", command=self._show_rhythms_directory_dialog)
-        f_menu.add_command(label="Settings", command=show_settings_window)
+        f_menu.add_command(
+            label="Settings",
+            command=lambda: self.on_request_show_settings_window(),
+            accelerator="Ctrl+,"
+        )
         f_menu.add_separator()
-        f_menu.add_command(label="Exit", command=lambda *_: self.on_request_exit())
+        f_menu.add_command(
+            label="Exit",
+            command=lambda: self.on_request_exit()
+        )
         self.add_cascade(label="File", menu=f_menu)
-        self._on_request_load_corpus = no_callback
+        self._on_show_settings_window_request = no_callback
         self._on_request_exit = no_callback
-
-    @property
-    def on_request_load_corpus(self):  # type: () -> tp.Callable[str]
-        return self._on_request_load_corpus
-
-    @on_request_load_corpus.setter
-    def on_request_load_corpus(self, callback):
-        if not callable(callback):
-            raise Exception("Expected callable but got \"%s\"" % str(callback))
-        self._on_request_load_corpus = callback
 
     @property
     def on_request_exit(self):
         return self._on_request_exit
 
     @on_request_exit.setter
-    def on_request_exit(self, callback):
+    def on_request_exit(self, callback: tp.Callable):
         if not callable(callback):
-            raise Exception("Expected callable but got \"%s\"" % str(callback))
+            raise TypeError("Expected callable but got \"%s\"" % str(callback))
         self._on_request_exit = callback
 
-    # TODO make this a "request" and redirect it to BSApp, open the dialog from there (same for _show_settings_window)
-    def _show_rhythms_directory_dialog(self):
-        # NOTE: askdirectory returns the path with forward slashes, even on Windows!
-        directory = tkinter.filedialog.askdirectory(
-            title="Choose rhythm directory",
-            parent=self.master
-        )
+    @property
+    def on_request_show_settings_window(self):
+        return self._on_show_settings_window_request
 
-        if not os.path.isdir(directory):
-            return
-
-        self.on_request_load_corpus(directory)
+    @on_request_show_settings_window.setter
+    def on_request_show_settings_window(self, callback: tp.Callable):
+        if not callable(callback):
+            raise TypeError("Expected callable but got \"%s\"" % str(callback))
+        self._on_show_settings_window_request = callback
 
 
 class BSSettingsWindow(BSAppWindow):
@@ -899,6 +892,7 @@ class BSSettingsWindow(BSAppWindow):
         super().__init__(app, **kwargs)
         self.wm_title(self.TITLE)
         self.minsize(min_width, min_height)
+        self.resizable(False, False)
 
         main_container = tk.Frame(self)
         main_container.pack(fill=tk.BOTH, padx=6, pady=6)
@@ -927,6 +921,7 @@ class BSSettingsWindow(BSAppWindow):
         btn_ok = tk.Button(bottom_btn_bar, text="OK", command=self._handle_ok)
         btn_cancel = tk.Button(bottom_btn_bar, text="Cancel", command=self.destroy)
         btn_apply = tk.Button(bottom_btn_bar, text="Apply", command=self._handle_apply, state=tk.DISABLED)
+        self.bind("<Escape>", eat_args(self.destroy))
 
         buttons = (btn_ok, btn_cancel, btn_apply)
         largest_btn_text = max(len(btn.cget("text")) for btn in buttons)
@@ -952,7 +947,7 @@ class BSSettingsWindow(BSAppWindow):
                     title=inp.get_name(),
                     message=str(e)
                 )
-                return
+                return False
 
         rhythms_root_dir = inputs[self.RhythmsRootDirInput].get_value()
         rhythm_resolution = inputs[self.RhythmResolutionInput].get_value()
@@ -966,10 +961,13 @@ class BSSettingsWindow(BSAppWindow):
 
         self._initial_values = dict(tuple((inp.__class__, inp.get_value()) for inp in inputs.values()))
         self._update_btn_apply_state()
+        return True
 
     def _handle_ok(self):
-        if self._settings_changed():
-            self._handle_apply()
+        if self._settings_changed() and not self._handle_apply():
+            # don't close the settings window if something
+            # _handle_apply did not go well (e.g. validation err)
+            return
         self.destroy()
 
     def _settings_changed(self):
@@ -1024,15 +1022,7 @@ class BSApp(tk.Tk, object):
         self.config(bg=background)
         self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoopLoader()
         self.controller = self._controller = controller
-
-        self._menubar = type_check_and_instantiate_if_necessary(
-            main_menu,
-            BSMainMenu,
-            allow_none=True,
-            root=self,
-            show_settings_window=self.show_settings_window
-        )
-
+        self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
 
         # frame name, frame class, instantiation args, pack args
@@ -1105,6 +1095,9 @@ class BSApp(tk.Tk, object):
             lambda loader: setattr(loader, "on_loading_error", self._on_loading_error)
         )
 
+        # keyboard shortcuts
+        self.bind_all("<Control-,>", eat_args(self.show_settings_window))
+
         self.redraw_frames()
 
     @property
@@ -1173,7 +1166,8 @@ class BSApp(tk.Tk, object):
         self.wm_title(title)
 
     def show_settings_window(self):
-        BSSettingsWindow(self)
+        settings_window = BSSettingsWindow(self)
+        settings_window.focus()
 
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
@@ -1199,7 +1193,7 @@ class BSApp(tk.Tk, object):
         menubar = self._menubar
         if menubar is None:
             return
-        menubar.on_request_load_corpus = self.controller.load_corpus
+        menubar.on_request_show_settings_window = self.show_settings_window
         menubar.on_request_exit = self.close
         self.config(menu=menubar)
 
