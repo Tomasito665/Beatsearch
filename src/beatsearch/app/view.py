@@ -731,6 +731,7 @@ class BSSettingsWindow(BSAppWindow):
 
         def __init__(self, master: tk.Widget):
             self.master = master
+            self._on_change_callback = None
 
         @abstractmethod
         def get_widget(self) -> tk.Widget:
@@ -752,11 +753,19 @@ class BSSettingsWindow(BSAppWindow):
 
             raise NotImplementedError
 
-        @abstractmethod
         def get_value(self) -> tp.Any:
-            """Returns the value of this input
+            """Returns the value of the variable of this input
 
             :return: value of this input
+            """
+
+            return self.get_variable().get()
+
+        @abstractmethod
+        def get_variable(self) -> tkinter.Variable:
+            """Returns the tkinter variable of this input
+
+            :return: tkinter variable
             """
 
             raise NotImplementedError
@@ -786,7 +795,29 @@ class BSSettingsWindow(BSAppWindow):
 
             raise NotImplementedError
 
+        def on_change(self, callback: tp.Callable):
+            """Sets the on_change callback
+
+            Sets the on_change callback for this input. Only one callback is allowed.
+
+            :param callback: callable or None to remove the callback
+            :return: None
+            """
+
+            variable = self.get_variable()
+            old_callback = self._on_change_callback
+
+            if old_callback:
+                variable.trace_remove("w", old_callback)
+
+            if not callback:
+                self._on_change_callback = None
+                return
+
+            variable.trace_add("write", callback)
+
     class RhythmsRootDirInput(Input):
+
         NAME = "Rhythms root directory"
 
         def __init__(self, *args, **kw):
@@ -803,8 +834,8 @@ class BSSettingsWindow(BSAppWindow):
         def get_name(self) -> str:
             return self.NAME
 
-        def get_value(self) -> tk.Variable:
-            return self._var_root_dir.get()
+        def get_variable(self) -> tk.Variable:
+            return self._var_root_dir
 
         def check_input(self) -> None:
             directory = self._var_root_dir.get()
@@ -812,7 +843,7 @@ class BSSettingsWindow(BSAppWindow):
                 raise self.InvalidInput("No such directory: %s" % directory)
 
         def reset(self, config: BSConfig):
-            root_dir = config.get_rhythm_root_directory()
+            root_dir = config.midi_root_directory.get()
             if root_dir:
                 assert os.path.isdir(root_dir), "directory doesn't exist: %s" % root_dir  # TODO handle this properly
             self._var_root_dir.set(root_dir)
@@ -846,8 +877,8 @@ class BSSettingsWindow(BSAppWindow):
         def get_name(self) -> str:
             return self.NAME
 
-        def get_value(self) -> tk.Variable:
-            return self._var_resolution.get()
+        def get_variable(self) -> tk.Variable:
+            return self._var_resolution
 
         def check_input(self) -> None:
             resolution_str = self._var_resolution.get()
@@ -861,7 +892,7 @@ class BSSettingsWindow(BSAppWindow):
                 raise self.InvalidInput("Resolution should be greater than zero")
 
         def reset(self, config: BSConfig):
-            resolution = config.get_rhythm_resolution() or RhythmCorpus.DEFAULT_RESOLUTION
+            resolution = config.rhythm_resolution.get()
             self._var_resolution.set(resolution)
 
     def __init__(self, app, min_width=360, min_height=60, **kwargs):
@@ -887,6 +918,7 @@ class BSSettingsWindow(BSAppWindow):
             self._initial_values[input_field_cls] = input_field_obj.get_value()
             tk.Label(input_container, text=input_field_obj.get_name(), anchor=tk.W).pack(fill=tk.X)
             input_field_obj.get_widget().pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+            input_field_obj.on_change(eat_args(self._update_btn_apply_state))
             input_container.pack(fill=tk.X)
             self._inputs[input_field_cls] = input_field_obj
 
@@ -904,10 +936,7 @@ class BSSettingsWindow(BSAppWindow):
             btn.pack(side=tk.RIGHT, padx=(0, 3))
 
         bottom_btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=6, padx=3)
-
         self._btn_apply = btn_apply
-        for seq in ("<Any-KeyPress>", "<Any-ButtonPress>"):
-            self.bind(seq, self._update_btn_apply_state)
 
     def _handle_apply(self):
         config = self.controller.get_config()
@@ -929,8 +958,8 @@ class BSSettingsWindow(BSAppWindow):
         rhythm_resolution = inputs[self.RhythmResolutionInput].get_value()
         controller.set_corpus(rhythms_root_dir)
 
-        config.set_rhythm_resolution(rhythm_resolution)
-        config.set_rhythm_root_directory(rhythms_root_dir)
+        config.rhythm_resolution.set(rhythm_resolution)
+        config.midi_root_directory.set(rhythms_root_dir)
         config.save()
 
         self._initial_values = dict(tuple((inp.__class__, inp.get_value()) for inp in inputs.values()))

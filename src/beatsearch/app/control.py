@@ -184,7 +184,7 @@ class BSController(object):
             self, distance_measure: MonophonicRhythmDistanceMeasure = HammingDistanceMeasure,
             rhythm_player: tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None] = None
     ):
-        self._config = BSConfig(os.path.join(get_beatsearch_dir(), "settings.ini"))
+        self._config = BSConfig()
         self._corpus = None  # type: RhythmCorpus
         self._corpus_resolution = -1
         self._distances_to_target = np.empty(0)
@@ -233,11 +233,11 @@ class BSController(object):
             self._corpus = corpus
             return
 
-        corpus = str(corpus)  # assuming that corpus is the MIDI file root directory
-        corpus_kwargs = {
-            'config'
-        }
-        self._corpus = RhythmCorpus(corpus, self._config)
+        root_directory = str(corpus)  # assuming that corpus is the MIDI file root directory
+        corpus = RhythmCorpus(root_directory, self._config.rhythm_resolution.get())
+        corpus.load(self._config)
+
+        self._corpus = corpus
 
         with self._lock:
             self._reset_distances_to_target_rhythm()
@@ -253,10 +253,11 @@ class BSController(object):
         """
 
         config = self._config
-        config.set_rhythm_resolution(resolution)
+        config.rhythm_resolution.set(resolution)
 
-        if self.is_corpus_set():
-            self._corpus.rhythm_resolution = resolution
+        corpus = self._corpus
+        if corpus.rhythm_resolution != resolution:
+            self.set_corpus(corpus.root_directory)
 
     def is_corpus_set(self):
         """
@@ -489,7 +490,7 @@ class BSController(object):
         self._distances_to_target_rhythm_are_stale = True
         self._dispatch(self.DISTANCE_MEASURE_SET)
 
-    def get_config(self):
+    def get_config(self) -> BSConfig:
         return self._config
 
     def is_current_distance_measure_quantizable(self):
@@ -565,19 +566,19 @@ class BSController(object):
         """
 
         config = self._config
-        root_dir = config.get_rhythm_root_directory()
-        resolution = config.get_rhythm_resolution()
+        root_dir = config.midi_root_directory.get()
+        resolution = config.rhythm_resolution.get()
 
         if os.path.isdir(root_dir) or not root_dir:
             self.set_corpus(root_dir)
         else:
             if clean:
-                config.set_rhythm_root_directory(None)
+                config.rhythm_resolution.set(None)
             if resolution > 0:
                 self.set_corpus_resolution(resolution)
 
         if resolution <= 0 and clean:
-            config.set_rhythm_resolution(None)
+            config.rhythm_resolution.set(None)
 
     def set_rhythm_selection(self, selected_rhythms):
         """
