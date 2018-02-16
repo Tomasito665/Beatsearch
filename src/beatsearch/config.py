@@ -141,7 +141,7 @@ class BSConfig(object):
                 self._config_parser.read_file(ini_file)
 
     @contextmanager
-    def add_midi_root_directory_cache_file(self, midi_directory: str, file_mode="wb"):
+    def add_midi_root_directory_cache_file(self, midi_directory: str, file_mode="wb", save=True):
         if not os.path.isdir(midi_directory):
             raise ValueError("not a directory: %s" % midi_directory)
 
@@ -170,6 +170,9 @@ class BSConfig(object):
             pass
 
         parser.set(BSConfigSection.SERIALIZED_RHYTHM_CORPORA, midi_directory, new_cache_id)
+
+        if save:
+            self.save()
 
     def get_midi_root_directory_cache_fpath(self, midi_directory):
         midi_directory = normalize_directory(midi_directory)

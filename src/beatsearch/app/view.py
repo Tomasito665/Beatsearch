@@ -939,8 +939,8 @@ class BSSettingsWindow(BSAppWindow):
         self._btn_apply = btn_apply
 
     def _handle_apply(self):
-        config = self.controller.get_config()
         controller = self.controller
+        config = controller.get_config()
         inputs = self._inputs
 
         for inp in inputs.values():
@@ -956,11 +956,13 @@ class BSSettingsWindow(BSAppWindow):
 
         rhythms_root_dir = inputs[self.RhythmsRootDirInput].get_value()
         rhythm_resolution = inputs[self.RhythmResolutionInput].get_value()
-        controller.set_corpus(rhythms_root_dir)
 
         config.rhythm_resolution.set(rhythm_resolution)
         config.midi_root_directory.set(rhythms_root_dir)
         config.save()
+
+        # reload the corpus with the new settings
+        controller.load_corpus()
 
         self._initial_values = dict(tuple((inp.__class__, inp.get_value()) for inp in inputs.values()))
         self._update_btn_apply_state()
@@ -1197,7 +1199,7 @@ class BSApp(tk.Tk, object):
         menubar = self._menubar
         if menubar is None:
             return
-        menubar.on_request_load_corpus = self.controller.set_corpus
+        menubar.on_request_load_corpus = self.controller.load_corpus
         menubar.on_request_exit = self.close
         self.config(menu=menubar)
 

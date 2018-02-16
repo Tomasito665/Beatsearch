@@ -210,76 +210,48 @@ class BSController(object):
         self.set_distance_measure(distance_measure)
         # automatically register a loader for the currently selected rhythm
         self.register_rhythm_loader(BSSelectedRhythmLoopLoader(self))
-        self.apply_settings()
+        # if a midi root directory is set, load the corpus
+        if self.get_config().midi_root_directory.get():
+            self.load_corpus()
 
-    def set_corpus(self, corpus):
-        """Sets the rhythm corpus
+    def load_corpus(self):
+        """Loads the rhythm corpus based on the settings in the current configuration
 
-        Sets the rhythm corpus. The given corpus may either be a:
+        Loads the rhythm corpus based on the current state of the BSConfig object. This method may be called multiple
+        times throughout the lifespan of the app, e.g. after changing the rhythm resolution or the midi root directory
+        in the BSConfig object.
 
-            string: the root directory containing the rhythm MIDI files
-            RhythmCorpus: the RhythmCorpus object
-            false value: to remove the corpus (is_corpus_set will return False afterwards)
-
-        :param corpus: either a string or a RhythmCorpus object
         :return: None
         """
 
-        if not corpus:
-            self._corpus = None
-            return
-
-        if isinstance(corpus, RhythmCorpus):
-            self._corpus = corpus
-            return
-
-        root_directory = str(corpus)  # assuming that corpus is the MIDI file root directory
-        corpus = RhythmCorpus(root_directory, self._config.rhythm_resolution.get())
-        corpus.load(self._config)
-
-        self._corpus = corpus
+        config = self._config
+        root_dir = config.midi_root_directory.get()
+        res = config.rhythm_resolution.get()
+        corpus = RhythmCorpus(root_dir, res)
+        corpus.load(config)
 
         with self._lock:
+            self._corpus = corpus
             self._reset_distances_to_target_rhythm()
 
         self.clear_rhythm_selection()
         self._dispatch(self.CORPUS_LOADED)
 
-    def set_corpus_resolution(self, resolution):
-        """Sets the rhythm corpus resolution
+    def is_corpus_loaded(self):
+        """Returns whether the rhythm corpus has loaded
 
-        :param resolution: rhythm resolution in PPQN
-        :return: None
-        """
-
-        config = self._config
-        config.rhythm_resolution.set(resolution)
-
-        corpus = self._corpus
-        if corpus.rhythm_resolution != resolution:
-            self.set_corpus(corpus.root_directory)
-
-    def is_corpus_set(self):
-        """
-        Returns whether or not a corpus has been set.
-
-        :return: True if a corpus has been set; False otherwise
+        :return: True if the rhythm corpus has loaded; False otherwise
         """
 
         return self._corpus is not None
 
     def get_corpus_id(self):
-        """Returns the id of the current rhythm corpus
-
-        Returns the id of the current rhythm corpus or an empty string if no corpus has been set.
+        """Returns the id of the current rhythm corpus or None if no corpus
 
         :return: id of current rhythm corpus
         """
 
-        try:
-            return self._corpus.id
-        except AttributeError:
-            return ""
+        return self._corpus.id if self.is_corpus_loaded() else None
 
     def get_corpus_rootdir(self):
         """Returns the root directory of the rhythm corpus
@@ -290,10 +262,7 @@ class BSController(object):
         :return: root directory of current rhythm corpus or empty string
         """
 
-        try:
-            return self._corpus.root_directory
-        except AttributeError:
-            return ""
+        return self._corpus.root_directory if self.is_corpus_loaded() else ""
 
     def get_corpus_rootdir_name(self):
         """Returns the name of the current rhythm corpus' root directory
@@ -558,28 +527,6 @@ class BSController(object):
         self._target_rhythm_prev_update = target_rhythm
         self._dispatch(self.DISTANCES_TO_TARGET_UPDATED)
 
-    def apply_settings(self, clean=True):
-        """Sets the state according to the settings in the config ini file
-
-        :param clean: when True, this method will remove invalid settings from the ini file
-        :return: None
-        """
-
-        config = self._config
-        root_dir = config.midi_root_directory.get()
-        resolution = config.rhythm_resolution.get()
-
-        if os.path.isdir(root_dir) or not root_dir:
-            self.set_corpus(root_dir)
-        else:
-            if clean:
-                config.rhythm_resolution.set(None)
-            if resolution > 0:
-                self.set_corpus_resolution(resolution)
-
-        if resolution <= 0 and clean:
-            config.rhythm_resolution.set(None)
-
     def set_rhythm_selection(self, selected_rhythms):
         """
         Sets the rhythm selection.
@@ -732,7 +679,7 @@ class BSController(object):
             raise ValueError("Unknown action \"%s\"" % action)
 
     def _precondition_check_corpus_set(self):
-        if not self.is_corpus_set():
+        if not self.is_corpus_loaded():
             raise Exception("Corpus not loaded")
 
     def _precondition_check_target_rhythm_set(self):

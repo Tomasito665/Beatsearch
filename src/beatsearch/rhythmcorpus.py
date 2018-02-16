@@ -15,38 +15,55 @@ class RhythmCorpus(object):
     RHYTHM_IX = 0
     FILE_DATA_IX = 1
 
-    def __init__(self, root_dir: str, rhythm_resolution: int):
-        if not os.path.isdir(root_dir):
-            raise IOError("no such directory: \"%s\"" % root_dir)
+    class CorpusStateError(Exception):
+        pass
 
-        if rhythm_resolution <= 0:
-            raise ValueError("expected rhythm resolution greater than zero but got %i" % rhythm_resolution)
+    def __init__(self, root_dir: tp.Optional[str] = None, rhythm_resolution: tp.Optional[int] = None):
+        self._root_dir = None            # type: tp.Union[str, None]
+        self._rhythm_resolution = None   # type: tp.Union[int, None]
+        self._rhythm_data = None         # type: tp.Union[tp.Tuple[tp.Tuple[MidiRhythm, RhythmFileInfo], ...]]
+        self._id = uuid.uuid4()          # type: uuid.UUID
 
-        self._root_dir = root_dir                     # type: str
-        self._rhythm_resolution = rhythm_resolution   # type: int
-        self._rhythm_data = tuple()                   # type: tp.Tuple[tp.Tuple[MidiRhythm, RhythmFileInfo], ...]
-        self._id = uuid.uuid4()                       # type: uuid.UUID
+        # calling setters (validation is handled there)
+        self.root_directory = root_dir
+        self.rhythm_resolution = rhythm_resolution
 
-    def load(self, config: BSConfig = None):
-        midi_dir = self._root_dir
+    def load(self, config: tp.Optional[BSConfig] = None):
+        """Load the corpus
+
+        Loads the corpus. When a config object is given, this method will try to load from cache first. Also, it will
+        write the cache filename to the config object.
+
+        If this method is called when the root_directory and/or rhythm_resolution attributes is not set, the caller
+        should provide a config object. The root_directory and rhythm_resolution attributes will then automatically be
+        set according to the configuration file.
+
+        :param config: BSConfig object or None
+        :return: None
+        """
+
+        if not config:
+            assert self._root_dir, "root_directory should be set if no BSConfig object is given"
+            assert self._rhythm_resolution, "rhythm_resolution should be set if no BSConfig object is given"
+
+        midi_dir = self._root_dir or config.midi_root_directory.get()
         cache_fpath = config.get_midi_root_directory_cache_fpath(midi_dir) if config else ""
         resolution = self._rhythm_resolution
 
         # try to load from cache
         if cache_fpath:
             if self._load_from_cache(cache_fpath):
-                return True
+                return
             else:
                 # remove the cache for this midi root directory if we weren't able to load it (and
                 # therefore it's probably erroneous or out of date)
                 config.forget_midi_root_directory_cache_file(midi_dir, remove_cache_file=True)
 
-        if not self._load_from_directory():
-            raise Exception("error occurred loading midi rhythms from: \"%s\"" % midi_dir)
+        # load directly from the directory if couldn't load from cache
+        self._load_from_directory()
 
         if not config:
-            # we can't create a new cache file without a config object
-            return True
+            return  # we can't create a new cache file without a config object
 
         pickle_data = {
             'res': resolution,
@@ -57,31 +74,69 @@ class RhythmCorpus(object):
         with config.add_midi_root_directory_cache_file(midi_dir) as cache_file:
             pickle.dump(pickle_data, cache_file)
 
-        return True
+    def is_loaded(self):
+        """Returns whether this corpus has already loaded
+
+        Returns whether this rhythm corpus has already been loaded. This will return true after a successful call to
+        load().
+
+        :return: True if this corpus has already loaded: False otherwise
+        """
+
+        return self._rhythm_data is not None
 
     @property
     def rhythm_resolution(self):
         """The resolution in PPQN
 
-        Tick resolution in PPQN (pulses-per-quarter-note) of the rhythms within this corpus. This is a read-only
-        property.
+        Tick resolution in PPQN (pulses-per-quarter-note) of the rhythms within this corpus. This property will become
+        a read-only property after the corpus has loaded.
 
         :return: resolution in PPQN of the rhythms in this corpus
         """
 
         return self._rhythm_resolution
 
+    @rhythm_resolution.setter
+    def rhythm_resolution(self, resolution: tp.Union[int, None]):
+        if self.is_loaded():
+            raise self.CorpusStateError()
+
+        if resolution is None:
+            self._rhythm_resolution = None
+            return
+
+        resolution = int(resolution)
+        if resolution <= 0:
+            raise ValueError("resolution should be greater than zero")
+
+        self._rhythm_resolution = resolution
+
     @property
     def root_directory(self):
         """MIDI root directory
 
-        Root directory containing the MIDI files that where used to create the rhythms within this corpus. This is a
-        read-only property.
+        Root directory containing the MIDI files that where used to create the rhythms within this corpus. This property
+        will become a read-only property after the corpus has loaded.
 
         :return: MIDI root directory
         """
 
         return self._root_dir
+
+    @root_directory.setter
+    def root_directory(self, root_dir: tp.Union[str, None]):
+        if self.is_loaded():
+            raise self.CorpusStateError()
+
+        if not root_dir:
+            self._root_dir = None
+            return
+
+        if not os.path.isdir(root_dir):
+            raise ValueError("no such directory: %s" % root_dir)
+
+        self._root_dir = root_dir
 
     @property
     def id(self):
@@ -91,7 +146,6 @@ class RhythmCorpus(object):
         """
 
         return self._id
-
 
     def __getitem__(self, i):
         """Returns the i-th rhythm"""
@@ -125,7 +179,6 @@ class RhythmCorpus(object):
                 yield rhythm, file_info
 
         self._rhythm_data = tuple(get_rhythm_data())
-        return True
 
     # loads the rhythm corpus from a cache file
     def _load_from_cache(self, cache_fpath: str):
