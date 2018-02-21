@@ -186,7 +186,11 @@ class RhythmCorpus(object):
             return False
 
         with open(cache_fpath, "rb") as pickle_file:
-            unpickled_data = pickle.load(pickle_file)
+            try:
+                unpickled_data = pickle.load(pickle_file)
+            except AttributeError as e:
+                print("Error loading midi root directory cache: %s" % e)
+                return False
 
         try:
             rhythm_resolution = unpickled_data['res']

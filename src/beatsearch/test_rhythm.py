@@ -15,7 +15,7 @@ from beatsearch.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
 from beatsearch.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
 
 # misc
-from beatsearch.rhythm import TimeSignature, Onset, MidiMapping, MidiKey, MonophonicRhythmRepresentationsMixin
+from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping, MonophonicRhythmRepresentationsMixin
 import midi
 
 
@@ -1171,19 +1171,21 @@ class TestMidiRhythm(TestRhythmLoop):
             yield event
 
     @staticmethod
-    def _create_midi_key_mock(name, pitch, abbreviation):
-        midi_key = MagicMock(MidiKey)
-        midi_key.pitch = pitch
-        midi_key.name = name
-        midi_key.abbreviation = abbreviation
-        return midi_key
+    def _create_midi_drum_key_mock(midi_key, frequency_band, decay_time, description, key_id):
+        midi_drum_key = MagicMock(MidiDrumMapping.MidiDrumKey)
+        midi_drum_key.midi_key = midi_key
+        midi_drum_key.frequency_band = frequency_band
+        midi_drum_key.decay_time = decay_time
+        midi_drum_key.description = description
+        midi_drum_key.id = key_id
+        return midi_drum_key
 
     ##########################################
     # from/to midi pattern integration tests #
     ##########################################
 
     @patch("beatsearch.rhythm.Onset", side_effect=mock_onset)
-    @inject_rhythm.mocked_setters(midi_mapping=MagicMock(MidiMapping))
+    @inject_rhythm.mocked_setters(midi_mapping=MagicMock(MidiDrumMapping))
     def test_load_midi_pattern(self, rhythm, _):
         kick, snare = 36, 38
 
@@ -1193,12 +1195,12 @@ class TestMidiRhythm(TestRhythmLoop):
         expected_snare_onsets = (mock_onset(2, 80), mock_onset(10, 60))
         expected_resolution = 16
 
-        kick_key_mock = self._create_midi_key_mock("kick", kick, "kck")
-        snare_key_mock = self._create_midi_key_mock("snare", snare, "snr")
+        kick_key_mock = self._create_midi_drum_key_mock(kick, "low", "normal", "kick", "kck")
+        snare_key_mock = self._create_midi_drum_key_mock(snare, "mid", "normal", "snare", "snr")
 
         assert isinstance(rhythm.midi_mapping, MagicMock), \
             "something went wrong in the constructor, midi_mapping was not set"
-        rhythm.midi_mapping.find_by_pitch = lambda pitch: kick_key_mock if pitch == kick else snare_key_mock
+        rhythm.midi_mapping.get_key_by_midi_pitch = lambda pitch: kick_key_mock if pitch == kick else snare_key_mock
 
         midi_track = midi.Track([
             self._create_midi_time_signature_mock_event(expected_ts.numerator, expected_ts.denominator),
@@ -1227,8 +1229,8 @@ class TestMidiRhythm(TestRhythmLoop):
                     snare_onset.tick, int, "snare onset tick position \"%s\" is not an int" % str(snare_onset.tick))
 
         with self.subTest("track_names_set_correctly"):
-            self.assertEqual(kick_track.get_name(), kick_key_mock.abbreviation)
-            self.assertEqual(snare_track.get_name(), snare_key_mock.abbreviation)
+            self.assertEqual(kick_track.get_name(), kick_key_mock.id)
+            self.assertEqual(snare_track.get_name(), snare_key_mock.id)
 
         with self.subTest("bpm_set_correctly"):
             rhythm.set_bpm.assert_called_once_with(float(180))
@@ -1242,17 +1244,17 @@ class TestMidiRhythm(TestRhythmLoop):
         with self.subTest("resolution_set_correctly"):
             rhythm.set_resolution.assert_called_once_with(expected_resolution)
 
-    @inject_rhythm.mocked_getters(midi_mapping=MagicMock(MidiMapping))
+    @inject_rhythm.mocked_getters(midi_mapping=MagicMock(MidiDrumMapping))
     def test_as_midi_pattern(self, rhythm):
         kick, snare = 36, 38
 
-        kick_key_mock = self._create_midi_key_mock("kick", kick, "kck")
-        snare_key_mock = self._create_midi_key_mock("snare", snare, "snr")
+        kick_key_mock = self._create_midi_drum_key_mock(kick, "low", "normal", "kick", "kck")
+        snare_key_mock = self._create_midi_drum_key_mock(snare, "mid", "normal", "snare", "snr")
 
         assert isinstance(rhythm.midi_mapping, MagicMock), \
             "something went wrong in the constructor, midi_mapping was not set"
-        rhythm.midi_mapping.find_by_abbreviation = \
-            lambda abbr: kick_key_mock if abbr == kick_key_mock.abbreviation else snare_key_mock
+        rhythm.midi_mapping.get_key_by_id = \
+            lambda key_id: kick_key_mock if key_id == kick_key_mock.id else snare_key_mock
 
         kick_onsets = (mock_onset(0, 80), mock_onset(3, 40), mock_onset(7, 80), mock_onset(12, 80))
         snare_onsets = (mock_onset(2, 80), mock_onset(10, 60))
@@ -1261,9 +1263,9 @@ class TestMidiRhythm(TestRhythmLoop):
         bpm = 180
 
         # noinspection PyTypeChecker
-        kick_track = Track(kick_onsets, kick_key_mock.abbreviation, rhythm)
+        kick_track = Track(kick_onsets, kick_key_mock.id, rhythm)
         # noinspection PyTypeChecker
-        snare_track = Track(snare_onsets, snare_key_mock.abbreviation, rhythm)
+        snare_track = Track(snare_onsets, snare_key_mock.id, rhythm)
 
         rhythm.get_track_iterator = MagicMock(return_value=iter((kick_track, snare_track)))
         rhythm.get_resolution.return_value = resolution

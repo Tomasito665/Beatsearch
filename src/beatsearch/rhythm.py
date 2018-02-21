@@ -1,11 +1,12 @@
 import os
+import enum
 import inspect
 import itertools
 from abc import abstractmethod, ABCMeta
 from io import IOBase
 from functools import wraps
 import typing as tp
-from collections import OrderedDict, namedtuple
+from collections import OrderedDict, namedtuple, defaultdict
 import math
 import numpy as np
 import midi
@@ -1510,145 +1511,224 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
         self.__dict__.update(state)
 
 
-MidiKey = namedtuple("MidiKey", [
-    "pitch",
-    "name",
-    "abbreviation"
-])
+class FrequencyBand(enum.Enum):
+    """Enumeration containing three drum sound frequency bands (low, mid and high)"""
+    LOW = enum.auto()
+    MID = enum.auto()
+    HIGH = enum.auto()
 
 
-class MidiMapping(object):
-    """Midi mapping base class"""
+class DecayTime(enum.Enum):
+    """Enumeration containing three drum sound decay times (short, normal and long)"""
+    SHORT = enum.auto()
+    NORMAL = enum.auto()
+    LONG = enum.auto()
 
-    def __init__(self, name: str, keys: tp.Iterable[tp.Union[MidiKey, tp.Tuple[int, str, str]]]):
-        keys = tuple(MidiKey(pitch, name, abbr.lower()) for [pitch, name, abbr] in keys)
-        keys_by_pitch = dict((key.pitch, key) for key in keys)
-        keys_by_name = dict((key.name, key) for key in keys)
-        keys_by_abbreviation = dict((key.abbreviation, key) for key in keys)
 
-        if len(keys_by_pitch) < len(keys):
-            raise ValueError("Keys should have unique pitch values")
-        if len(keys_by_name) < len(keys):
-            raise ValueError("Keys should have unique names")
-        if len(keys_by_abbreviation) < len(keys):
-            raise ValueError("Keys should have unique abbreviations")
+class MidiDrumMapping(object):
+    """Midi drum mapping class
 
-        self._name = name
+    An instance of this class represents a MIDI drum mapping. It is a container for MidiDrumKey objects and provides
+    functionality for fast retrieval of these objects, based on either midi pitch, frequency band or key id.
+    """
+
+    class MidiDrumKey(object):
+        """Struct-like class holding information about a single key within a MIDI drum mapping
+
+        Holds information about the frequency band and the decay time of the drum sound it represents. Also stores the
+        MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defaults to the MIDI pitch.
+        """
+
+        def __init__(self, midi_pitch: int, frequency_band: FrequencyBand,
+                     decay_time: DecayTime, description: str, key_id: str = None):
+            """Creates a new midi drum key
+
+            :param midi_pitch:     the MIDI pitch as an integer in the range [0, 127] (the MIDI pitch has to be unique
+                                   within the mapping this drum key belongs to)
+            :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
+            :param decay_time:     DecayTime enum object (SHORT, NORMAL or LONG)
+            :param description:    a small description (a few words, max 50 characters) of the sound of this drum sound
+            :param key_id:         a unique (within the drum mapping) id for this key as a string (defaults to the midi
+                                   pitch)
+
+            :raises ValueError: if midi pitch not in range or if description exceeds the max number of characters
+            :raises TypeError:  if given frequency band is not a FrequencyBand object or given decay time is not a
+                                DecayTime object
+            """
+
+            midi_pitch = int(midi_pitch)
+            description = str(description)
+            key_id = str(midi_pitch if key_id is None else key_id)
+
+            if not (0 <= midi_pitch <= 127):
+                raise ValueError("expected midi pitch in range [0, 127]")
+            if len(description) > 50:
+                raise ValueError("description length should not exceed 50 characters")
+            if not isinstance(frequency_band, FrequencyBand):
+                raise TypeError
+            if not isinstance(decay_time, DecayTime):
+                raise TypeError
+
+            self._data = (midi_pitch, frequency_band, decay_time, description, key_id)
+
+        @property
+        def midi_pitch(self) -> int:
+            """The midi pitch of this midi drum key (read-only)"""
+            return self._data[0]
+
+        @property
+        def frequency_band(self) -> FrequencyBand:
+            """The frequency band (FrequencyBand enum object) of this drum key (read-only)"""
+            return self._data[1]
+
+        @property
+        def decay_time(self) -> DecayTime:
+            """The decay time (DecayTime enum object) of this drum key (read-only)"""
+            return self._data[2]
+
+        @property
+        def description(self) -> str:
+            """The description of this drum key as a string (read-only)"""
+            return self._data[3]
+
+        @property
+        def id(self) -> str:
+            """The id of this drum key as a string (read-only)"""
+            return self._data[4]
+
+        def __repr__(self):
+            return "MidiDrumKey(%i, %s, %s, \"%s\", \"%s\")" % (
+                self.midi_pitch, self.frequency_band.name, self.decay_time.name, self.description, self.id)
+
+    def __init__(self, name: str, keys: tp.Sequence[MidiDrumKey]):
+        self._name = str(name)
+        keys = tuple(keys)
+
+        keys_by_midi_key = {}
+        keys_by_id = {}
+        keys_by_frequency_band = defaultdict(lambda: [])
+        keys_by_decay_time = defaultdict(lambda: [])
+
+        for k in keys:
+            assert k.midi_pitch not in keys_by_midi_key, "multiple keys on midi key %i" % k.midi_pitch
+            assert k.id not in keys_by_id, "multiple keys with id \"%s\"" % k.id
+
+            keys_by_midi_key[k.midi_pitch] = k
+            keys_by_id[k.id] = k
+            keys_by_frequency_band[k.frequency_band].append(k)
+            keys_by_decay_time[k.decay_time].append(k)
+
         self._keys = keys
-        self._keys_by_pitch = keys_by_pitch
-        self._keys_by_name = keys_by_name
-        self._keys_by_abbreviation = keys_by_abbreviation
+        self._keys_by_midi_key = keys_by_midi_key
+        self._keys_by_id = keys_by_id
 
-    def find(self, query: tp.Union[str, int]) -> tp.Union[MidiKey, None]:
-        """
-        Finds a Midi key by either its midi pitch, name or abbreviation.
+        # copies a dict and converts the values to tuples
+        solidify = lambda d: dict((item[0], tuple(item[1])) for item in d.items())
 
-        :param query: MIDI pitch, name or abbreviation
-        :return: MidiKey namedtuple or None if not found
-        """
-
-        return self.find_by_pitch(query) or self.find_by_name(query) or self.find_by_abbreviation(query)
-
-    def find_by_pitch(self, pitch: int) -> tp.Union[MidiKey, None]:
-        """
-        Finds a Midi key by its pitch.
-
-        :param pitch: midi pitch as an integer
-        :return: MidiKey namedtuple or None if not found
-        """
-
-        return self._keys_by_pitch.get(pitch, None)
-
-    def find_by_name(self, name: str) -> tp.Union[MidiKey, None]:
-        """
-        Finds a Midi key by its name.
-
-        :param name: key name
-        :return: MidiKey namedtuple or None if not found
-        """
-
-        return self._keys_by_name.get(name, None)
-
-    def find_by_abbreviation(self, abbreviation: str) -> tp.Union[MidiKey, None]:
-        """
-        Finds a Midi key by its abbreviation.
-
-        :param abbreviation: key abbreviation
-        :return: MidiKey namedtuple or None if not found
-        """
-
-        return self._keys_by_abbreviation.get(abbreviation.lower(), None)
+        self._keys_by_frequency_band = solidify(keys_by_frequency_band)
+        self._keys_by_decay_time = solidify(keys_by_decay_time)
 
     @property
-    def keys(self) -> tp.Tuple[MidiKey, ...]:
-        """
-        A tuple containing all the Midi keys of this mapping. This property is read-only.
-
-        :return: tuple containing all the Midi keys of this mapping
-        """
-
-        return self._keys
-
-    @property
-    def name(self) -> str:
-        """
-        The name of this mapping. This property is read-only.
-
-        :return: name of this mapping
-        """
-
+    def name(self):
+        """Name of this drum mapping (read-only)"""
         return self._name
 
+    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumKey, None]:
+        """Returns the MidiDrumKey with the given midi pitch
 
-GMDrumMapping = MidiMapping("GMDrumMapping", [
-    (35, "Acoustic bass drum", "abd"),
-    (36, "Bass drum 1", "bd1"),
-    (37, "Side stick", "sst"),
-    (38, "Acoustic snare", "asn"),
-    (39, "Hand clap", "hcl"),
-    (40, "Electric snare", "esn"),
-    (41, "Low floor tom", "lft"),
-    (42, "Closed hi-hat", "chh"),
-    (43, "High floor tom", "hft"),
-    (44, "Pedal hi-hat", "phh"),
-    (45, "Low tom", "ltm"),
-    (46, "Open hi-hat", "ohh"),
-    (47, "Low mid tom", "lmt"),
-    (48, "High mid tom", "hmt"),
-    (49, "Crash cymbal 1", "cr1"),
-    (50, "High tom", "htm"),
-    (51, "Ride cymbal 1", "rc1"),
-    (52, "Chinese cymbal", "chc"),
-    (53, "Ride bell", "rbl"),
-    (54, "Tambourine", "tmb"),
-    (55, "Splash cymbal", "spl"),
-    (56, "Cowbell", "cwb"),
-    (57, "Crash cymbal 2", "cr2"),
-    (58, "Vibraslap", "vbs"),
-    (59, "Ride cymbal 2", "rc2"),
-    (60, "Hi bongo", "hbg"),
-    (61, "Low bongo", "lbg"),
-    (62, "Muted high conga", "mhc"),
-    (63, "Open high conga", "ohc"),
-    (64, "Low conga", "lcn"),
-    (65, "High timbale", "htb"),
-    (66, "Low timbale", "ltb"),
-    (67, "High agogo", "hgo"),
-    (68, "Low agogo", "lgo"),
-    (69, "Cabasa", "cbs"),
-    (70, "Maracas", "mcs"),
-    (71, "Short whistle", "swh"),
-    (72, "Long whistle", "lwh"),
-    (73, "Short guiro", "sgr"),
-    (74, "Long guiro", "lgr"),
-    (75, "Claves", "clv"),
-    (76, "Hi wood block", "hwb"),
-    (77, "Low wood block", "lwb"),
-    (78, "Muted cuica", "mcu"),
-    (79, "Open cuica", "ocu"),
-    (80, "Muted triangle", "mtr"),
-    (81, "Open triangle", "otr")
-])
+        :param midi_pitch: midi pitch as an integer
+        :return: MidiDrumKey object with the given midi pitch or None if no key found with given pitch
+        """
+
+        return self._keys_by_midi_key.get(midi_pitch, None)
+
+    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumKey, None]:
+        """Returns the MidiDrumKey with the given key id
+
+        :param key_id: key id of the midi drum key
+        :return: MidiDrumKey object with the given key id or None if no key found with given key id
+        """
+
+        return self._keys_by_id.get(key_id, None)
+
+    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumKey, ...]:
+        """Returns the keys with the given frequency band
+
+        :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
+        :return: a tuple containing the MidiDrumKey objects with the given frequency band or an empty tuple if nothing
+                 found
+        """
+
+        return self._keys_by_frequency_band.get(frequency_band, tuple())
+
+    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumKey, ...]:
+        """Returns the keys with the given decay time
+
+        :param decay_time: DecayTime enum object (SHORT, NORMAL or LONG)
+        :return: a tuple containing the MidiDrumKey objects with the given decay time or an empty tuple if nothing
+                 found
+        """
+
+        return self._keys_by_decay_time.get(decay_time, tuple())
+
+    def __iter__(self):
+        """Returns an iterator over the MidiDrumKey objects within this mapping
+
+        :return: iterator yielding MidiDrumKey objects
+        """
+
+        return iter(self._keys)
+
+
+GMDrumMapping = MidiDrumMapping("GMDrumMapping", [
+    MidiDrumMapping.MidiDrumKey(35, FrequencyBand.LOW, DecayTime.NORMAL, "Acoustic bass drum", key_id="abd"),
+    MidiDrumMapping.MidiDrumKey(36, FrequencyBand.LOW, DecayTime.NORMAL, "Bass drum", key_id="bd1"),
+    MidiDrumMapping.MidiDrumKey(37, FrequencyBand.MID, DecayTime.SHORT, "Side stick", key_id="sst"),
+    MidiDrumMapping.MidiDrumKey(38, FrequencyBand.MID, DecayTime.NORMAL, "Acoustic snare", key_id="asn"),
+    MidiDrumMapping.MidiDrumKey(39, FrequencyBand.MID, DecayTime.NORMAL, "Hand clap", key_id="hcl"),
+    MidiDrumMapping.MidiDrumKey(40, FrequencyBand.MID, DecayTime.NORMAL, "Electric snare", key_id="esn"),
+    MidiDrumMapping.MidiDrumKey(41, FrequencyBand.LOW, DecayTime.NORMAL, "Low floor tom", key_id="lft"),
+    MidiDrumMapping.MidiDrumKey(42, FrequencyBand.HIGH, DecayTime.SHORT, "Closed hi-hat", key_id="chh"),
+    MidiDrumMapping.MidiDrumKey(43, FrequencyBand.LOW, DecayTime.NORMAL, "High floor tom", key_id="hft"),
+    MidiDrumMapping.MidiDrumKey(44, FrequencyBand.HIGH, DecayTime.NORMAL, "Pedal hi-hat", key_id="phh"),
+    MidiDrumMapping.MidiDrumKey(45, FrequencyBand.MID, DecayTime.NORMAL, "Low tom", key_id="ltm"),
+    MidiDrumMapping.MidiDrumKey(46, FrequencyBand.HIGH, DecayTime.LONG, "Open hi-hat", key_id="ohh"),
+    MidiDrumMapping.MidiDrumKey(47, FrequencyBand.MID, DecayTime.NORMAL, "Low mid tom", key_id="lmt"),
+    MidiDrumMapping.MidiDrumKey(48, FrequencyBand.MID, DecayTime.NORMAL, "High mid tom", key_id="hmt"),
+    MidiDrumMapping.MidiDrumKey(49, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 1", key_id="cr1"),
+    MidiDrumMapping.MidiDrumKey(50, FrequencyBand.MID, DecayTime.NORMAL, "High tom", key_id="htm"),
+    MidiDrumMapping.MidiDrumKey(51, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 1", key_id="rc1"),
+    MidiDrumMapping.MidiDrumKey(52, FrequencyBand.HIGH, DecayTime.LONG, "Chinese cymbal", key_id="chc"),
+    MidiDrumMapping.MidiDrumKey(53, FrequencyBand.HIGH, DecayTime.LONG, "Ride bell", key_id="rbl"),
+    MidiDrumMapping.MidiDrumKey(54, FrequencyBand.MID, DecayTime.NORMAL, "Tambourine", key_id="tmb"),
+    MidiDrumMapping.MidiDrumKey(55, FrequencyBand.HIGH, DecayTime.LONG, "Splash cymbal", key_id="spl"),
+    MidiDrumMapping.MidiDrumKey(56, FrequencyBand.MID, DecayTime.SHORT, "Cowbell", key_id="cwb"),
+    MidiDrumMapping.MidiDrumKey(57, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 2", key_id="cr2"),
+    MidiDrumMapping.MidiDrumKey(58, FrequencyBand.HIGH, DecayTime.LONG, "Vibraslap", key_id="vbs"),
+    MidiDrumMapping.MidiDrumKey(59, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 2", key_id="rc2"),
+    MidiDrumMapping.MidiDrumKey(60, FrequencyBand.MID, DecayTime.NORMAL, "Hi bongo", key_id="hbg"),
+    MidiDrumMapping.MidiDrumKey(61, FrequencyBand.MID, DecayTime.NORMAL, "Low bongo", key_id="lbg"),
+    MidiDrumMapping.MidiDrumKey(62, FrequencyBand.MID, DecayTime.NORMAL, "Muted high conga", key_id="mhc"),
+    MidiDrumMapping.MidiDrumKey(63, FrequencyBand.MID, DecayTime.NORMAL, "Open high conga", key_id="ohc"),
+    MidiDrumMapping.MidiDrumKey(64, FrequencyBand.MID, DecayTime.NORMAL, "Low conga", key_id="lcn"),
+    MidiDrumMapping.MidiDrumKey(65, FrequencyBand.MID, DecayTime.NORMAL, "High timbale", key_id="htb"),
+    MidiDrumMapping.MidiDrumKey(66, FrequencyBand.MID, DecayTime.NORMAL, "Low timbale", key_id="ltb"),
+    MidiDrumMapping.MidiDrumKey(67, FrequencyBand.MID, DecayTime.NORMAL, "High agogo", key_id="hgo"),
+    MidiDrumMapping.MidiDrumKey(68, FrequencyBand.MID, DecayTime.NORMAL, "Low agogo", key_id="lgo"),
+    MidiDrumMapping.MidiDrumKey(69, FrequencyBand.HIGH, DecayTime.NORMAL, "Cabasa", key_id="cbs"),
+    MidiDrumMapping.MidiDrumKey(70, FrequencyBand.HIGH, DecayTime.NORMAL, "Maracas", key_id="mcs"),
+    MidiDrumMapping.MidiDrumKey(71, FrequencyBand.MID, DecayTime.NORMAL, "Short whistle", key_id="swh"),
+    MidiDrumMapping.MidiDrumKey(72, FrequencyBand.MID, DecayTime.NORMAL, "Long whistle", key_id="lwh"),
+    MidiDrumMapping.MidiDrumKey(73, FrequencyBand.MID, DecayTime.NORMAL, "Short guiro", key_id="sgr"),
+    MidiDrumMapping.MidiDrumKey(74, FrequencyBand.MID, DecayTime.NORMAL, "Long guiro", key_id="lgr"),
+    MidiDrumMapping.MidiDrumKey(75, FrequencyBand.MID, DecayTime.SHORT, "Claves", key_id="clv"),
+    MidiDrumMapping.MidiDrumKey(76, FrequencyBand.MID, DecayTime.SHORT, "Hi wood block", key_id="hwb"),
+    MidiDrumMapping.MidiDrumKey(77, FrequencyBand.MID, DecayTime.SHORT, "Low wood block", key_id="lwb"),
+    MidiDrumMapping.MidiDrumKey(78, FrequencyBand.MID, DecayTime.NORMAL, "Muted cuica", key_id="mcu"),
+    MidiDrumMapping.MidiDrumKey(79, FrequencyBand.MID, DecayTime.NORMAL, "Open cuica", key_id="ocu"),
+    MidiDrumMapping.MidiDrumKey(80, FrequencyBand.MID, DecayTime.SHORT, "Muted triangle", key_id="mtr"),
+    MidiDrumMapping.MidiDrumKey(81, FrequencyBand.MID, DecayTime.LONG, "Open triangle", key_id="otr")
+])  # type: MidiDrumMapping
 
 
 class RhythmLoop(PolyphonicRhythmImpl):
@@ -1751,7 +1831,7 @@ class RhythmLoop(PolyphonicRhythmImpl):
 class MidiRhythm(RhythmLoop):
     def __init__(self, midi_file: tp.Union[IOBase, str] = "",
                  midi_pattern: midi.Pattern = None,
-                 midi_mapping: MidiMapping = GMDrumMapping,
+                 midi_mapping: MidiDrumMapping = GMDrumMapping,
                  name: str = "", preserve_midi_duration: bool = False, **kwargs):
         super().__init__(**kwargs)
 
@@ -1768,7 +1848,7 @@ class MidiRhythm(RhythmLoop):
             name = name or os.path.splitext(os.path.basename(midi_file.name))[0]
 
         self.set_name(name)
-        self._midi_mapping = midi_mapping  # type: MidiMapping
+        self._midi_mapping = midi_mapping  # type: MidiDrumMapping
         self._midi_metronome = -1  # type: int
 
         # loads the tracks and sets the bpm, time signature, midi metronome and resolution
@@ -1801,9 +1881,9 @@ class MidiRhythm(RhythmLoop):
 
         # add note events
         for track in self.get_track_iterator():
-            midi_note = self._midi_mapping.find_by_abbreviation(track.name)
-            assert midi_note is not None  # if track has invalid midi note abbreviation set_track would have failed
-            pitch = midi_note.pitch
+            midi_note = self._midi_mapping.get_key_by_id(track.name)
+            assert midi_note is not None  # if track has invalid midi note id set_tracks would have failed
+            pitch = midi_note.midi_pitch
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]
@@ -1841,17 +1921,17 @@ class MidiRhythm(RhythmLoop):
 
     def __get_track_naming_error__(self, track_name: str) -> str:
         """
-        Checks if the given track name is a valid MidiKey abbreviation according to this loop's midi mapping.
+        Checks if the given track name is a valid MidiDrumKey id according to this loop's midi mapping.
 
         :param track_name: track name to check
-        :return: a message telling that the track name is not a valid abbreviation or an empty string if the track name
+        :return: a message telling that the track name is not a valid midi key id or an empty string if the track name
                  is ok
         """
 
         mapping = self._midi_mapping
-        if mapping.find_by_abbreviation(track_name):
+        if mapping.get_key_by_id(track_name):
             return ""
-        return "No midi key found with abbreviation \"%s\" in %s" % (track_name, mapping.name)
+        return "No midi key found with id \"%s\" in %s" % (track_name, mapping.name)
 
     def load_midi_pattern(self, pattern: midi.Pattern, preserve_midi_duration: bool = False) -> None:
         """
@@ -1888,14 +1968,14 @@ class MidiRhythm(RhythmLoop):
         track = midi.Track(sorted(track, key=lambda event: event.tick))  # sort in chronological order
 
         bpm = 0               # type: tp.Union[float]
-        track_data = {}       # type: tp.Dict[MidiKey, tp.List[tp.Tuple[int, int], ...]]
+        track_data = {}       # type: tp.Dict[MidiDrumMapping.MidiDrumKey, tp.List[tp.Tuple[int, int], ...]]
         ts_midi_event = None  # type: tp.Union[midi.TimeSignatureEvent, None]
         eot_event = None      # type: tp.Union[midi.EndOfTrackEvent, None]
 
         for msg in track:
             if isinstance(msg, midi.NoteOnEvent):
                 midi_pitch = msg.get_pitch()  # type: int
-                midi_key = mapping.find_by_pitch(midi_pitch)
+                midi_key = mapping.get_key_by_midi_pitch(midi_pitch)
                 if midi_key not in track_data:
                     if midi_key is None:
                         print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.name))
@@ -1924,10 +2004,10 @@ class MidiRhythm(RhythmLoop):
         # noinspection PyShadowingNames
         def track_generator():
             # sort the rhythm tracks by midi pitch
-            sorted_midi_keys = sorted(track_data.keys(), key=lambda midi_key: midi_key.pitch)
+            sorted_midi_keys = sorted(track_data.keys(), key=lambda midi_key: midi_key.midi_pitch)
             for midi_key in sorted_midi_keys:
                 onsets = track_data[midi_key]
-                yield Track(onsets, midi_key.abbreviation)
+                yield Track(onsets, midi_key.id)
 
         self._midi_metronome = midi_metronome
         self.set_time_signature(time_signature)
