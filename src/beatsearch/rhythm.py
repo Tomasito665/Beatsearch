@@ -1782,6 +1782,14 @@ class MidiDrumMappingReducer(object, metaclass=ABCMeta):
 
         return self._groups.get(name, None)
 
+    def group_names(self):
+        """Returns an iterator over the names of the groups within this reducer
+
+        :return: iterator yielding the names of the groups in this reducer
+        """
+
+        return iter(self._groups.keys())
+
 
 @friendly_named_class("Frequency-band mapping reducer")
 class FrequencyBandMidiDrumMappingReducer(MidiDrumMappingReducer):
@@ -1802,6 +1810,47 @@ class UniquePropertyComboMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
     def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
         return "%s.%s" % (midi_key.frequency_band.name, midi_key.decay_time.name)
+
+
+def get_drum_mapping_reducer_implementation_names() -> tp.Tuple[str, ...]:
+    """Returns a tuple containing the class names of all MidiDrumMappingReducer implementations"""
+    return tuple(reducer.__name__ for reducer in MidiDrumMappingReducer.__subclasses__())
+
+
+def get_drum_mapping_reducer_implementation_friendly_names() -> tp.Tuple[str, ...]:
+    """Returns a tuple containing the friendly names of all MidiDrumMappingReducer implementations"""
+    return tuple(getattr(reducer, "__friendly_name__") for reducer in MidiDrumMappingReducer.__subclasses__())
+
+
+def get_drum_mapping_reducer_implementation(reducer_name: str, **kwargs) -> tp.Type[MidiDrumMappingReducer]:
+    """Returns an implementation of MidiDrumMappingReducer
+
+    Finds and returns a MidiDrumMappingReducer subclass, given its class name or friendly name. This method has an
+    execution time of O(N).
+
+    :param reducer_name: either the class name or the friendly name (if it is @friendly_named_class annotated) of
+                         the reducer subclass
+    :param kwargs:
+        default - when given, this will be returned if nothing is found
+
+    :return: subclass of MidiDrumMappingReducer with the given class name or friendly name
+    :raises ValueError: if no subclass with the given name or friendly name (and no default is set)
+    """
+
+    for reducer in MidiDrumMappingReducer.__subclasses__():
+        if reducer.__name__ == reducer_name:
+            return reducer
+        try:
+            # noinspection PyUnresolvedReferences
+            if reducer.__friendly_name__ == reducer_name:
+                return reducer
+        except AttributeError:
+            continue
+
+    try:
+        return kwargs['default']
+    except KeyError:
+        raise ValueError("No MidiDrumMappingReducer found with class name or friendly name \"%s\"" % reducer_name)
 
 
 GMDrumMapping = MidiDrumMappingImpl("GMDrumMapping", [
@@ -1956,6 +2005,7 @@ class MidiRhythm(RhythmLoop):
     def __init__(self, midi_file: tp.Union[IOBase, str] = "",
                  midi_pattern: midi.Pattern = None,
                  midi_mapping: MidiDrumMapping = GMDrumMapping,
+                 midi_mapping_reducer_cls: tp.Optional[tp.Type[MidiDrumMappingReducer]] = None,
                  name: str = "", preserve_midi_duration: bool = False, **kwargs):
         super().__init__(**kwargs)
 
@@ -1971,9 +2021,15 @@ class MidiRhythm(RhythmLoop):
                 midi_file.close()
             name = name or os.path.splitext(os.path.basename(midi_file.name))[0]
 
+        if midi_mapping_reducer_cls:
+            mapping_reducer = midi_mapping_reducer_cls(midi_mapping)
+        else:
+            mapping_reducer = None
+
         self.set_name(name)
-        self._midi_mapping = midi_mapping  # type: MidiDrumMapping
-        self._midi_metronome = -1  # type: int
+        self._midi_mapping = midi_mapping             # type: MidiDrumMapping
+        self._midi_mapping_reducer = mapping_reducer  # type: tp.Union[MidiDrumMappingReducer, None]
+        self._midi_metronome = -1                     # type: int
 
         # loads the tracks and sets the bpm, time signature, midi metronome and resolution
         if midi_pattern:
@@ -2052,6 +2108,14 @@ class MidiRhythm(RhythmLoop):
                  is ok
         """
 
+        mapping_reducer = self._midi_mapping_reducer
+
+        if mapping_reducer:
+            group_names = tuple(mapping_reducer.group_names())
+            if track_name in group_names:
+                return ""
+            return "No group called \"%s\"" % track_name
+
         mapping = self._midi_mapping
         if mapping.get_key_by_id(track_name):
             return ""
@@ -2087,26 +2151,30 @@ class MidiRhythm(RhythmLoop):
             raise ValueError("Given MIDI pattern has multiple tracks with note events (%i)",
                              n_tracks_containing_note_events)
 
+        if self._midi_mapping_reducer:
+            get_track_name = self._midi_mapping_reducer.get_group_name
+        else:
+            get_track_name = lambda m_key: m_key.id
+
         pattern.make_ticks_abs()
         track = list(itertools.chain(*pattern))  # merge all tracks into one
         track = midi.Track(sorted(track, key=lambda event: event.tick))  # sort in chronological order
 
         bpm = 0               # type: tp.Union[float]
-        track_data = {}       # type: tp.Dict[MidiDrumMapping.MidiDrumKey, tp.List[tp.Tuple[int, int], ...]]
+        track_data = defaultdict(lambda: [])  # type: tp.Dict[MidiDrumMapping.MidiDrumKey, tp.List[tp.Tuple[int, int], ...]]
         ts_midi_event = None  # type: tp.Union[midi.TimeSignatureEvent, None]
         eot_event = None      # type: tp.Union[midi.EndOfTrackEvent, None]
 
         for msg in track:
             if isinstance(msg, midi.NoteOnEvent):
                 midi_pitch = msg.get_pitch()  # type: int
-                midi_key = mapping.get_key_by_midi_pitch(midi_pitch)
-                if midi_key not in track_data:
-                    if midi_key is None:
-                        print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.get_name()))
-                        continue
-                    track_data[midi_key] = []
+                mapping_key = mapping.get_key_by_midi_pitch(midi_pitch)
+                if mapping_key is None:
+                    print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.get_name()))
+                    continue
                 onset = (int(msg.tick), int(msg.get_velocity()))
-                track_data[midi_key].append(onset)
+                track_name = get_track_name(mapping_key)
+                track_data[track_name].append(onset)
             elif isinstance(msg, midi.TimeSignatureEvent):
                 if ts_midi_event is None:
                     ts_midi_event = msg
@@ -2124,19 +2192,12 @@ class MidiRhythm(RhythmLoop):
 
         time_signature = TimeSignature.from_midi_event(ts_midi_event)
         midi_metronome = ts_midi_event.get_metronome()  # type: int
-
-        # noinspection PyShadowingNames
-        def track_generator():
-            # sort the rhythm tracks by midi pitch
-            sorted_midi_keys = sorted(track_data.keys(), key=lambda midi_key: midi_key.midi_pitch)
-            for midi_key in sorted_midi_keys:
-                onsets = track_data[midi_key]
-                yield Track(onsets, midi_key.id)
+        create_tracks = lambda: (Track(onsets, t_name) for t_name, onsets in sorted(track_data.items()))
 
         self._midi_metronome = midi_metronome
         self.set_time_signature(time_signature)
         self.set_bpm(bpm)
-        self.set_tracks(track_generator(), pattern.resolution)
+        self.set_tracks(create_tracks(), pattern.resolution)
 
         if preserve_midi_duration:
             self.set_duration_in_ticks(eot_event.tick)

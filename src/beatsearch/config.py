@@ -4,10 +4,11 @@ import configparser
 import typing as tp
 from contextlib import contextmanager
 from beatsearch.utils import get_beatsearch_dir
+from beatsearch.rhythm import get_drum_mapping_reducer_implementation
 
 
 class BSConfigSettingHandle(object):
-    def __init__(self, section: str, name: str, default_value, to_type: tp.Callable,
+    def __init__(self, section: str, name: str, default_value: tp.Any, to_type: tp.Callable,
                  to_str: tp.Callable = None, validate: tp.Callable = None):
 
         if validate and not callable(validate):
@@ -27,7 +28,7 @@ class BSConfigSettingHandle(object):
 
         self.default_value = default_value
 
-    def set(self, value: tp.Any):
+    def set(self, value: tp.Union[tp.Any, str]):
         """Sets the value of this setting
 
         :param value: new value of the setting
@@ -37,11 +38,12 @@ class BSConfigSettingHandle(object):
         parser = self.config_parser
         section = self.section
 
-        try:
-            value = self._to_type(value)
-        except Exception as e:
-            print("couldn't convert \"%s\" with \"%s\"" % (str(value), self._to_type))
-            raise e
+        if isinstance(value, str):
+            try:
+                value = self._to_type(value)
+            except Exception as e:
+                print("couldn't convert \"%s\" with \"%s\"" % (str(value), self._to_type))
+                raise e
 
         if self._validate and not self._validate(value):
             raise ValueError(value)
@@ -52,7 +54,7 @@ class BSConfigSettingHandle(object):
         if not self._is_representable_as_string(value):
             raise RuntimeError("value \"%s\" is not representable as a string without information loss" % value)
 
-        parser[section][self.name] = str(value)
+        parser[section][self.name] = self._to_str(value)
 
     def get(self):
         """Returns the value of this setting or the default if not set
@@ -66,7 +68,8 @@ class BSConfigSettingHandle(object):
             value_as_str = parser[self.section][self.name]
         except KeyError:
             # if not set, set it to the default value and return that
-            self.set(self.default_value)
+            default_value_as_str = self._to_str(self.default_value)
+            self.set(default_value_as_str)
             return self.default_value
 
         return self._to_type(value_as_str)
@@ -132,7 +135,13 @@ class BSConfig(object):
             validate=lambda val: val >= 0
         )
 
-        for setting in (self.midi_root_directory, self.rhythm_resolution):
+        self.mapping_reducer = BSConfigSettingHandle(
+            BSConfigSection.DEFAULT, "midi_mapping_reducer", None,
+            lambda name: None if name == "None" else get_drum_mapping_reducer_implementation(name),
+            lambda reducer: "None" if reducer is None else reducer.__name__
+        )
+
+        for setting in (self.midi_root_directory, self.rhythm_resolution, self.mapping_reducer):
             setting.config_parser = self._config_parser
 
         # If there already exists an ini file, load that in

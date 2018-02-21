@@ -29,7 +29,8 @@ from beatsearch.utils import (
 )
 from beatsearch.app.control import BSController, BSRhythmLoopLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGrid
-from beatsearch.rhythm import RhythmLoop, MidiRhythm, Rhythm
+from beatsearch.rhythm import RhythmLoop, MidiRhythm, Rhythm, \
+    get_drum_mapping_reducer_implementation_friendly_names, get_drum_mapping_reducer_implementation
 from beatsearch.config import BSConfig
 from beatsearch.rhythmcorpus import RhythmCorpus
 import midi  # after beatsearch imports!
@@ -726,22 +727,23 @@ class BSSettingsWindow(BSAppWindow):
             self.master = master
             self._on_change_callback = None
 
+        @classmethod
         @abstractmethod
-        def get_widget(self) -> tk.Widget:
-            """Returns the widget containing the input controls
-
-            :return: widget containing the input controls
-            """
-
-            raise NotImplementedError
-
-        @abstractmethod
-        def get_name(self) -> str:
+        def get_name(cls) -> str:
             """Returns the name of this input
 
             The name returned by this method will be used as a label.
 
             :return: name of the input
+            """
+
+            raise NotImplementedError
+
+        @abstractmethod
+        def get_widget(self) -> tk.Widget:
+            """Returns the widget containing the input controls
+
+            :return: widget containing the input controls
             """
 
             raise NotImplementedError
@@ -810,7 +812,6 @@ class BSSettingsWindow(BSAppWindow):
             variable.trace_add("write", callback)
 
     class RhythmsRootDirInput(Input):
-
         NAME = "Rhythms root directory"
 
         def __init__(self, *args, **kw):
@@ -821,11 +822,12 @@ class BSSettingsWindow(BSAppWindow):
             tk.Button(self._container, text="Browse", command=self._on_btn_browse, width=12)\
                 .pack(side=tk.RIGHT, padx=(3, 0))
 
+        @classmethod
+        def get_name(cls) -> str:
+            return cls.NAME
+
         def get_widget(self) -> tk.Widget:
             return self._container
-
-        def get_name(self) -> str:
-            return self.NAME
 
         def get_variable(self) -> tk.Variable:
             return self._var_root_dir
@@ -864,11 +866,12 @@ class BSSettingsWindow(BSAppWindow):
             self._var_resolution = tk.StringVar()
             self._entry = tk.Entry(self.master, textvariable=self._var_resolution)
 
+        @classmethod
+        def get_name(cls) -> str:
+            return cls.NAME
+
         def get_widget(self) -> tk.Widget:
             return self._entry
-
-        def get_name(self) -> str:
-            return self.NAME
 
         def get_variable(self) -> tk.Variable:
             return self._var_resolution
@@ -888,6 +891,44 @@ class BSSettingsWindow(BSAppWindow):
             resolution = config.rhythm_resolution.get()
             self._var_resolution.set(resolution)
 
+    class MidiDrumMappingReducerInput(Input):
+        NAME = "MIDI Mapping Reducer"
+        MAPPING_REDUCER_NAMES = ["None"] + list(get_drum_mapping_reducer_implementation_friendly_names())
+
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            self._var_reducer = tk.StringVar()
+            self._combobox = ttk.Combobox(
+                self.master,
+                values=self.MAPPING_REDUCER_NAMES,
+                textvariable=self._var_reducer,
+                state="readonly"
+            )
+
+        @classmethod
+        def get_name(cls) -> str:
+            return cls.NAME
+
+        def get_widget(self) -> tk.Widget:
+            return self._combobox
+
+        def get_variable(self) -> tkinter.Variable:
+            return self._var_reducer
+
+        def check_input(self) -> None:
+            reducer_name = self._var_reducer.get()
+            if reducer_name not in self.MAPPING_REDUCER_NAMES:
+                raise self.InvalidInput("Unknown mapping reducer: %s (choose between: %s)" % (
+                    reducer_name, str(self.MAPPING_REDUCER_NAMES)))
+
+        def reset(self, config: BSConfig):
+            reducer = config.mapping_reducer.get()
+            friendly_name = "None"
+            if reducer:
+                friendly_name = reducer.__friendly_name__
+                assert friendly_name in self.MAPPING_REDUCER_NAMES
+            self._var_reducer.set(friendly_name)
+
     def __init__(self, app, min_width=360, min_height=60, **kwargs):
         super().__init__(app, **kwargs)
         self.wm_title(self.TITLE)
@@ -900,7 +941,8 @@ class BSSettingsWindow(BSAppWindow):
 
         self._inputs = {
             self.RhythmsRootDirInput: None,
-            self.RhythmResolutionInput: None
+            self.RhythmResolutionInput: None,
+            self.MidiDrumMappingReducerInput: None,
         }  # type: tp.Dict[tp.Type[BSSettingsWindow.Input], BSSettingsWindow.Input]
 
         self._initial_values = {}
@@ -951,9 +993,16 @@ class BSSettingsWindow(BSAppWindow):
 
         rhythms_root_dir = inputs[self.RhythmsRootDirInput].get_value()
         rhythm_resolution = inputs[self.RhythmResolutionInput].get_value()
+        mapping_reducer_friendly_name = inputs[self.MidiDrumMappingReducerInput].get_value()
+
+        if mapping_reducer_friendly_name == "None":
+            mapping_reducer_cls = None
+        else:
+            mapping_reducer_cls = get_drum_mapping_reducer_implementation(mapping_reducer_friendly_name)
 
         config.rhythm_resolution.set(rhythm_resolution)
         config.midi_root_directory.set(rhythms_root_dir)
+        config.mapping_reducer.set(mapping_reducer_cls)
         config.save()
 
         # reload the corpus with the new settings

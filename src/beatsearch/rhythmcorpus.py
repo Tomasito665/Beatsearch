@@ -4,7 +4,7 @@ import uuid
 import pickle
 import typing as tp
 from collections import namedtuple
-from beatsearch.rhythm import MidiRhythm
+from beatsearch.rhythm import MidiRhythm, MidiDrumMappingReducer, get_drum_mapping_reducer_implementation
 from beatsearch.utils import get_midi_files_in_directory
 from beatsearch.config import BSConfig
 
@@ -19,15 +19,22 @@ class RhythmCorpus(object):
     class CorpusStateError(Exception):
         pass
 
-    def __init__(self, root_dir: tp.Optional[str] = None, rhythm_resolution: tp.Optional[int] = None):
-        self._root_dir = None            # type: tp.Union[str, None]
-        self._rhythm_resolution = None   # type: tp.Union[int, None]
-        self._rhythm_data = None         # type: tp.Union[tp.Tuple[tp.Tuple[MidiRhythm, RhythmFileInfo], ...]]
-        self._id = uuid.uuid4()          # type: uuid.UUID
+    def __init__(
+            self,
+            root_dir: tp.Optional[str] = None,
+            rhythm_resolution: tp.Optional[int] = None,
+            midi_mapping_reducer: tp.Optional[MidiDrumMappingReducer] = None
+    ):
+        self._root_dir = None              # type: tp.Union[str, None]
+        self._rhythm_resolution = None     # type: tp.Union[int, None]
+        self._midi_mapping_reducer = None  # type: tp.Union[tp.Type[MidiDrumMappingReducer], None]
+        self._rhythm_data = None           # type: tp.Union[tp.Tuple[tp.Tuple[MidiRhythm, RhythmFileInfo], ...]]
+        self._id = uuid.uuid4()            # type: uuid.UUID
 
         # calling setters (validation is handled there)
         self.root_directory = root_dir
         self.rhythm_resolution = rhythm_resolution
+        self.midi_mapping_reducer = midi_mapping_reducer
 
     def load(self, config: tp.Optional[BSConfig] = None):
         """Load the corpus
@@ -46,10 +53,16 @@ class RhythmCorpus(object):
         if not config:
             assert self._root_dir, "root_directory should be set if no BSConfig object is given"
             assert self._rhythm_resolution, "rhythm_resolution should be set if no BSConfig object is given"
+            assert self._midi_mapping_reducer, "midi_mapping_reducer should be set if no BSConfig object is given"
 
         midi_dir = self._root_dir or config.midi_root_directory.get()
         cache_fpath = config.get_midi_root_directory_cache_fpath(midi_dir) if config else ""
-        resolution = self._rhythm_resolution
+        resolution = self._rhythm_resolution or config.rhythm_resolution.get()
+        mapping_reducer = self._midi_mapping_reducer or config.mapping_reducer.get()
+
+        self.root_directory = midi_dir
+        self.rhythm_resolution = resolution
+        self.midi_mapping_reducer = mapping_reducer
 
         # try to load from cache
         if cache_fpath:
@@ -68,6 +81,7 @@ class RhythmCorpus(object):
 
         pickle_data = {
             'res': resolution,
+            'mapping_reducer': getattr(mapping_reducer, "__name__", "None"),
             'data': self._rhythm_data
         }
 
@@ -112,6 +126,16 @@ class RhythmCorpus(object):
             raise ValueError("resolution should be greater than zero")
 
         self._rhythm_resolution = resolution
+
+    @property
+    def midi_mapping_reducer(self) -> tp.Union[tp.Type[MidiDrumMappingReducer], None]:
+        return self._midi_mapping_reducer
+
+    @midi_mapping_reducer.setter
+    def midi_mapping_reducer(self, midi_mapping_reducer: tp.Type[MidiDrumMappingReducer]):
+        if self.is_loaded():
+            raise self.CorpusStateError
+        self._midi_mapping_reducer = midi_mapping_reducer
 
     @property
     def root_directory(self):
@@ -164,12 +188,13 @@ class RhythmCorpus(object):
     def _load_from_directory(self):
         midi_dir = self._root_dir
         resolution = self._rhythm_resolution
+        mapping_reducer = self._midi_mapping_reducer
 
         def get_rhythm_data():
             for f_path in get_midi_files_in_directory(midi_dir):
                 f_path = f_path.replace("\\", "/")  # TODO handle this properly with a utility function "normalize_path"
                 try:
-                    rhythm = MidiRhythm(f_path)
+                    rhythm = MidiRhythm(f_path, midi_mapping_reducer_cls=mapping_reducer)
                     rhythm.set_resolution(resolution)
                     print("%s: OK" % f_path)
                 except (TypeError, ValueError) as e:
@@ -195,12 +220,18 @@ class RhythmCorpus(object):
 
         try:
             rhythm_resolution = unpickled_data['res']
+            mapping_reducer_name = unpickled_data['mapping_reducer']
             rhythm_data = unpickled_data['data']
         except KeyError:
             print("Midi root directory cache has bad format: %s" % cache_fpath)
             return False
 
-        if not self._is_rhythm_data_up_to_date(rhythm_data, rhythm_resolution):
+        if mapping_reducer_name == "None":
+            mapping_reducer = None
+        else:
+            mapping_reducer = get_drum_mapping_reducer_implementation(mapping_reducer_name)
+
+        if not self._is_rhythm_data_up_to_date(rhythm_data, rhythm_resolution, mapping_reducer):
             print("Midi root directory cache file not up to date: %s" % cache_fpath)
             return False
 
@@ -211,9 +242,13 @@ class RhythmCorpus(object):
     # returns whether the rhythm file data is up to date with the "real word" files
     def _is_rhythm_data_up_to_date(
             self, rhythm_data: tp.Tuple[tp.Tuple[MidiRhythm, RhythmFileInfo], ...],
-            rhythm_resolution: int
+            rhythm_resolution: int,
+            mapping_reducer: tp.Union[MidiDrumMappingReducer, None]
     ):
         if rhythm_resolution != self._rhythm_resolution:
+            return False
+
+        if mapping_reducer != self._midi_mapping_reducer:
             return False
 
         for file_info in (data[self.FILE_DATA_IX] for data in rhythm_data):
