@@ -1171,9 +1171,9 @@ class TestMidiRhythm(TestRhythmLoop):
             yield event
 
     @staticmethod
-    def _create_midi_drum_key_mock(midi_key, frequency_band, decay_time, description, key_id):
+    def _create_midi_drum_key_mock(midi_pitch, frequency_band, decay_time, description, key_id):
         midi_drum_key = MagicMock(MidiDrumMapping.MidiDrumKey)
-        midi_drum_key.midi_key = midi_key
+        midi_drum_key.midi_pitch = midi_pitch
         midi_drum_key.frequency_band = frequency_band
         midi_drum_key.decay_time = decay_time
         midi_drum_key.description = description

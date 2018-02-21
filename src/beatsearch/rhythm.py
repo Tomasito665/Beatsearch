@@ -7,6 +7,7 @@ from io import IOBase
 from functools import wraps
 import typing as tp
 from collections import OrderedDict, namedtuple, defaultdict
+from beatsearch.utils import TupleView, friendly_named_class
 import math
 import numpy as np
 import midi
@@ -1525,11 +1526,11 @@ class DecayTime(enum.Enum):
     LONG = enum.auto()
 
 
-class MidiDrumMapping(object):
-    """Midi drum mapping class
+class MidiDrumMapping(object, metaclass=ABCMeta):
+    """Midi drum mapping interface
 
-    An instance of this class represents a MIDI drum mapping. It is a container for MidiDrumKey objects and provides
-    functionality for fast retrieval of these objects, based on either midi pitch, frequency band or key id.
+    Each MidiDrumMapping object represents a MIDI drum mapping and is a container for MidiDrumKey objects. It provides
+    functionality for retrieval of these objects, based on either midi pitch, frequency band or key id.
     """
 
     class MidiDrumKey(object):
@@ -1600,7 +1601,85 @@ class MidiDrumMapping(object):
             return "MidiDrumKey(%i, %s, %s, \"%s\", \"%s\")" % (
                 self.midi_pitch, self.frequency_band.name, self.decay_time.name, self.description, self.id)
 
-    def __init__(self, name: str, keys: tp.Sequence[MidiDrumKey]):
+    @abstractmethod
+    def get_name(self):
+        """Returns the name of this drum mapping
+
+        :return: name of this drum mapping as a string
+        """
+
+        raise NotImplementedError
+
+    def get_keys(self) -> tp.Sequence[MidiDrumKey]:
+        """Returns an immutable sequence containing all keys
+
+        :return: an immutable sequence containing all the keys of this mapping as MidiDrumKey objects
+        """
+
+        raise NotImplementedError
+
+    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumKey, None]:
+        """Returns the MidiDrumKey with the given midi pitch
+
+        :param midi_pitch: midi pitch as an integer
+        :return: MidiDrumKey object with the given midi pitch or None if no key found with given pitch
+        """
+
+        try:
+            return next(key for key in self.get_keys() if key.midi_pitch == midi_pitch)
+        except StopIteration:
+            return None
+
+    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumKey, None]:
+        """Returns the MidiDrumKey with the given key id
+
+        :param key_id: key id of the midi drum key
+        :return: MidiDrumKey object with the given key id or None if no key found with given key id
+        """
+
+        try:
+            return next(key for key in self.get_keys() if key.id == key_id)
+        except StopIteration:
+            return None
+
+    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumKey, ...]:
+        """Returns the keys with the given frequency band
+
+        :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
+        :return: a tuple containing the MidiDrumKey objects with the given frequency band or an empty tuple if nothing
+                 found
+        """
+
+        return tuple(key for key in self.get_keys() if key.frequency_band == frequency_band)
+
+    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumKey, ...]:
+        """Returns the keys with the given decay time
+
+        :param decay_time: DecayTime enum object (SHORT, NORMAL or LONG)
+        :return: a tuple containing the MidiDrumKey objects with the given decay time or an empty tuple if nothing
+                 found
+        """
+
+        return tuple(key for key in self.get_keys() if key.decay_time == decay_time)
+
+    def __iter__(self) -> tp.Iterable[MidiDrumKey]:
+        """Returns an iterator over the MidiDrumKey objects within this mapping
+
+        :return: iterator yielding MidiDrumKey objects
+        """
+
+        return iter(self.get_keys())
+
+
+class MidiDrumMappingImpl(MidiDrumMapping):
+    """Midi drum mapping implementation
+
+    This class is an implementation of the MidiDrumMapping interface. It adds mapping state and implements all retrieval
+    functionality (get_key_by_midi_pitch, get_key_by_id, get_keys_with_frequency_band, get_keys_with_decay_time) with an
+    execution time of O(1).
+    """
+
+    def __init__(self, name: str, keys: tp.Sequence[MidiDrumMapping.MidiDrumKey]):
         self._name = str(name)
         keys = tuple(keys)
 
@@ -1628,59 +1707,104 @@ class MidiDrumMapping(object):
         self._keys_by_frequency_band = solidify(keys_by_frequency_band)
         self._keys_by_decay_time = solidify(keys_by_decay_time)
 
-    @property
-    def name(self):
-        """Name of this drum mapping (read-only)"""
+    # implements MidiDrumMapping.get_name
+    def get_name(self):
         return self._name
 
-    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumKey, None]:
-        """Returns the MidiDrumKey with the given midi pitch
-
-        :param midi_pitch: midi pitch as an integer
-        :return: MidiDrumKey object with the given midi pitch or None if no key found with given pitch
-        """
-
+    # implements MidiDrumMapping.get_key_by_midi_pitch with an execution time of O(1)
+    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumMapping.MidiDrumKey, None]:
         return self._keys_by_midi_key.get(midi_pitch, None)
 
-    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumKey, None]:
-        """Returns the MidiDrumKey with the given key id
-
-        :param key_id: key id of the midi drum key
-        :return: MidiDrumKey object with the given key id or None if no key found with given key id
-        """
-
+    # implements MidiDrumMapping.get_key_by_id with an execution time of O(1)
+    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumMapping.MidiDrumKey, None]:
         return self._keys_by_id.get(key_id, None)
 
-    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumKey, ...]:
-        """Returns the keys with the given frequency band
-
-        :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
-        :return: a tuple containing the MidiDrumKey objects with the given frequency band or an empty tuple if nothing
-                 found
-        """
-
+    # implements MidiDrumMapping.get_keys_with_frequency_band with an execution time of O(1)
+    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumMapping.MidiDrumKey, ...]:
         return self._keys_by_frequency_band.get(frequency_band, tuple())
 
-    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumKey, ...]:
-        """Returns the keys with the given decay time
-
-        :param decay_time: DecayTime enum object (SHORT, NORMAL or LONG)
-        :return: a tuple containing the MidiDrumKey objects with the given decay time or an empty tuple if nothing
-                 found
-        """
-
+    # implements MidiDrumMapping.get_keys_with_decay_time with an execution time of O(1)
+    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumMapping.MidiDrumKey, ...]:
         return self._keys_by_decay_time.get(decay_time, tuple())
 
-    def __iter__(self):
-        """Returns an iterator over the MidiDrumKey objects within this mapping
+    # implements MidiDrumMapping.get_keys with an execution time of O(1)
+    def get_keys(self) -> tp.Sequence[MidiDrumMapping.MidiDrumKey]:
+        return self._keys
 
-        :return: iterator yielding MidiDrumKey objects
+
+class MidiDrumMappingGroup(MidiDrumMapping):
+    def __init__(self, name: str, parent: MidiDrumMapping, midi_key_indices: tp.Sequence[int]):
+        """Creates a new midi drum mapping group
+
+        :param name: name of the midi drum mapping group
+        :param parent: midi drum mapping containing the midi drum keys that this group is a selection of
+        :param midi_key_indices: indices of the midi drum keys returned by parent.get_keys()
         """
 
-        return iter(self._keys)
+        self._name = str(name)
+        self._parent = parent
+        self._key_view = TupleView(parent.get_keys(), midi_key_indices)
+
+    def get_name(self) -> str:
+        return self._name
+
+    def get_keys(self) -> tp.Sequence[MidiDrumMapping.MidiDrumKey]:
+        return self._key_view
 
 
-GMDrumMapping = MidiDrumMapping("GMDrumMapping", [
+class MidiDrumMappingReducer(object, metaclass=ABCMeta):
+    def __init__(self, mapping: MidiDrumMapping):
+        group_indices = defaultdict(lambda: [])
+
+        for ix, key in enumerate(mapping):
+            group_name = self.get_group_name(key)
+            group_indices[group_name].append(ix)
+
+        self._groups = dict((name, MidiDrumMappingGroup(name, mapping, indices)) for name, indices in group_indices.items())
+
+    @staticmethod
+    @abstractmethod
+    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+        """Returns the name of the group, given the midi key
+
+        :param midi_key: midi drum key
+        :return: name of the group which the midi drum key belongs to
+        """
+
+        raise NotImplementedError
+
+    def get_group(self, name: str) -> MidiDrumMappingGroup:
+        """Returns the midi drum group with the given name
+
+        :param name: name of the drum group
+        :return: MidiDrumMappingGroup with the given name or None if no group found
+        """
+
+        return self._groups.get(name, None)
+
+
+@friendly_named_class("Frequency-band mapping reducer")
+class FrequencyBandMidiDrumMappingReducer(MidiDrumMappingReducer):
+    @staticmethod
+    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+        return midi_key.frequency_band.name
+
+
+@friendly_named_class("Decay-time mapping reducer")
+class DecayTimeMidiDrumMappingReducer(MidiDrumMappingReducer):
+    @staticmethod
+    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+        return midi_key.decay_time.name
+
+
+@friendly_named_class("Unique-property combination reducer")
+class UniquePropertyComboMidiDrumMappingReducer(MidiDrumMappingReducer):
+    @staticmethod
+    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+        return "%s.%s" % (midi_key.frequency_band.name, midi_key.decay_time.name)
+
+
+GMDrumMapping = MidiDrumMappingImpl("GMDrumMapping", [
     MidiDrumMapping.MidiDrumKey(35, FrequencyBand.LOW, DecayTime.NORMAL, "Acoustic bass drum", key_id="abd"),
     MidiDrumMapping.MidiDrumKey(36, FrequencyBand.LOW, DecayTime.NORMAL, "Bass drum", key_id="bd1"),
     MidiDrumMapping.MidiDrumKey(37, FrequencyBand.MID, DecayTime.SHORT, "Side stick", key_id="sst"),
@@ -1931,7 +2055,7 @@ class MidiRhythm(RhythmLoop):
         mapping = self._midi_mapping
         if mapping.get_key_by_id(track_name):
             return ""
-        return "No midi key found with id \"%s\" in %s" % (track_name, mapping.name)
+        return "No midi key found with id \"%s\" in %s" % (track_name, mapping.get_name())
 
     def load_midi_pattern(self, pattern: midi.Pattern, preserve_midi_duration: bool = False) -> None:
         """
@@ -1978,7 +2102,7 @@ class MidiRhythm(RhythmLoop):
                 midi_key = mapping.get_key_by_midi_pitch(midi_pitch)
                 if midi_key not in track_data:
                     if midi_key is None:
-                        print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.name))
+                        print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.get_name()))
                         continue
                     track_data[midi_key] = []
                 onset = (int(msg.tick), int(msg.get_velocity()))

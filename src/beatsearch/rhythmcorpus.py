@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 import pickle
 import typing as tp
@@ -188,8 +189,8 @@ class RhythmCorpus(object):
         with open(cache_fpath, "rb") as pickle_file:
             try:
                 unpickled_data = pickle.load(pickle_file)
-            except AttributeError as e:
-                print("Error loading midi root directory cache: %s" % e)
+            except (ValueError, TypeError) as e:
+                print("Error loading midi root directory cache: %s" % e, file=sys.stderr)
                 return False
 
         try:

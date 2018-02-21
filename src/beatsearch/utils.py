@@ -1,6 +1,7 @@
 # coding=utf-8
 import os
 import sys
+import collections
 import typing as tp
 from time import time
 from inspect import isclass
@@ -229,3 +230,44 @@ def get_midi_files_in_directory(directory):
             if os.path.splitext(f_name)[1] != ".mid":
                 continue
             yield os.path.join(directory, directory, f_name)
+
+
+class TupleView(collections.Sequence):
+    @staticmethod
+    def range_view(the_tuple, from_index, to_index):
+        """Creates a range tuple view
+
+        :param the_tuple: the tuple to create the view of
+        :param from_index: the starting index
+        :param to_index: the ending index (excluding)
+        :return: TupleView
+        """
+
+        assert to_index >= from_index
+        indices = range(from_index, to_index) if to_index > from_index else tuple()
+        return TupleView(the_tuple, indices)
+
+    def __init__(self, the_tuple, indices):
+        """Creates a view of the given tuple
+
+        :param the_tuple: the tuple to create the view of
+        :param indices: the indices of the tuple
+        """
+
+        indices = tuple(indices)
+
+        for ix in indices:
+            try:
+                the_tuple[ix]
+            except IndexError:
+                raise ValueError("invalid index: %i" % ix)
+
+        self._the_tuple = the_tuple
+        self._indices = indices
+
+    def __getitem__(self, index):
+        actual_index = self._indices[index]
+        return self._the_tuple[actual_index]
+
+    def __len__(self):
+        return len(self._indices)
