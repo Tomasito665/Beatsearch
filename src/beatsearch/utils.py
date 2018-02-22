@@ -271,3 +271,13 @@ class TupleView(collections.Sequence):
 
     def __len__(self):
         return len(self._indices)
+
+
+def most_common_element(sequence: tp.Sequence[tp.Any]) -> tp.Any:
+    """Returns the most common element in the given sequence
+
+    :param sequence: sequence
+    :return: None
+    """
+
+    return max(set(sequence), key=sequence.count)

@@ -29,7 +29,7 @@ class BSConfigSettingHandle(object):
         self.name = name        # type: str
         self.default_value = default_value  # type: tp.Any
 
-    def set(self, value: tp.Union[tp.Any, str]):
+    def set(self, value: tp.Union[tp.Any, str]) -> None:
         """Sets the value of this setting
 
         :param value: new value of the setting
@@ -38,6 +38,12 @@ class BSConfigSettingHandle(object):
         :raises StateError: if config_parser not set
         """
 
+        old_value = self.get()
+        self._do_set(value)
+        self._notify_bindings()
+        self._notify_listeners(old_value)
+
+    def _do_set(self, value: tp.Union[tp.Any, str]) -> None:
         parser = self._check_and_get_parser()
         section = self.section
 
@@ -57,11 +63,7 @@ class BSConfigSettingHandle(object):
         if not self._is_representable_as_string(value):
             raise RuntimeError("value \"%s\" is not representable as a string without information loss" % value)
 
-        old_value = self.get()
         parser[section][self.name] = self._to_str(value)
-
-        self._notify_bindings()
-        self._notify_listeners(old_value)
 
     def get(self) -> tp.Any:
         """Returns the value of this setting or the default if not set
@@ -76,8 +78,7 @@ class BSConfigSettingHandle(object):
             value_as_str = parser[self.section][self.name]
         except KeyError:
             # if not set, set it to the default value and return that
-            default_value_as_str = self._to_str(self.default_value)
-            self.set(default_value_as_str)
+            self._do_set(self.default_value)
             return self.default_value
 
         return self._to_type(value_as_str)

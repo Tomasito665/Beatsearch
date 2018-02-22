@@ -7,7 +7,7 @@ from io import IOBase
 from functools import wraps
 import typing as tp
 from collections import OrderedDict, namedtuple, defaultdict
-from beatsearch.utils import TupleView, friendly_named_class
+from beatsearch.utils import TupleView, friendly_named_class, most_common_element
 import math
 import numpy as np
 import midi
@@ -2031,6 +2031,7 @@ class MidiRhythm(RhythmLoop):
         self._midi_mapping = midi_mapping             # type: MidiDrumMapping
         self._midi_mapping_reducer = mapping_reducer  # type: tp.Union[MidiDrumMappingReducer, None]
         self._midi_metronome = -1                     # type: int
+        self._prototype_midi_pitches = dict()         # type: tp.Dict[str, int]
 
         # loads the tracks and sets the bpm, time signature, midi metronome and resolution
         if midi_pattern:
@@ -2057,8 +2058,7 @@ class MidiRhythm(RhythmLoop):
             return None
         return mapping_reducer.__class__
 
-    def as_midi_pattern(self, note_length: int = 0, midi_channel: int = 9,
-                        midi_format: int = 0) -> midi.Pattern:
+    def as_midi_pattern(self, note_length: int = 0, midi_channel: int = 9, midi_format: int = 0) -> midi.Pattern:
         """
         Converts this rhythm to a MIDI pattern.
 
@@ -2079,9 +2079,7 @@ class MidiRhythm(RhythmLoop):
 
         # add note events
         for track in self.get_track_iterator():
-            midi_note = self._midi_mapping.get_key_by_id(track.name)
-            assert midi_note is not None  # if track has invalid midi note id set_tracks would have failed
-            pitch = midi_note.midi_pitch
+            pitch = self._prototype_midi_pitches[track.name]
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]
@@ -2178,10 +2176,10 @@ class MidiRhythm(RhythmLoop):
         track = list(itertools.chain(*pattern))  # merge all tracks into one
         track = midi.Track(sorted(track, key=lambda event: event.tick))  # sort in chronological order
 
-        bpm = 0               # type: tp.Union[float]
-        track_data = defaultdict(lambda: [])  # type: tp.Dict[MidiDrumMapping.MidiDrumKey, tp.List[tp.Tuple[int, int], ...]]
-        ts_midi_event = None  # type: tp.Union[midi.TimeSignatureEvent, None]
-        eot_event = None      # type: tp.Union[midi.EndOfTrackEvent, None]
+        bpm = 0                                      # type: tp.Union[float]
+        midi_note_events = defaultdict(lambda: [])   # type: tp.Dict[str, tp.List[midi.NoteEvent]]
+        ts_midi_event = None                         # type: tp.Union[midi.TimeSignatureEvent, None]
+        eot_event = None                             # type: tp.Union[midi.EndOfTrackEvent, None]
 
         for msg in track:
             if isinstance(msg, midi.NoteOnEvent):
@@ -2190,9 +2188,8 @@ class MidiRhythm(RhythmLoop):
                 if mapping_key is None:
                     print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.get_name()))
                     continue
-                onset = (int(msg.tick), int(msg.get_velocity()))
                 track_name = get_track_name(mapping_key)
-                track_data[track_name].append(onset)
+                midi_note_events[track_name].append(msg)
             elif isinstance(msg, midi.TimeSignatureEvent):
                 if ts_midi_event is None:
                     ts_midi_event = msg
@@ -2210,12 +2207,18 @@ class MidiRhythm(RhythmLoop):
 
         time_signature = TimeSignature.from_midi_event(ts_midi_event)
         midi_metronome = ts_midi_event.get_metronome()  # type: int
-        create_tracks = lambda: (Track(onsets, t_name) for t_name, onsets in sorted(track_data.items()))
+        track_data = OrderedDict()  # type: tp.Dict[str, tp.Tuple[Track, int]]
+
+        for t_name, events in sorted(midi_note_events.items()):
+            most_common_midi_pitch = most_common_element(tuple(e.get_pitch() for e in events))
+            onsets = ((int(e.tick), int(e.get_velocity())) for e in events)
+            track_data[t_name] = Track(onsets, t_name), most_common_midi_pitch
 
         self._midi_metronome = midi_metronome
         self.set_time_signature(time_signature)
         self.set_bpm(bpm)
-        self.set_tracks(create_tracks(), pattern.resolution)
+        self.set_tracks((entry[0] for entry in track_data.values()), pattern.resolution)
+        self._prototype_midi_pitches = dict(tuple((t_name, entry[1]) for t_name, entry in track_data.items()))
 
         if preserve_midi_duration:
             self.set_duration_in_ticks(eot_event.tick)
