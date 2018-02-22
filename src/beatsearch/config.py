@@ -8,34 +8,37 @@ from beatsearch.rhythm import get_drum_mapping_reducer_implementation
 
 
 class BSConfigSettingHandle(object):
+    class StateError(Exception):
+        pass
+
     def __init__(self, section: str, name: str, default_value: tp.Any, to_type: tp.Callable,
                  to_str: tp.Callable = None, validate: tp.Callable = None):
 
         if validate and not callable(validate):
             raise TypeError("validate function should be callable")
 
-        self.config_parser = None
-        self._validate = validate
-        self._to_type = to_type
-        self._to_str = to_str or str
+        self.config_parser = None       # type: tp.Union[configparser.ConfigParser, None]
+        self._validate = validate       # type: tp.Callable[[tp.Any], bool]
+        self._to_type = to_type         # type: tp.Callable[[str], tp.Any]
+        self._to_str = to_str or str    # type: tp.Callable[[tp.Any], str]
+        self._default_value = None      # type: tp.Union[tp.Any, None]
+        self._listeners = []            # type: tp.List[tp.Callable[[tp.Any, tp.Any], tp.Any], ...]
+        self._binding_setters = []      # type: tp.List[tp.Callable[[tp.Any], tp.Any], ...]
 
-        self.section = section
-        self.name = name
-
-        if not self._is_representable_as_string(default_value):
-            raise ValueError("default value \"%s\" is not representable as a "
-                             "string without information loss" % default_value)
-
-        self.default_value = default_value
+        self.section = section  # type: str
+        self.name = name        # type: str
+        self.default_value = default_value  # type: tp.Any
 
     def set(self, value: tp.Union[tp.Any, str]):
         """Sets the value of this setting
 
         :param value: new value of the setting
         :return: None
+
+        :raises StateError: if config_parser not set
         """
 
-        parser = self.config_parser
+        parser = self._check_and_get_parser()
         section = self.section
 
         if isinstance(value, str):
@@ -54,15 +57,20 @@ class BSConfigSettingHandle(object):
         if not self._is_representable_as_string(value):
             raise RuntimeError("value \"%s\" is not representable as a string without information loss" % value)
 
+        old_value = self.get()
         parser[section][self.name] = self._to_str(value)
 
-    def get(self):
+        self._notify_bindings()
+        self._notify_listeners(old_value)
+
+    def get(self) -> tp.Any:
         """Returns the value of this setting or the default if not set
 
         :return: the value of this setting or the default if not set
+        :raises StateError: if config_parser not set
         """
 
-        parser = self.config_parser
+        parser = self._check_and_get_parser()
 
         try:
             value_as_str = parser[self.section][self.name]
@@ -74,10 +82,97 @@ class BSConfigSettingHandle(object):
 
         return self._to_type(value_as_str)
 
-    def _is_representable_as_string(self, value_original):
+    def add_binding(self, binding_setter: tp.Callable[[tp.Any], tp.Any]):
+        """Adds a binding to this setting
+
+        Bindings are variables that are bound to this setting. The given binding setter should be a callable receiving
+        the value of this setting as its single parameter. The binding setter will be called immediately immediately
+        after it's bound and later at every change through the set() method.
+
+        :param binding_setter: callable receiving the setting value as its single parameter
+        :return: None
+        """
+
+        if not callable(binding_setter):
+            raise TypeError
+
+        binding_setter(self.get())
+        self._binding_setters.append(binding_setter)
+
+    def remove_binding(self, binding_setter: tp.Callable[[tp.Any], tp.Any]) -> bool:
+        """Removes a binding
+
+        :param binding_setter: setter of binding to remove
+        :return: True if it was removed; False if it not added
+        """
+
+        try:
+            self._binding_setters.remove(binding_setter)
+        except ValueError:
+            return False
+
+        return True
+
+    def add_listener(self, callback: tp.Union[tp.Callable[[tp.Any], tp.Any]]) -> None:
+        """Adds a change listener to this setting
+
+        Adds a change listener to this setting. The listeners will be called immediately after the execution of set().
+
+        :param callback: callback receiving one or two parameters, consecutively the new value and the old value
+        :return: None
+        """
+
+        if not callable(callback):
+            raise TypeError
+        self._listeners.append(callback)
+
+    def remove_listener(self, callback: tp.Callable[[tp.Any], tp.Any]) -> bool:
+        """Removes the given change listener of this setting
+
+        :param callback: callback to remove
+        :return: True if it was removed; False if it was never added
+        """
+
+        try:
+            self._listeners.remove(callback)
+        except ValueError:
+            return False
+
+        return True
+
+    @property
+    def default_value(self) -> tp.Any:
+        """The default value of this setting returned by get() if this setting was not set yet"""
+        return self._default_value
+
+    @default_value.setter
+    def default_value(self, default_value: tp.Any):
+        if not self._is_representable_as_string(default_value):
+            raise ValueError("given default value \"%s\" is not representable as a "
+                             "string without information loss" % default_value)
+        self._default_value = default_value
+
+    def _notify_bindings(self) -> None:
+        value = self.get()
+        for binding_setter in self._binding_setters:
+            binding_setter(value)
+
+    def _notify_listeners(self, old_value: tp.Any) -> None:
+        new_value = self.get()
+        for callback in self._listeners:
+            callback(old_value, new_value)
+
+    def _is_representable_as_string(self, value_original: tp.Any) -> bool:
         value_as_str = self._to_str(value_original)
         value_converted_back = self._to_type(value_as_str)
         return value_original == value_converted_back
+
+    def _check_and_get_parser(self) -> configparser.ConfigParser:
+        # returns config parser and raises a StateError if not yet set
+        parser = self.config_parser
+        if not parser:
+            raise self.StateError("ConfigParser not set")
+        return parser
 
 
 class BSConfigSection(object):

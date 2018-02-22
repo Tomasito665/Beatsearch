@@ -27,10 +27,16 @@ from beatsearch.utils import (
     eat_args,
     color_variant,
 )
-from beatsearch.app.control import BSController, BSRhythmLoopLoader
+from beatsearch.app.control import BSController, BSMidiRhythmLoader
 from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGrid
-from beatsearch.rhythm import RhythmLoop, MidiRhythm, Rhythm, \
-    get_drum_mapping_reducer_implementation_friendly_names, get_drum_mapping_reducer_implementation
+from beatsearch.rhythm import (
+    RhythmLoop,
+    MidiRhythm,
+    Rhythm,
+    MidiDrumMappingReducer,
+    get_drum_mapping_reducer_implementation_friendly_names,
+    get_drum_mapping_reducer_implementation,
+)
 from beatsearch.config import BSConfig
 from beatsearch.rhythmcorpus import RhythmCorpus
 import midi  # after beatsearch imports!
@@ -62,7 +68,7 @@ class BSAppWindow(tk.Toplevel, BSAppWidgetMixin):
         BSAppWidgetMixin.__init__(self, app)
 
 
-class BSMidiRhythmLoopLoader(BSRhythmLoopLoader):
+class BSMidiFileRhythmLoader(BSMidiRhythmLoader):
     SOURCE_NAME = "MIDI file"
 
     def __init__(self):
@@ -75,17 +81,20 @@ class BSMidiRhythmLoopLoader(BSRhythmLoopLoader):
     def is_available(self):
         return True
 
-    def __load__(self, **kwargs):
+    def __load__(self, rhythm_resolution: int,
+                 mapping_reducer: tp.Optional[tp.Type[MidiDrumMappingReducer]]) -> MidiRhythm:
         fpath = filedialog.askopenfilename(
             title="Load rhythm from MIDI file",
             filetypes=(("MIDI files", "*.mid"), ("All files", "*"))
         )
         if not fpath:
+            # TODO Add mechanism to cancel the loading process without raising a LoadingError (extra "cancel" arg?)
             return None
         if not os.path.isfile(fpath):
             raise self.LoadingError("No such file: %s" % fpath)
         try:
-            rhythm = MidiRhythm(fpath)
+            rhythm = MidiRhythm(fpath, midi_mapping_reducer_cls=mapping_reducer)
+            rhythm.set_resolution(rhythm_resolution)
         except TypeError as e:
             fname = os.path.basename(fpath)
             raise self.LoadingError("Error loading\"%s\": %s" % (fname, str(e)))
@@ -1069,7 +1078,7 @@ class BSApp(tk.Tk, object):
 
         self.wm_title(BSApp.WINDOW_TITLE)
         self.config(bg=background)
-        self._midi_rhythm_loader_by_dialog = BSMidiRhythmLoopLoader()
+        self._midi_rhythm_loader_by_dialog = BSMidiFileRhythmLoader()
         self.controller = self._controller = controller
         self._menubar = type_check_and_instantiate_if_necessary(main_menu, BSMainMenu, allow_none=True, root=self)
         self.frames = OrderedDict()
@@ -1259,7 +1268,7 @@ class BSApp(tk.Tk, object):
         controller.set_target_rhythm(rhythm)
 
     @staticmethod
-    def _on_loading_error(loading_error: BSRhythmLoopLoader.LoadingError):
+    def _on_loading_error(loading_error: BSMidiRhythmLoader.LoadingError):
         messagebox.showerror(
             title="Rhythm loading error",
             message=str(loading_error)

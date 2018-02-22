@@ -15,8 +15,8 @@ from tempfile import TemporaryFile
 # noinspection PyUnresolvedReferences
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
-from beatsearch.app.control import BSController, BSRhythmPlayer, BSRhythmLoopLoader
-from beatsearch.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit
+from beatsearch.app.control import BSController, BSRhythmPlayer, BSMidiRhythmLoader
+from beatsearch.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit, MidiDrumMappingReducer
 from beatsearch.app.view import BSApp
 from beatsearch.utils import get_default_beatsearch_rhythms_fpath
 # noinspection PyUnresolvedReferences
@@ -27,7 +27,7 @@ ReaperApi = Reaper
 
 def main(input_track_name, output_track_name):
     player = ReaperRhythmPlayer()
-    rhythm_loader = ReaperRhythmLoopLoader()
+    rhythm_loader = ReaperMidiRhythmLoader()
 
     def find_reaper_thread_target():
         try:
@@ -176,7 +176,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         return fpath
 
 
-class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
+class ReaperMidiRhythmLoader(BSMidiRhythmLoader):
     SOURCE_NAME = "Reaper MIDI media item"
 
     def __init__(self, input_track=None):
@@ -190,7 +190,8 @@ class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
         return self._input_track is not None
 
     # noinspection PyUnboundLocalVariable
-    def __load__(self, **kwargs):
+    def __load__(self, rhythm_resolution: int,
+                 mapping_reducer: tp.Optional[tp.Type[MidiDrumMappingReducer]]) -> MidiRhythm:
         track = self._input_track
 
         with ReaperApi as api:
@@ -242,7 +243,10 @@ class ReaperRhythmLoopLoader(BSRhythmLoopLoader):
             resolution=midi_resolution
         )
 
-        return MidiRhythm(midi_pattern=midi_pattern, name=media_take_name)
+        rhythm = MidiRhythm(midi_pattern=midi_pattern, name=media_take_name, midi_mapping_reducer_cls=mapping_reducer)
+        rhythm.set_resolution(rhythm_resolution)
+
+        return rhythm
 
     @classmethod
     def get_source_name(cls):

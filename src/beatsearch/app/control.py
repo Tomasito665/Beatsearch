@@ -1,4 +1,5 @@
 import os
+from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import wraps
 import typing as tp
@@ -7,8 +8,10 @@ import threading
 from sortedcollections import OrderedSet
 from beatsearch.rhythm import (
     RhythmLoop,
+    MidiRhythm,
     PolyphonicRhythmImpl,
-    create_rumba_rhythm
+    create_rumba_rhythm,
+    MidiDrumMappingReducer
 )
 from beatsearch.metrics import (
     MonophonicRhythmDistanceMeasure,
@@ -18,7 +21,7 @@ from beatsearch.metrics import (
 )
 from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.config import BSConfig
-from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, get_beatsearch_dir
+from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
 
 
 class BSRhythmPlayer(object):
@@ -84,46 +87,91 @@ class BSFakeRhythmPlayer(BSRhythmPlayer):
         return self._repeat
 
 
-class BSRhythmLoopLoader(object):
+class BSMidiRhythmLoader(object, metaclass=ABCMeta):
+    """MIDI rhythm loader base class"""
+
     def __init__(self):
-        self._on_loading_error = no_callback
+        self._on_loading_error = no_callback  # type: tp.Callable[[BSMidiRhythmLoader.LoadingError], tp.Any]
+        self.midi_mapping_reducer = None      # type: tp.Union[[tp.Type[MidiDrumMappingReducer], None]
+        self.rhythm_resolution = 0            # type: int
 
     class LoadingError(Exception):
+        """Exception raised in  __load__"""
         pass
 
-    def load(self, **kwargs):  # type: (tp.Any) -> tp.Union[None, RhythmLoop]
+    def load(self) -> tp.Union[MidiRhythm, None]:
+        """Loads and returns the midi rhythm
+
+        :return: MidiRhythm object or None
+        :raises LoadingError: if no on_loading_error callback is set
+        """
+
         if not self.is_available():
             return None
+
+        resolution = self.rhythm_resolution
+        mapping_reducer = self.midi_mapping_reducer
+
         try:
-            return self.__load__(**kwargs)
+            rhythm = self.__load__(resolution, mapping_reducer)
         except self.LoadingError as e:
             if self.on_loading_error is no_callback:
                 raise e
             self.on_loading_error(e)
             return None
 
-    def is_available(self):  # type: () -> bool
+        assert rhythm.resolution == resolution, "__load__ ignored the requested resolution of %i" % resolution
+        assert rhythm.midi_mapping_reducer is mapping_reducer, \
+            "__load__ ignored the requested mapping reducer \"%s\"" % str(mapping_reducer)
+
+        return rhythm
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Returns whether this loader is available
+
+        :return: True if this loader is available and ready to use; False otherwise
+        """
+
         raise NotImplementedError
 
-    def __load__(self, **kwargs):  # type: (tp.Any) -> RhythmLoop
+    @abstractmethod
+    def __load__(self, rhythm_resolution: int,
+                 mapping_reducer: tp.Optional[tp.Type[MidiDrumMappingReducer]]) -> MidiRhythm:
+        """Loads and returns a midi rhythm
+
+        :param rhythm_resolution: resolution of the rhythm to load
+        :param mapping_reducer: MIDI drum mapping reducer of the rhythm to load
+        :return: rhythm with given resolution and mapping reducer
+        :raises LoadingError: if something went wrong while loading
+        """
+
         raise NotImplementedError
 
     @classmethod
-    def get_source_name(cls):
+    @abstractmethod
+    def get_source_name(cls) -> str:
+        """Returns the name of this source, which will be used in the view as a label"""
         raise NotImplementedError
 
     @property
-    def on_loading_error(self):
+    def on_loading_error(self) -> tp.Union[tp.Callable[[LoadingError], tp.Any]]:
+        """Callback receiving a LoadingError parameter
+
+        This callback will be called from load() if a LoadingError was raised in that method. If this property is not
+        set, the LoadingError will be raised (otherwise this method will be called and the exception won't be raisen).
+        """
+
         return self._on_loading_error
 
     @on_loading_error.setter
-    def on_loading_error(self, callback):
+    def on_loading_error(self, callback: tp.Union[tp.Callable[[LoadingError], tp.Any]]):
         if not callable(callback):
             raise TypeError("Expected callable but got \"%s\"" % callback)
         self._on_loading_error = callback
 
 
-class BSSelectedRhythmLoopLoader(BSRhythmLoopLoader):
+class BSSelectedMidiRhythmLoader(BSMidiRhythmLoader):
     SOURCE_NAME = "selected rhythm"
 
     def __init__(self, controller):  # type: (BSController) -> None
@@ -131,19 +179,22 @@ class BSSelectedRhythmLoopLoader(BSRhythmLoopLoader):
         self.controller = controller
 
     @classmethod
-    def get_source_name(cls):
+    def get_source_name(cls) -> str:
         return cls.SOURCE_NAME
 
-    def is_available(self):
+    def is_available(self) -> bool:
         controller = self.controller
         rhythm_selection = controller.get_rhythm_selection()
         return len(rhythm_selection) >= 1
 
-    def __load__(self, **kwargs):
+    def __load__(self, rhythm_resolution: int,
+                 mapping_reducer: tp.Optional[tp.Type[MidiDrumMappingReducer]]) -> MidiRhythm:
         controller = self.controller
         rhythm_selection = controller.get_rhythm_selection()
         rhythm_ix = rhythm_selection[0]
         rhythm = controller.get_rhythm_by_index(rhythm_ix)
+        assert rhythm.resolution == rhythm_resolution
+        assert rhythm.midi_mapping_reducer is mapping_reducer
         return rhythm
 
 
@@ -209,7 +260,7 @@ class BSController(object):
         self.set_rhythm_player(rhythm_player)
         self.set_distance_measure(distance_measure)
         # automatically register a loader for the currently selected rhythm
-        self.register_rhythm_loader(BSSelectedRhythmLoopLoader(self))
+        self.register_rhythm_loader(BSSelectedMidiRhythmLoader(self))
         # if a midi root directory is set, load the corpus
         if self.get_config().midi_root_directory.get():
             self.load_corpus()
@@ -559,7 +610,7 @@ class BSController(object):
 
         return tuple(self._rhythm_selection)
 
-    def register_rhythm_loader(self, loader: BSRhythmLoopLoader):
+    def register_rhythm_loader(self, loader: BSMidiRhythmLoader) -> None:
         """
         Register a new rhythm loader.
 
@@ -570,13 +621,18 @@ class BSController(object):
         loader_class = loader.__class__
         if loader_class in self._rhythm_loaders:
             raise ValueError("Already registered a rhythm loader for loader type: \"%s\"" % loader_class)
+
+        config = self._config
+        config.mapping_reducer.add_binding(lambda reducer: setattr(loader, "midi_mapping_reducer", reducer))
+        config.rhythm_resolution.add_binding(lambda res: setattr(loader, "rhythm_resolution", res))
+
         self._rhythm_loaders[loader.__class__] = loader
         self._dispatch(self.RHYTHM_LOADER_REGISTERED, loader)
 
     def get_rhythm_loader_source_names(self):
         """
         Returns a tuple with the rhythm source names of the currently registered rhythm loaders. See the
-        BSRhythmLoopLoader.source_name property.
+        BSMidiRhythmLoader.source_name property.
 
         :return: tuple containing the source names of the currently registered rhythm loaders
         """
@@ -592,7 +648,7 @@ class BSController(object):
 
         return len(self._rhythm_loaders)
 
-    def get_rhythm_loader_iterator(self) -> (tp.Iterator[tp.Tuple[tp.Type[BSRhythmLoopLoader], BSRhythmLoopLoader]]):
+    def get_rhythm_loader_iterator(self) -> (tp.Iterator[tp.Tuple[tp.Type[BSMidiRhythmLoader], BSMidiRhythmLoader]]):
         """
         Returns an iterator over the currently registered rhythm loaders.
 
@@ -601,7 +657,7 @@ class BSController(object):
 
         return iter(self._rhythm_loaders.items())
 
-    def get_rhythm_loader(self, loader_type: tp.Type[BSRhythmLoopLoader]):  # type: (str) -> BSRhythmLoopLoader
+    def get_rhythm_loader(self, loader_type: tp.Type[BSMidiRhythmLoader]):  # type: (str) -> BSMidiRhythmLoader
         """
         Returns the rhythm loader, given the loader type.
 

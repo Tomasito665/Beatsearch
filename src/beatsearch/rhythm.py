@@ -2008,6 +2008,7 @@ class MidiRhythm(RhythmLoop):
                  midi_mapping_reducer_cls: tp.Optional[tp.Type[MidiDrumMappingReducer]] = None,
                  name: str = "", preserve_midi_duration: bool = False, **kwargs):
         super().__init__(**kwargs)
+        # TODO resolution and other post_init props are not set.... call post_init from here?
 
         if all(a for a in [midi_file, midi_pattern]):
             raise Exception("Given both midi file and midi pattern. Please provide one max one.")
@@ -2037,7 +2038,24 @@ class MidiRhythm(RhythmLoop):
 
     @property
     def midi_mapping(self):
+        """The midi mapping.
+
+        The MIDI mapping is used when parsing the MIDI data to create the track names. This is a read-only property.
+        """
         return self._midi_mapping
+
+    @property
+    def midi_mapping_reducer(self):
+        """The mapping reducer class.
+
+        The MIDI drum mapping reducer class is the class of the mapping reducer used to parse the MIDI data and create
+        the tracks of this rhythm. This is a read-only property.
+        """
+
+        mapping_reducer = self._midi_mapping_reducer
+        if not mapping_reducer:
+            return None
+        return mapping_reducer.__class__
 
     def as_midi_pattern(self, note_length: int = 0, midi_channel: int = 9,
                         midi_format: int = 0) -> midi.Pattern:
