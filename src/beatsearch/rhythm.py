@@ -2058,13 +2058,16 @@ class MidiRhythm(RhythmLoop):
             return None
         return mapping_reducer.__class__
 
-    def as_midi_pattern(self, note_length: int = 0, midi_channel: int = 9, midi_format: int = 0) -> midi.Pattern:
+    def as_midi_pattern(self, note_length: int = 0,
+                        midi_channel: int = 9, midi_format: int = 0,
+                        midi_keys: tp.Optional[tp.Dict[str, int]] = None) -> midi.Pattern:
         """
         Converts this rhythm to a MIDI pattern.
 
         :param note_length: note duration in ticks
         :param midi_channel: NoteOn/NoteOff events channel (defaults to 9, which is the default for drum sounds)
         :param midi_format: midi format
+        :param midi_keys: optional, dictionary holding the MIDI keys per track name
         :return: MIDI pattern
         """
 
@@ -2077,9 +2080,11 @@ class MidiRhythm(RhythmLoop):
         if self.bpm:
             midi_track.append(midi.SetTempoEvent(bpm=self.bpm))  # tempo
 
+        midi_keys = midi_keys or self._prototype_midi_pitches
+
         # add note events
         for track in self.get_track_iterator():
-            pitch = self._prototype_midi_pitches[track.name]
+            pitch = midi_keys[track.name]
             onsets = track.onsets
             for onset in onsets:
                 note_abs_tick = onset[0]

@@ -1273,7 +1273,7 @@ class TestMidiRhythm(TestRhythmLoop):
         rhythm.get_bpm.return_value = bpm
         rhythm.get_name.return_value = "Jorge"
 
-        midi_pattern = rhythm.as_midi_pattern(note_length=0)
+        midi_pattern = rhythm.as_midi_pattern(note_length=0, midi_keys={'kck': kick, 'snr': snare})
 
         self.assertEqual(midi_pattern.resolution, resolution)
         self.assertEqual(len(midi_pattern), 1)
