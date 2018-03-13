@@ -528,7 +528,7 @@ class BSController(object):
             return False
 
         track_distance_measure = self._rhythm_measure.monophonic_measure
-        track_distance_measure.internal_unit = unit
+        track_distance_measure.unit = unit
         track_distance_measure.quantize_enabled = True
         self._distances_to_target_rhythm_are_stale = True
         return True

@@ -15,7 +15,7 @@ from beatsearch.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
 from beatsearch.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
 
 # misc
-from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping, MonophonicRhythmRepresentationsMixin
+from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping
 import midi
 
 
@@ -473,102 +473,6 @@ def mock_onset(tick=0, velocity=0):
     return onset_mock
 
 
-class TestMonophonicRhythmImplementationsMixin(TestCase):
-
-    class MockedMonophonicRhythmWithRhythmRepresentationsMixin(MonophonicRhythmRepresentationsMixin,
-                                                               FakeRhythmBaseImplementation,
-                                                               RhythmMockedGetters):
-        def __init__(self):
-            super().__init__()
-            FakeRhythmBaseImplementation.__init__(self)
-            RhythmMockedGetters.__init__(self)
-            self.get_onsets = MagicMock()
-
-        def get_onsets(self) -> tp.Tuple[Onset, ...]: pass
-
-        def set_onsets(self, onsets: tp.Union[tp.Iterable[Onset], tp.Iterable[tp.Tuple[int, int]]]): pass
-
-    @classmethod
-    def _get_rhythm_mock_with_23_rumba_clave_onsets(cls, resolution):
-        rhythm_mock = cls.MockedMonophonicRhythmWithRhythmRepresentationsMixin()
-        assert resolution >= 4, "the 2/3 claves pattern is is not representable with a resolution smaller than 4"
-
-        onset_positions = (
-            int(resolution / 4.0 * 0),
-            int(resolution / 4.0 * 3),
-            int(resolution / 4.0 * 7),
-            int(resolution / 4.0 * 10),
-            int(resolution / 4.0 * 12)
-        )
-
-        mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
-
-        rhythm_mock.get_resolution.return_value = resolution
-        rhythm_mock.get_onsets.return_value = mocked_onsets
-        rhythm_mock.get_duration_in_ticks.return_value = int(resolution * 4)
-
-        return rhythm_mock
-
-    def test_binary(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_binary_ticks = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
-        actual_binary_ticks = rhythm.get_binary(unit="ticks")
-        self.assertEqual(actual_binary_ticks, expected_binary_ticks)
-
-    def test_pre_note_inter_onset_intervals(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_ioi_chain = [0, 3, 4, 3, 2]
-        actual_ioi_chain = rhythm.get_pre_note_inter_onset_intervals(unit="ticks")
-        self.assertEqual(actual_ioi_chain, expected_ioi_chain)
-
-    def test_post_note_inter_onset_intervals(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_ioi_chain = [3, 4, 3, 2, 4]
-        actual_ioi_chain = rhythm.get_post_note_inter_onset_intervals(unit="ticks")
-        self.assertEqual(actual_ioi_chain, expected_ioi_chain)
-
-    def test_interval_histogram(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_histogram = (
-            [1, 2, 2],  # occurrences
-            [2, 3, 4]   # intervals
-        )
-        actual_histogram = rhythm.get_interval_histogram(unit="ticks")
-        self.assertEqual(actual_histogram, expected_histogram)
-
-    def test_schillinger_chain(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_chain = [1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1]
-        actual_chain = rhythm.get_binary_schillinger_chain(unit="ticks", values=(1, 0))
-        self.assertEqual(actual_chain, expected_chain)
-
-    def test_chronotonic_chain(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_chain = [3, 3, 3, 4, 4, 4, 4, 3, 3, 3, 2, 2, 4, 4, 4, 4]
-        actual_chain = rhythm.get_chronotonic_chain(unit="ticks")
-        self.assertEqual(actual_chain, expected_chain)
-
-    def test_interval_difference_vector(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_vector_non_cyclic = [4 / 3, 3 / 4, 2 / 3, 4 / 2]
-        expected_vector_cyclic = expected_vector_non_cyclic + [3 / 4]
-
-        actual_vector_cyclic = rhythm.get_interval_difference_vector(cyclic=True, unit="ticks")
-        actual_vector_non_cyclic = rhythm.get_interval_difference_vector(cyclic=False, unit="ticks")
-
-        with self.subTest(cyclic=True):
-            self.assertEqual(actual_vector_cyclic, expected_vector_cyclic)
-
-        with self.subTest(cyclic=False):
-            self.assertEqual(actual_vector_non_cyclic, expected_vector_non_cyclic)
-
-    def test_onset_times(self):
-        rhythm = self._get_rhythm_mock_with_23_rumba_clave_onsets(4)
-        expected_onset_times = [0, 3, 7, 10, 12]
-        actual_onset_times = rhythm.get_onset_times(unit="ticks")
-        self.assertEqual(actual_onset_times, expected_onset_times)
-
-
 class TestMonophonicRhythmImpl(TestRhythmBase):
     class MonophonicRhythmMockedSettersMixin(MonophonicRhythm, RhythmMockedSetters, metaclass=ABCMeta):
         def __init__(self):
@@ -593,16 +497,6 @@ class TestMonophonicRhythmImpl(TestRhythmBase):
     @classmethod
     def get_mocked_getters_mixin(cls):
         return cls.MonophonicRhythmMockedGettersMixin
-
-    ######################################################################
-    # inherits the rhythm representations from the representations mixin #
-    ######################################################################
-
-    @inject_rhythm.type
-    def test_inherits_methods_from_monophonic_rhythm_representations_mixin(self, rhythm_class):
-        self.assertTrue(issubclass(rhythm_class, MonophonicRhythmRepresentationsMixin),
-                        "all rhythm implementations should extend the "
-                        "MonophonicRhythmRepresentationsMixin but %s doesn't" % str(rhythm_class))
 
     ###################################
     # onsets prop <-> getters/setters #

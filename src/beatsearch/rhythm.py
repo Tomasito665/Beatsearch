@@ -270,21 +270,27 @@ class Rhythm(object, metaclass=ABCMeta):
         def needs_resolution(cls, f):
             @wraps(f)
             def wrapper(rhythm, *args, **kwargs):
-                if rhythm.get_resolution() == 0:
-                    raise cls.ResolutionNotSet
+                cls.check_resolution(rhythm)
                 return f(rhythm, *args, **kwargs)
-
             return wrapper
 
         @classmethod
         def needs_time_signature(cls, f):
             @wraps(f)
             def wrapper(rhythm, *args, **kwargs):
-                if not rhythm.get_time_signature():
-                    raise cls.TimeSignatureNotSet
+                cls.check_time_signature(rhythm)
                 return f(rhythm, *args, **kwargs)
-
             return wrapper
+
+        @classmethod
+        def check_resolution(cls, rhythm):
+            if rhythm.get_resolution() == 0:
+                raise cls.ResolutionNotSet
+
+        @classmethod
+        def check_time_signature(cls, rhythm):
+            if not rhythm.get_time_signature():
+                raise cls.TimeSignatureNotSet
 
     @abstractmethod
     def get_resolution(self) -> int:
@@ -783,213 +789,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         return len(self.onsets)
 
 
-class MonophonicRhythmRepresentationsMixin(MonophonicRhythm, metaclass=ABCMeta):
-
-    #####################################
-    # Monophonic rhythm representations #
-    #####################################
-
-    @Rhythm.Precondition.needs_resolution
-    @concretize_unit()
-    def get_binary(self, unit="eighths"):
-        """
-        Returns the binary representation of the note onsets of this rhythm where each step where a note onset
-        happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
-        quarter note) of the binary vector.
-
-        :param unit:
-        :return: the binary representation of the note onsets of the given pitch
-        """
-
-        resolution = self.get_resolution()
-        duration = self.get_duration(unit)
-        binary_string = [0] * int(math.ceil(duration))
-
-        for onset in self.onsets:
-            pulse = convert_time(onset.tick, resolution, unit, quantize=True)
-            try:
-                binary_string[pulse] = 1
-            except IndexError:
-                pass  # when quantization pushes note after end of rhythm
-
-        return binary_string
-
-    @Rhythm.Precondition.needs_resolution
-    @concretize_unit()
-    def get_pre_note_inter_onset_intervals(self, unit="ticks"):
-        """
-        Returns the time difference between the current note and the previous note for all notes of this rhythm in
-        eighths. The first note will return the time difference with the start of the rhythm.
-
-        For example, given the Rumba Clave rhythm:
-          X--X---X--X-X---
-          0  3   4  3 2
-
-        :return: pre note inter-onset interval vector
-        """
-
-        resolution = self.get_resolution()
-        current_tick = 0
-        intervals = []
-
-        for onset in self.onsets:
-            delta_tick = onset.tick - current_tick
-            intervals.append(convert_time(delta_tick, resolution, unit))
-            current_tick = onset.tick
-
-        return intervals
-
-    @Rhythm.Precondition.needs_resolution
-    @concretize_unit()  # TODO Add cyclic option to include the offset in the last onset's interval
-    def get_post_note_inter_onset_intervals(self, unit="ticks", quantize=False):
-        """
-        Returns the time difference between the current note and the next note for all notes in this rhythm in eighths.
-        The last note will return the time difference with the end (duration) of the rhythm.
-
-        For example, given the Rumba Clave rhythm:
-          X--X---X--X-X---
-          3  4   3  2 4
-
-        :return: post note inter-onset interval vector
-        """
-
-        intervals = []
-        onset_positions = itertools.chain((onset.tick for onset in self.onsets), [self.duration_in_ticks])
-        last_onset_tick = -1
-
-        for onset_tick in onset_positions:
-            if last_onset_tick < 0:
-                last_onset_tick = onset_tick
-                continue
-
-            delta_in_ticks = onset_tick - last_onset_tick
-            delta_in_units = convert_time(delta_in_ticks, self.get_resolution(), unit, quantize=quantize)
-
-            intervals.append(delta_in_units)
-            last_onset_tick = onset_tick
-
-        return intervals
-
-    def get_interval_histogram(self, unit="eighths"):
-        """
-        Returns the number of occurrences of all the inter-onset intervals from the smallest to the biggest
-        interval. The inter onset intervals are retrieved with get_post_note_inter_onset_intervals().
-
-        For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]:
-            (
-                [1, 2, 2],  # occurrences
-                [2, 3, 4]   # bins (interval durations)
-            )
-
-
-        :return: an (occurrences, bins) tuple
-        """
-
-        intervals = self.get_post_note_inter_onset_intervals(unit, quantize=True)
-        histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
-        occurrences = histogram[0].tolist()
-        bins = histogram[1].tolist()[:-1]
-        return occurrences, bins
-
-    def get_binary_schillinger_chain(self, unit='ticks', values=(1, 0)):
-        """
-        Returns the Schillinger notation of this rhythm where each onset is a change of a "binary note".
-
-        For example, given the Rumba Clave rhythm and with values (0, 1):
-          X--X---X--X-X---
-          0001111000110000
-
-        However, when given the values (1, 0), the schillinger chain will be the opposite:
-          X--X---X--X-X---
-          1110000111001111
-
-        :param unit: the unit to quantize on ('ticks' is no quantization)
-        :param values: binary vector to be used in the schillinger chain. E.g. when given ('a', 'b'), the returned
-                       schillinger chain will consist of 'a' and 'b'.
-        :return: Schillinger rhythm vector as a list
-        """
-
-        chain, i = self.get_binary(unit), 0
-        value_i = 1
-        while i < len(chain):
-            if chain[i] == 1:
-                value_i = 1 - value_i
-            chain[i] = values[value_i]
-            i += 1
-        return chain
-
-    def get_chronotonic_chain(self, unit="ticks"):
-        """
-        Returns the chronotonic chain representation of this rhythm.
-
-        For example, given the Rumba Clave rhythm:
-          X--X---X--X-X---
-          3334444333224444
-
-        :param unit: unit
-        :return: the chronotonic chain as a list
-        """
-
-        chain, i, delta = self.get_binary(unit), 0, 0
-        while i < len(chain):
-            if chain[i] == 1:
-                j = i + 1
-                while j < len(chain) and chain[j] == 0:
-                    j += 1
-                delta = j - i
-            chain[i] = delta
-            i += 1
-        return chain
-
-    def get_interval_difference_vector(self, cyclic=True, unit="ticks", quantize=False):
-        """
-        Returns the interval difference vector (aka difference of rhythm vector). For each
-        note, this is the difference between the current onset interval and the next onset
-        interval. So, if N is the number of onsets, the returned vector will have a length
-        of N - 1. This is different with cyclic rhythms, where the last onset's interval is
-        compared with the first onset's interval. In this case, the length will be N.
-
-        For example, given the post-note inter-onset interval vector for the Rumba clave:
-          [3, 4, 3, 2, 4]
-
-        The interval difference vector would be:
-           With cyclic set to False: [4/3, 3/4, 2/3, 4/2]
-           With cyclic set to True:  [4/3, 3/4, 2/3, 4/2, 3/4]
-
-        :param cyclic: whether or not to treat this rhythm as a cyclic rhythm or not
-        :param unit: time unit
-        :param quantize: whether or not the inter onset interval vector should be quantized
-        :return: interval difference vector
-        """
-
-        vector = self.get_post_note_inter_onset_intervals(unit, quantize)
-        if cyclic:
-            vector.append(vector[0])
-        i = 0
-        while i < len(vector) - 1:
-            try:
-                vector[i] = vector[i + 1] / float(vector[i])
-            except ZeroDivisionError:
-                vector[i] = float('inf')
-            i += 1
-        vector.pop()
-        return vector
-
-    @Rhythm.Precondition.needs_resolution
-    @concretize_unit()
-    def get_onset_times(self, unit="ticks", quantize=False):
-        """
-        Returns the absolute onset times of the notes in this rhythm.
-
-        :param unit: the unit of the onset times
-        :param quantize: whether or not the onset times must be quantized to the given unit
-        :return: a list with the onset times of this rhythm
-        """
-
-        return [convert_time(onset[0], self.get_resolution(), unit, quantize) for onset in self.onsets]
-
-
-class MonophonicRhythmBase(MonophonicRhythmRepresentationsMixin, MonophonicRhythm, metaclass=ABCMeta):
+class MonophonicRhythmBase(MonophonicRhythm, metaclass=ABCMeta):
     """Monophonic rhythm base class implementing MonophonicRhythm
 
     Abstract base class for monophonic rhythms. This class implements MonophonicRhythm.get_onsets, adding onset state
