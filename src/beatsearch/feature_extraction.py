@@ -148,7 +148,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor):
         POST_NOTE = enum.auto()
 
     # noinspection PyShadowingBuiltins
-    def __init__(self, unit="ticks", mode: Mode = Mode.POST_NOTE, quantize=True):
+    def __init__(self, unit="eighths", mode: Mode = Mode.POST_NOTE, quantize=True):
         super().__init__(unit)
         self._mode = None
         self.quantize = quantize
@@ -232,7 +232,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor):
 
 
 class IOIHistogram(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="ticks"):
+    def __init__(self, unit="eighths"):
         self._ioi_vector_extractor = IOIVector(unit, mode=IOIVector.Mode.POST_NOTE)
         self._ioi_vector_extractor.quantize = True
         super().__init__(unit)  # NOTE: super constructor must be called after self._ioi_vector_extractor definition
@@ -267,7 +267,7 @@ class IOIHistogram(MonophonicRhythmFeatureExtractor):
 
 
 class BinarySchillingerChain(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="ticks", values=(1, 0)):
+    def __init__(self, unit="eighths", values=(1, 0)):
         self._values = None
         self._binary_vector_extractor = BinaryOnsetVector(unit)
         self.values = values
@@ -321,7 +321,7 @@ class BinarySchillingerChain(MonophonicRhythmFeatureExtractor):
 
 
 class ChronotonicChain(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="ticks"):
+    def __init__(self, unit="eighths"):
         super().__init__(unit)
         self._binary_vector_extractor = BinaryOnsetVector(unit)
 
@@ -356,7 +356,7 @@ class ChronotonicChain(MonophonicRhythmFeatureExtractor):
 
 
 class IOIDifferenceVector(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="ticks", quantize=True, cyclic=True):
+    def __init__(self, unit="eighths", quantize=True, cyclic=True):
         self._ioi_vector_extractor = IOIVector(unit, mode=IOIVector.Mode.POST_NOTE, quantize=quantize)
         super().__init__(unit)  # super constructor must be called after self._ioi_vector_extractor definition
         self._cyclic = None
@@ -427,7 +427,7 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractor):
 
 
 class OnsetPositionVector(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="ticks", quantize=True):
+    def __init__(self, unit="eighths", quantize=True):
         super().__init__(unit)
         self.quantize = quantize
 
@@ -444,3 +444,56 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor):
         quantize = self.quantize
         return [convert_time(onset[0], resolution, unit, quantize) for onset in rhythm.get_onsets()]
 
+
+class SyncopationVector(MonophonicRhythmFeatureExtractor):
+    def __init__(self, unit="eighths"):
+        self._binary_vector_extractor = BinaryOnsetVector(unit)
+        super().__init__(unit)  # super constructor must be called after self._binary_vector_extractor definition
+
+    def set_unit(self, unit: str):
+        if unit == "ticks":
+            raise ValueError("SyncopationVector only supports musical units, not ticks")
+        super().set_unit(unit)
+        self._binary_vector_extractor.set_unit(unit)
+
+    def __process__(self, rhythm: MonophonicRhythm, unit: tp.Union[int, str]):
+        """
+        Extracts the syncopations from the given monophonic rhythm. The syncopations are computed with the method
+        proposed by H.C. Longuet-Higgins and C. S. Lee in their work titled: "The Rhythmic Interpretation of
+        Monophonic Music".
+
+        The syncopations are returned as a two-dimensional tuple. If the given rhythm contains N syncopations, the
+        returned tuple will have a length of N. Each element of the returned tuple contains two elements:
+            - the position of the syncopation in the binary onset vector of the rhythm
+            - the syncopation strength
+
+        :param rhythm: rhythm to extract the syncopations from
+        :param unit: time unit
+        :return: a two-dimensional tuple containing the onset positions in the first dimension and the syncopation
+                 strengths in the second dimension
+        """
+
+        Rhythm.Precondition.check_time_signature(rhythm)
+
+        assert self._binary_vector_extractor.unit == self.unit
+        binary_vector = self._binary_vector_extractor.process(rhythm)
+        time_signature = rhythm.get_time_signature()
+        metrical_weights = time_signature.get_metrical_weights(unit)
+
+        def get_syncopations():
+            for step, curr_step_is_onset in enumerate(binary_vector):
+                next_step = (step + 1) % len(binary_vector)
+                next_step_is_onset = binary_vector[next_step]
+
+                # iterate only over note-rest pairs
+                if not curr_step_is_onset or next_step_is_onset:
+                    continue
+
+                note_weight = metrical_weights[step]
+                rest_weight = metrical_weights[next_step]
+
+                if note_weight <= rest_weight:
+                    syncopation_strength = rest_weight - note_weight
+                    yield step, syncopation_strength
+
+        return tuple(get_syncopations())

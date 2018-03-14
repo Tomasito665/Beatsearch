@@ -199,6 +199,8 @@ class TestOnsetPositionVector(TestMonophonicRhythmFeatureExtractorImplementation
         self.assertEqual(actual_vector, expected_vector)
 
 
+# TODO Add test for SyncopationVector
+
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):
         self.assertRaises(Exception, PolyphonicRhythmFeatureExtractor)

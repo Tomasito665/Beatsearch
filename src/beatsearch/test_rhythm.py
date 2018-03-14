@@ -1256,5 +1256,8 @@ class TestOnset(TestCase):
         self.assertEqual(onset.tick, 5)     # 3 * 1.6 = 4.8
 
 
+# TODO Add tests for TimeSignature
+
+
 if __name__ == "__main__":
     main()
