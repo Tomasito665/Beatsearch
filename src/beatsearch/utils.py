@@ -5,7 +5,7 @@ import collections
 import typing as tp
 from time import time
 from inspect import isclass
-from functools import wraps
+from functools import wraps, reduce
 from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
 
 
@@ -281,3 +281,13 @@ def most_common_element(sequence: tp.Sequence[tp.Any]) -> tp.Any:
     """
 
     return max(set(sequence), key=sequence.count)
+
+
+def sequence_product(iterable):
+    """Returns the product of the given iterable
+
+    :param iterable: iterable to return the product of
+    :return: product of given iterable
+    """
+
+    return reduce((lambda x, y: x * y), iterable)

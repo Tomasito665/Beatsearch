@@ -1,3 +1,4 @@
+# coding=utf-8
 import os
 import enum
 import inspect
@@ -7,7 +8,7 @@ from io import IOBase
 from functools import wraps
 import typing as tp
 from collections import OrderedDict, namedtuple, defaultdict
-from beatsearch.utils import TupleView, friendly_named_class, most_common_element
+from beatsearch.utils import TupleView, friendly_named_class, most_common_element, sequence_product
 import math
 import numpy as np
 import midi
@@ -232,6 +233,92 @@ class TimeSignature(object):
             metronome=metronome,
             thirtyseconds=thirty_seconds
         )
+
+    def get_meter_tree(self, unit="eighths"):
+        """Returns a vector containing subdivision counts needed to construct a hierarchical meter tree structure
+
+        A meter is representable as a tree structure, e.g. time signature 6/8 is represented by this tree:
+
+                   ----- A ------           note value = 𝅗𝅥. (dotted half note)
+              --- B ---      --- B ---      note value = ♩. (dotted quarter note)
+             C    C    C    C    C    C     note value = 𝅘𝅥𝅮  (eighth note)
+
+        In this tree, the A node splits up into two nodes and the B nodes into three nodes. Given that the tree may only
+        split up into either only binary or only ternary subdivisions, this tree is represented by this list: [2, 3],
+        because the first node has 2 subdivisions (A) and the second nodes have 3 subdivisions.
+
+        This method will construct such a tree and return the subdivision list of the tree where the deepest node
+        represents the given time unit. Only musical time units are allowed ("eighths", "quarters", etc., not "ticks").
+
+        :param unit: the musical time unit of the deepest nodes in the tree
+        :return: a tuple containing the subdivision counts needed to construct a hierarchical meter tree structure for
+                 this time signature
+
+        :raises ValueError: if given ticks or if this time signature is not divisible by the given time unit (e.g. a 6/8
+                            time signature is not representable with multiples of quarters, but it is with multiples of
+                            eighths or sixteenths)
+        """
+
+        if unit == "ticks":
+            raise ValueError("Can't express meter in ticks")
+
+        n_units_per_beat = convert_time(1, self.get_beat_unit().value, unit)
+        curr_branch = self.numerator
+        divisions = []
+
+        if math.isclose(n_units_per_beat, int(n_units_per_beat)):
+            n_units_per_beat = int(n_units_per_beat)
+        else:
+            raise ValueError("Can't express %s time signature in \"%s\"" % (self, unit))
+
+        while curr_branch > 1:
+            for quotient in (2, 3):
+                if curr_branch % quotient == 0:
+                    divisions.append(quotient)
+                    curr_branch /= quotient
+                    break
+            else:
+                raise Exception("No context-sensitive meters allowed. Branch of %i units "
+                                "not equally divisible into binary or ternary sub-units" % curr_branch)
+
+        divisions.extend(itertools.repeat(2, n_units_per_beat - 1))
+        return tuple(divisions)
+
+    def get_metrical_weights(self, unit="eighths", root_weight=0):
+        """Returns the metrical weights for a full measure of this time signature
+
+        Constructs a hierarchical meter tree structure (see get_meter_tree) ands assigns a weight to each node. Then it
+        flattens the tree and returns it as a list. The weight of a node is the weight of the parent node minus one. The
+        weight of the root node is specified with the root_weight argument of this method.
+
+        For example, given the "eighths" tree structure of a 4/4 time signature:
+
+                         --------------- R -------------
+                 ------ A ------                 ------ A ------        note value = 𝅝 (whole note)
+             -- B --         -- B --         -- B --         -- B --    note value = ♩ (quarter note)
+            C       C       C       C       C       C       C       C   note value = 𝅘𝅥𝅮 (eighth note)
+
+        if root_weight is 0, then the weights of the R, A, B and C nodes are 0, -1, -2 and -3 respectively. This will
+        yield these metrical weights: [0, -3, -2, -3, -1, -3, -2, -3].
+
+        :param unit: step time unit
+        :param root_weight: weight of first node in the
+        :return: the metrical weights for a full measure of this time signature with the given time unit
+        """
+
+        subdivisions = self.get_meter_tree(unit)
+        metrical_weights = [None] * sequence_product(subdivisions)
+        n_branches = 1
+
+        for n, curr_subdivision in enumerate(itertools.chain([1], subdivisions)):
+            curr_subdivision_weight = root_weight - n
+            n_branches *= curr_subdivision
+
+            for ix in np.linspace(0, len(metrical_weights), n_branches, endpoint=False, dtype=int):
+                if metrical_weights[ix] is None:
+                    metrical_weights[ix] = curr_subdivision_weight
+
+        return metrical_weights
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
