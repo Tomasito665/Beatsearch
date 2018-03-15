@@ -12,7 +12,7 @@ from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, IOIHisto
     BinarySchillingerChain, ChronotonicChain, IOIDifferenceVector, OnsetDensity
 
 # misc
-from beatsearch.rhythm import MonophonicRhythm
+from beatsearch.rhythm import MonophonicRhythm, Unit
 from beatsearch.test_rhythm import mock_onset
 
 
@@ -78,7 +78,53 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=
         self.feature_extractor = cls()
         self.feature_extractor.unit = "ticks"
 
-    # TODO Add test to check if unit is set with first positional constructor parameter and with named "unit" parameter
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_with_first_positional_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            with self.subTest(unit):
+                obj = cls(unit)
+                self.assertEqual(obj.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_with_named_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            with self.subTest(unit):
+                obj = cls(unit=unit)
+                self.assertEqual(obj.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_to_pre_processors_with_first_positional_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            obj = cls(unit=unit)
+            for pre_processor in obj.pre_processors:
+                with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
+                    self.assertEqual(pre_processor.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_set_to_preprocessors_with_named_constructor_argument(self):
+        cls = self.get_impl_class()
+        for unit in self.get_legal_units():
+            obj = cls(unit=unit)
+            for pre_processor in obj.pre_processors:
+                with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
+                    self.assertEqual(pre_processor.unit, unit)
+
+    # noinspection PyUnresolvedReferences
+    def test_unit_property_sets_preprocessor_units(self):
+        cls = self.get_impl_class()
+        obj = cls()
+        for unit in self.get_legal_units():
+            obj.unit = unit
+            for pre_processor in obj.pre_processors:
+                with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
+                    self.assertEqual(pre_processor.unit, unit)
+
+    @staticmethod
+    def get_legal_units():
+        return ["ticks"] + list(Unit.get_unit_values())
 
     @staticmethod
     @abstractmethod

@@ -75,6 +75,16 @@ class Unit(object):
         return Unit._unit_names
 
     @classmethod
+    def get_unit_values(cls):
+        """
+        Returns a tuple containing the unit values ("quarters", "eighths", "sixteenths", etc)
+
+        :return: tuple containing the unit values
+        """
+
+        return tuple(cls._units.keys())
+
+    @classmethod
     def get_unit_by_name(cls, unit_name):
         """
         Returns a unit given its unit name.
