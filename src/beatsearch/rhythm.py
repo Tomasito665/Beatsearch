@@ -885,6 +885,73 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
     def get_onset_count(self) -> int:  # implements Rhythm.get_onset_count
         return len(self.onsets)
 
+    # noinspection PyPep8Naming
+    class create(object):  # not intended like a class but more like a namespace for factory methods
+        def __init__(self):
+            raise Exception("can't instantiate this class, it is a factory and only contains static methods")
+
+        @classmethod
+        def from_string(
+                cls,
+                onset_string: tp.Sequence[bool],
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+                onset_character: str = "x",
+                velocity: int = 100,
+                resolution: int = 4
+        ):
+            # type: () -> MonophonicRhythmImpl
+            # NOTE: Return type hinting as an "old-style" comment because MonophonicRhythmImpl not defined yet here
+            """
+            Creates a new monophonic rhythm, given a given string. Each character in the string will represent one tick
+            and each onset character will represent an onset in the rhythm, e.g. "x--x---x--x-x---", given onset
+            character "x".
+
+            :param onset_string:    onset string where each onset character will result in an onset, the length of the
+                                    string will determine the duration of the rhythm
+            :param time_signature:  time signature of the rhythm as a (numerator, denominator) tuple
+            :param onset_character: the onset character
+            :param velocity:        the velocity of the onsets (velocity is the same for all onsets)
+            :param resolution:      resolution in pulses per quarter note (if res=4, four characters in the onset string
+                                    will represent one quarter note)
+            :return: monophonic rhythm object
+            """
+
+            return cls.from_binary_chain(
+                binary_chain=tuple((char == onset_character) for char in onset_string),
+                time_signature=time_signature,
+                velocity=velocity,
+                resolution=resolution
+            )
+
+        @classmethod
+        def from_binary_chain(
+                cls,
+                binary_chain: tp.Sequence[bool],
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+                velocity: int = 100,
+                resolution: int = 4
+        ):
+            # type: () -> MonophonicRhythmImpl
+            # NOTE: Return type hinting as an "old-style" comment because MonophonicRhythmImpl not defined yet here
+            """
+            Creates a new monophonic rhythm, given a binary chain (iterable). Each element in the iterable represents
+            one tick. If the element is True, that will result in an onset, e.g. [1, 0, 1, 0, 1, 1, 1, 0].
+
+            :param binary_chain:   iterable containing true or false elements
+            :param time_signature: the time signature of the rhythm as a (numerator, denominator) tuple
+            :param velocity:       the velocity of the onsets (velocity is the same for all onsets)
+            :param resolution:     resolution in pulses per quarter note (if res=4, four elements in the binary chain
+                                   will represent one quarter note)
+            :return: monophonic rhythm object
+            """
+
+            onsets = filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_chain)))
+
+            return MonophonicRhythmImpl(
+                onsets=tuple(onsets), duration=len(binary_chain),
+                resolution=resolution, time_signature=time_signature
+            )
+
 
 class MonophonicRhythmBase(MonophonicRhythm, metaclass=ABCMeta):
     """Monophonic rhythm base class implementing MonophonicRhythm
@@ -986,48 +1053,6 @@ class MonophonicRhythmImpl(RhythmBase, MonophonicRhythmBase):
         RhythmBase.__init__(self)
         MonophonicRhythmBase.__init__(self, onsets)
         self.post_init(**kwargs)
-
-
-class MonophonicRhythmFactory(object):
-    def __init__(self):
-        raise Exception("can't instantiate this class, it is a factory and only contains static methods")
-
-    @classmethod
-    def from_string(cls, onset_string, onset_character="x", velocity=100, resolution=4) -> MonophonicRhythmImpl:
-        """
-        Creates a new monophonic rhythm, given a given string. Each character in the string will represent one tick and
-        each onset character will represent an onset in the rhythm, e.g. "x--x---x--x-x---", given onset character "x".
-
-        :param onset_string: onset string where each onset character will result in an onset, the length of the string
-                             will determine the duration of the rhythm
-        :param onset_character: the onset character
-        :param velocity: the velocity of the onsets (velocity is the same for all onsets)
-        :param resolution: resolution in pulses per quarter note (if res=4, four characters in the onset
-                           string will represent one quarter note)
-        :return: monophonic rhythm object
-        """
-
-        binary_string = tuple((char == onset_character) for char in onset_string)
-        return cls.from_binary_chain(binary_string, velocity, resolution)
-
-    @classmethod
-    def from_binary_chain(cls, binary_chain, velocity=100, resolution=4) -> MonophonicRhythmImpl:
-        """
-        Creates a new monophonic rhythm, given a binary chain (iterable). Each element in the iterable represents one
-        tick. If the element is True, that will result in an onset, e.g. [1, 0, 1, 0, 1, 1, 1, 0].
-
-        :param binary_chain: iterable containing true or false elements
-        :param velocity: the velocity of the onsets (velocity is the same for all onsets)
-        :param resolution: resolution in pulses per quarter note (if res=4, four elements in the binary chain will
-                           represent one quarter note)
-        :return: monophonic rhythm object
-        """
-
-        onsets = filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_chain)))
-        return MonophonicRhythmImpl(onsets=tuple(onsets), duration=len(binary_chain), resolution=resolution)
-
-
-MonophonicRhythm.create = MonophonicRhythmFactory
 
 
 class SlavedRhythmBase(Rhythm, metaclass=ABCMeta):

@@ -1222,7 +1222,28 @@ class TestMidiRhythm(TestRhythmLoop):
 
 # TODO Add tests for convert_time -> should always return an int when quantize is True
 
-# TODO Add tests for MonophonicRhythmFactory
+class TestMonophonicRhythmFactory(TestCase):
+    @patch("beatsearch.rhythm.MonophonicRhythmImpl")
+    def test_from_binary_chain(self, mock_monophonic_rhythm_impl_constructor):
+        binary_onset_vector = [True, False, False, True, False, False, True, False]
+        MonophonicRhythm.create.from_binary_chain(binary_onset_vector, time_signature=(1, 2), velocity=87, resolution=2)
+        mock_monophonic_rhythm_impl_constructor.assert_called_once_with(
+            onsets=((0, 87), (3, 87), (6, 87)),
+            time_signature=(1, 2),
+            resolution=2,
+            duration=len(binary_onset_vector)
+        )
+
+    @patch.object(MonophonicRhythm.create, "from_binary_chain")
+    def test_from_string(self, mock_from_binary_chain):
+        MonophonicRhythm.create.from_string("O..O..OO", (7, 8), onset_character="O", velocity=20, resolution=2)
+        mock_from_binary_chain.assert_called_once_with(
+            binary_chain=(True, False, False, True, False, False, True, True),
+            time_signature=(7, 8),
+            velocity=20,
+            resolution=2
+        )
+
 
 class TestOnset(TestCase):
     def test_properties_equal_constructor_args(self):
