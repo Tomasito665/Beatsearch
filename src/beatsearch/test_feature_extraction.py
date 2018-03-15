@@ -9,7 +9,7 @@ from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtract
 
 # feature extractor implementations
 from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, IOIHistogram, \
-    BinarySchillingerChain, ChronotonicChain, IOIDifferenceVector
+    BinarySchillingerChain, ChronotonicChain, IOIDifferenceVector, OnsetDensity
 
 # misc
 from beatsearch.rhythm import MonophonicRhythm
@@ -200,6 +200,18 @@ class TestOnsetPositionVector(TestMonophonicRhythmFeatureExtractorImplementation
 
 
 # TODO Add test for SyncopationVector
+
+class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return OnsetDensity
+
+    def test_process(self):
+        expected_onset_density = 0.3125  # rumba rhythm has 5 onsets and 16 available positions
+        actual_onset_density = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_onset_density, expected_onset_density)
+
 
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):

@@ -497,3 +497,28 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
                     yield step, syncopation_strength
 
         return tuple(get_syncopations())
+
+
+class OnsetDensity(MonophonicRhythmFeatureExtractor):
+    def __init__(self, unit="eighths"):
+        self._binary_vector_extractor = BinaryOnsetVector(unit)
+        super().__init__(unit)
+
+    def set_unit(self, unit: str):
+        super().set_unit(unit)
+        self._binary_vector_extractor.set_unit(unit)
+
+    def __process__(self, rhythm: MonophonicRhythm, unit: tp.Union[int, str]):
+        """
+        Computes the onset density of the given rhythm. The onset density is the number of onsets over the number of
+        positions in the binary onset vector of the given rhythm.
+
+        :param rhythm: monophonic rhythm to compute the onset density of
+        :param unit: time unit
+        :return: onset density of the given rhythm
+        """
+
+        assert self._binary_vector_extractor.unit == self.unit
+        binary_vector = self._binary_vector_extractor.process(rhythm)
+        n_onsets = sum(binary_vector)  # onsets are ones, non-onsets are zeros
+        return float(n_onsets) / len(binary_vector)
