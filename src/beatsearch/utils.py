@@ -4,6 +4,7 @@ import sys
 import collections
 import typing as tp
 from time import time
+from abc import ABCMeta, abstractmethod
 from inspect import isclass
 from functools import wraps, reduce
 from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
@@ -291,3 +292,21 @@ def sequence_product(iterable):
     """
 
     return reduce((lambda x, y: x * y), iterable)
+
+
+class Quantizable(object, metaclass=ABCMeta):
+    @property
+    def quantize_enabled(self) -> bool:
+        return self.is_quantize_enabled()
+
+    @quantize_enabled.setter
+    def quantize_enabled(self, quantize_enabled: bool):
+        self.set_quantize_enabled(quantize_enabled)
+
+    @abstractmethod
+    def set_quantize_enabled(self, quantize_enabled: bool):
+        raise NotImplementedError
+
+    @abstractmethod
+    def is_quantize_enabled(self) -> bool:
+        raise NotImplementedError

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from abc import ABCMeta, abstractmethod
 
 # feature extractor base classes
-from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtractor, \
+from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtractorBase, \
     MonophonicRhythmFeatureExtractor, PolyphonicRhythmFeatureExtractor, OnsetPositionVector
 
 # feature extractor implementations
@@ -48,7 +48,7 @@ class TestFeatureExtractor(TestCase):
 
 class TestRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):
-        self.assertRaises(Exception, RhythmFeatureExtractor)
+        self.assertRaises(Exception, RhythmFeatureExtractorBase)
 
 
 class TestMonophonicRhythmFeatureExtractor(TestCase):

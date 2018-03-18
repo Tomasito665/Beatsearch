@@ -3,10 +3,10 @@ import math
 import typing as tp
 from collections import OrderedDict
 from abc import abstractmethod, ABCMeta
-from beatsearch.rhythm import convert_time, MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm, Unit
-from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, IOIDifferenceVector, OnsetPositionVector, \
-    ChronotonicChain
-from beatsearch.utils import friendly_named_class
+from beatsearch.rhythm import MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm, Unit
+from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, \
+    IOIDifferenceVector, OnsetPositionVector, ChronotonicChain
+from beatsearch.utils import friendly_named_class, Quantizable
 
 
 class DistanceMeasure(object):
@@ -268,24 +268,6 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
                 raise ValueError("No measure with class or friendly name: '%s'" % measure_name)
 
 
-class Quantizable(object, metaclass=ABCMeta):
-    @property
-    def quantize_enabled(self) -> bool:
-        return self.is_quantize_enabled()
-
-    @quantize_enabled.setter
-    def quantize_enabled(self, quantize_enabled: bool):
-        self.set_quantize_enabled(quantize_enabled)
-
-    @abstractmethod
-    def set_quantize_enabled(self, quantize_enabled: bool):
-        raise NotImplementedError
-
-    @abstractmethod
-    def is_quantize_enabled(self) -> bool:
-        raise NotImplementedError
-
-
 @friendly_named_class("Hamming distance")
 class HammingDistanceMeasure(MonophonicRhythmDistanceMeasure):
     """
@@ -323,7 +305,7 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
     """
 
     def __init__(self, unit="ticks", length_policy="exact", quantize=False):
-        self._ioi_vector = IOIVector(unit, mode=IOIVector.Mode.POST_NOTE, quantize=quantize)
+        self._ioi_vector = IOIVector(unit, mode=IOIVector.Mode.POST_NOTE, quantize_enabled=quantize)
         super().__init__(unit, length_policy)  # super constructor must be called after self._ioi_vector definition
         self.quantize_enabled = quantize
 
@@ -332,10 +314,10 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
         self._ioi_vector.set_unit(unit)
 
     def set_quantize_enabled(self, quantize_enabled):
-        self._ioi_vector.quantize = quantize_enabled
+        self._ioi_vector.set_quantize_enabled(quantize_enabled)
 
     def is_quantize_enabled(self) -> bool:
-        return self._ioi_vector.quantize
+        return self._ioi_vector.is_quantize_enabled()
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
         assert self._ioi_vector.unit == self.unit
@@ -376,10 +358,10 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
         self._ioi_diff_vector.cyclic = cyclic
 
     def set_quantize_enabled(self, quantize_enabled: bool):
-        self._ioi_diff_vector.quantize = quantize_enabled
+        self._ioi_diff_vector.set_quantize_enabled(quantize_enabled)
 
     def is_quantize_enabled(self) -> bool:
-        return self._ioi_diff_vector.quantize
+        return self._ioi_diff_vector.is_quantize_enabled()
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
         assert self._ioi_diff_vector.unit == self.unit
@@ -421,10 +403,10 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
         self._onset_position_vector.set_unit(unit)
 
     def set_quantize_enabled(self, quantize_enabled: bool):
-        self._onset_position_vector.quantize = quantize_enabled
+        self._onset_position_vector.set_quantize_enabled(quantize_enabled)
 
     def is_quantize_enabled(self) -> bool:
-        return self._onset_position_vector.quantize
+        return self._onset_position_vector.is_quantize_enabled()
 
     def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
         assert self._onset_position_vector.unit == self.unit

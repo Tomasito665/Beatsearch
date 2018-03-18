@@ -6,220 +6,83 @@ import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.colors import to_rgba
 from matplotlib.patches import Wedge
-from itertools import cycle
-from functools import wraps
-from collections import namedtuple
-from beatsearch.rhythm import concretize_unit, Unit, RhythmLoop, Rhythm, Track
-from beatsearch.utils import merge_dicts
+from abc import ABCMeta, abstractmethod
+from itertools import cycle, repeat
+from beatsearch.rhythm import Unit, RhythmLoop, Rhythm, Track
+from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
+    RhythmFeatureExtractorBase, ChronotonicChain, OnsetPositionVector, IOIHistogram
+from beatsearch.utils import Quantizable
 
 # make room for the labels
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
 
 
-class SnapsToGrid(enum.Enum):
+class SnapsToGridPolicy(enum.Enum):
     ALWAYS = enum.auto()
     NEVER = enum.auto()
     ADJUSTABLE = enum.auto()
     NOT_APPLICABLE = enum.auto()
 
 
-PlotTypeInfo = namedtuple("PlotTypeInfo", ["title", "snaps_to_grid"])
+def get_coordinates_on_circle(circle_position, circle_radius, x):
+    x *= 2.0
+    p_x = circle_radius * math.sin(x * math.pi) + circle_position[0]
+    p_y = circle_radius * math.cos(x * math.pi) + circle_position[1]
+    return p_x, p_y
 
 
-# noinspection PyPep8Naming
-class plot(object):
-    """
-    Decorator for RhythmLoopPlotter plotting methods.
-    """
+# TODO replace whatever calls this function with @concretize_unit decorator
+def to_concrete_unit(unit, rhythm):
+    if unit == 'ticks':
+        return rhythm.get_resolution()
+    return unit
 
-    # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
-    colors = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
 
-    def __init__(self, title, snaps_to_grid: SnapsToGrid, subplot_layout='combined', share_axis=None, *_, **kwargs):
-        self._title = title
-        self._snaps_to_grid = snaps_to_grid
-        self._subplot_layout = subplot_layout
-        self._share_x, self._share_y = plot.parse_axis_arg_str(share_axis)
-        self._named_decorator_args = kwargs
-        self._f_fill_subplot = None
-        self._f_setup_subplot = None
-        self._rhythm_plotter = None
-        self.draw = None  # type: tp.Union[tp.Callable, None]
+def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit, axis='x'):
+    duration = rhythm.get_duration(unit)
+    measure_duration = rhythm.get_measure_duration(unit)
+    beat_duration = rhythm.get_beat_duration(unit)
 
-    def get_info(self):
-        return PlotTypeInfo(self._title, self._snaps_to_grid)
+    measure_grid_ticks = np.arange(0, duration + 1, measure_duration)
+    beat_grid_ticks = np.arange(0, duration + 1, beat_duration)
 
-    class Descriptor(object):
+    if len(axis) > 2:
+        raise ValueError("Illegal axis: %s" % axis)
+
+    axes.set_xticks(measure_grid_ticks)
+    axes.set_xticks(beat_grid_ticks, minor=True)
+    axes.set_yticks(measure_grid_ticks)
+    axes.set_yticks(beat_grid_ticks, minor=True)
+
+    axes.set_axisbelow(True)
+    axes.grid(which='minor', alpha=0.2, axis=axis)
+    axes.grid(which='major', alpha=0.5, axis=axis)
+
+
+class Orientation(enum.Enum):
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+
+
+class SubplotLayout(object, metaclass=ABCMeta):
+    def __init__(self, share_axis=None):
+        self.share_x, self.share_y = self.parse_axis_arg_str(share_axis)
+
+    @abstractmethod
+    def inflate(self, figure: plt.Figure, n_subplots: int, subplot_kwargs: tp.Dict[str, tp.Any]) \
+            -> tp.Iterable[plt.Axes]:
         """
-        This class provides the 'plot' decorator of a handle to the RhythmLoopPlotter instance and it enables sets the
-        function pointer to the subplot setup function for methods decorated with @foo.setup. This enables the following
-        syntax:
+        Should create and add subplots to the given figure and return the subplot axes. Implementations of this method
+        should pay attention to the share_x and share_y attributes and link the axes of the subplots accordingly.
 
-            @plot()
-            def polygon(axes):
-                ...
-
-            @polygon.setup(axes):
-                ...
-        """
-
-        def __init__(self, obj_decorator):
-            self.obj_decorator = obj_decorator
-
-        def setup(self, f_setup_subplot):
-            self.obj_decorator._f_setup_subplot = f_setup_subplot
-            return self
-
-        def get_info(self):
-            return self.obj_decorator.get_info()
-
-        def __get__(self, obj, obj_type):
-            if obj_type != RhythmLoopPlotter:
-                raise ValueError("Expected a RhythmLoopPlotter object but got a '%s'" % str(obj))
-            self.obj_decorator._rhythm_plotter = obj
-            return self.obj_decorator.draw
-
-    def __call__(self, f_fill_subplot, *args, **kwargs):
-        self._f_fill_subplot = f_fill_subplot
-
-        @wraps(self._draw)
-        def draw_f_wrapper(*args_, **kwargs_):
-            self._draw(*args_, **kwargs_)
-
-        # noinspection PyUnresolvedReferences
-        draw_f_wrapper.__doc__ = self._draw.__doc__.format(self._title)
-        draw_f_wrapper.__name__ = f_fill_subplot.__name__
-        self.draw = draw_f_wrapper
-
-        return plot.Descriptor(obj_decorator=self)
-
-    def _draw(
-            self,
-            rhythm_loop: RhythmLoop,
-            figure: tp.Union[plt.Figure, None] = None,
-            figure_kwargs: tp.Dict[str, tp.Any] = None,
-            legend_kwargs: tp.Dict[str, tp.Any] = None,
-            *args, **kwargs
-    ) -> plt.Figure:
-        """
-        Plots the {0} of the given drum loop on a matplotlib figure and returns the figure object.
-
-        :param rhythm_loop: the rhythm loop to plot
-        :param figure: figure to draw the loop
-        :param figure_kwargs: keyword arguments for the creation of the figure. This argument is ignored if a custom
-                              figure has been provided
-        :param legend_kwargs: keyword arguments for the call to Figure.legend
-        :return: matplotlib figure object
+        :param figure: figure to add the subplots to
+        :param n_subplots: subplot count
+        :param subplot_kwargs: named arguments to pass to the figure.add_subplot method
+        :return: iterable of axes
         """
 
-        track_iterator = rhythm_loop.get_track_iterator()
-
-        # the figure to add the subplot(s) to
-        figure = figure or plt.figure("%s - %s" % (self._title, rhythm_loop.name), **(figure_kwargs or {}))
-
-        rhythm_plotter = self._rhythm_plotter
-        concrete_unit = to_concrete_unit(rhythm_plotter.unit, rhythm_loop)
-
-        # the setup method will also receive the args given to the decorator
-        setup_args = merge_dicts(self._named_decorator_args, {
-            'self': rhythm_plotter,
-            'rhythm': rhythm_loop,
-            'concrete_unit': concrete_unit,
-            'n_pulses': int(math.ceil(rhythm_loop.get_duration(concrete_unit))),
-            'n_tracks': rhythm_loop.get_track_count()
-        })
-
-        # this iterator will return both an axes object and a setup result object at each iteration
-        subplots = self._get_subplot_iterator(figure, setup_args)
-
-        # this iterator will cycle through the plot colors
-        color_pool = cycle(plot.colors)
-
-        # decorated function
-        fill_subplot = self._f_fill_subplot
-
-        # keep track of track names and plot handles for legend
-        track_names = []
-        plot_handles = []
-
-        track_i = 0
-        for track in track_iterator:
-            axes, axes_setup_result = next(subplots)
-
-            handle = fill_subplot(
-                track=track,
-                axes=axes,
-                track_i=track_i,
-                color=next(color_pool),
-                setup_result=axes_setup_result,
-                *args, **merge_dicts(kwargs, setup_args)  # TODO merge_dicts not necessary anymore now with Python 3
-            )[0]
-
-            axes.set_xlabel(rhythm_plotter.unit)
-            track_names.append(track.name)
-            plot_handles.append(handle)
-            track_i += 1
-
-        figure.legend(plot_handles, track_names, loc="center right", **(legend_kwargs or {}))
-        plt.draw()  # draw axes on figure
-
-        return figure
-
-    def _get_subplot_iterator(self, figure, setup_args):
-        layout = self._subplot_layout
-
-        if layout == 'combined':
-            subplot_iterator_creator = self._combined_subplot_iterator
-        elif layout == 'v_stack':
-            subplot_iterator_creator = self._create_stacked_subplot_iterator(direction='vertical')
-        elif layout == 'h_stack':
-            subplot_iterator_creator = self._create_stacked_subplot_iterator(direction='horizontal')
-        else:
-            raise ValueError("Unknown subplot layout: '%s'" % layout)
-
-        return subplot_iterator_creator(figure, setup_args)
-
-    def _add_and_setup_subplot(self, figure, setup_args, *args, **kwargs):
-        axes = figure.add_subplot(*args, **kwargs)
-        f_setup = self._f_setup_subplot
-        if callable(f_setup):
-            setup_result = f_setup(axes=axes, **setup_args)
-        else:
-            setup_result = None
-        return axes, setup_result
-
-    def _combined_subplot_iterator(self, figure, setup_args):
-        res = self._add_and_setup_subplot(figure, setup_args, 111)
-        while True:
-            yield res
-
-    def _create_stacked_subplot_iterator(self, direction='horizontal'):
-        subplot_args_by_direction = {
-            'horizontal': lambda n_tracks, track_i: [1, n_tracks, track_i + 1],
-            'vertical': lambda n_tracks, track_i: [n_tracks, 1, track_i + 1]
-        }
-
-        if direction not in subplot_args_by_direction:
-            raise ValueError("Unknown direction: '%s'" % direction)
-
-        def get_stacked_axes_iterator(figure, setup_args):
-            n_tracks = setup_args['n_tracks']
-            track_i = 0
-            prev_subplot = None
-
-            while track_i < n_tracks:
-                args = [figure, setup_args] + subplot_args_by_direction[direction](n_tracks, track_i)
-                kwargs = {
-                    'sharex': prev_subplot if self._share_x else None,
-                    'sharey': prev_subplot if self._share_y else None
-                }
-                res = self._add_and_setup_subplot(*args, **kwargs)
-                yield res
-                prev_subplot = res[0]
-                track_i += 1
-
-        return get_stacked_axes_iterator
+        raise NotImplementedError
 
     @staticmethod
     def parse_axis_arg_str(axis_arg_str):
@@ -236,101 +99,278 @@ class plot(object):
             raise ValueError("Unknown axis '%s', choose between %s" % (axis_arg_str, list(axis_arg_options.keys())))
 
 
-class RhythmLoopPlotter(object):
-    def __init__(self, unit='ticks', background_color='#38302E', foreground_color='#6F6866', accent_color='#DB5461'):
-        self._color = {
-            'background': background_color,
-            'foreground': foreground_color,
-            'accent': accent_color
-        }
+class CombinedSubplotLayout(SubplotLayout):
+    def inflate(self, figure: plt.Figure, n_subplots: int, subplot_kwargs: tp.Dict[str, tp.Any]) \
+            -> tp.Iterable[plt.Axes]:
+        axes = figure.add_subplot(111, **subplot_kwargs)
+        return repeat(axes, n_subplots)
+
+
+class StackedSubplotLayout(SubplotLayout):
+    __subplot_args_by_orientation = {
+        Orientation.HORIZONTAL: lambda n, i: [1, n, i + 1],
+        Orientation.VERTICAL: lambda n, i: [n, 1, i + 1]
+    }
+
+    def __init__(self, orientation: Orientation = Orientation.VERTICAL, share_axis: tp.Optional[str] = "both"):
+        super().__init__(share_axis)
+
+        self.check_orientation(orientation)
+        self._orientation = orientation  # type: Orientation
+
+    def inflate(self, figure: plt.Figure, n_subplots: int, subplot_kwargs: tp.Dict[str, tp.Any]) \
+            -> tp.Iterable[plt.Axes]:
+
+        orientation = self._orientation
+        get_subplot_positional_args = self.__subplot_args_by_orientation[orientation]
+        prev_subplot = None
+
+        for subplot_ix in range(n_subplots):
+            subplot_positional_args = get_subplot_positional_args(n_subplots, subplot_ix)
+
+            # noinspection SpellCheckingInspection
+            subplot = figure.add_subplot(*subplot_positional_args, **{
+                **subplot_kwargs,
+                'sharex': prev_subplot if self.share_x else None,
+                'sharey': prev_subplot if self.share_y else None
+            })
+
+            yield subplot
+            prev_subplot = subplot
+
+    @classmethod
+    def check_orientation(cls, orientation: Orientation):
+        if orientation not in cls.__subplot_args_by_orientation:
+            raise ValueError("Unknown orientation: %s" % str(orientation))
+
+
+class RhythmLoopPlotter(object, metaclass=ABCMeta):
+    # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
+    COLORS = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
+
+    def __init__(self, unit: str, subplot_layout: SubplotLayout,
+                 feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractorBase]] = None,
+                 snap_to_grid_policy: SnapsToGridPolicy = SnapsToGridPolicy.NOT_APPLICABLE, snaps_to_grid: bool = None):
+
+        self._subplot_layout = subplot_layout  # type: SubplotLayout
+        self._feature_extractors = feature_extractors
         self._unit = None
-        self.unit = unit
+        self._snaps_to_grid = None
+        self._snap_to_grid_policy = snap_to_grid_policy
+
+        if snaps_to_grid is None:
+            if snap_to_grid_policy in [SnapsToGridPolicy.NEVER, SnapsToGridPolicy.ADJUSTABLE]:
+                snaps_to_grid = False
+            elif snap_to_grid_policy == SnapsToGridPolicy.ALWAYS:
+                snaps_to_grid = True
+
+        self.snaps_to_grid = snaps_to_grid  # call setter
+        self.set_unit(unit)
+
+    def set_unit(self, unit):
+        if unit != "ticks":
+            Unit.check_unit(unit)
+        # bind unit of feature extractors to rhythm loop plotter unit
+        for feature_extractor in self._feature_extractors.values():
+            feature_extractor.set_unit(unit)
+        self._unit = unit
+
+    def get_unit(self):
+        return self._unit
 
     @property
     def unit(self):
-        return self._unit
+        return self.get_unit()
 
     @unit.setter
     def unit(self, unit):
-        if unit != 'ticks' and not Unit.exists(unit):
-            raise ValueError("Unknown unit: %s" % str(unit))
-        self._unit = unit
+        self.set_unit(unit)
+
+    @property
+    def snap_to_grid_policy(self):
+        return self._snap_to_grid_policy
+
+    @property
+    def snaps_to_grid(self) -> bool:
+        return self._snaps_to_grid
+
+    @snaps_to_grid.setter
+    def snaps_to_grid(self, snaps_to_grid):
+        policy = self._snap_to_grid_policy
+
+        if policy == SnapsToGridPolicy.NOT_APPLICABLE:
+            if snaps_to_grid is not None:
+                raise RuntimeError("Snaps to grid is not applicable for %s" % self.__class__.__name__)
+            return
+
+        if policy != SnapsToGridPolicy.ADJUSTABLE:
+            if policy == SnapsToGridPolicy.ALWAYS:
+                assert snaps_to_grid
+            elif policy == SnapsToGridPolicy.NEVER:
+                assert not snaps_to_grid
+
+        snaps_to_grid = bool(snaps_to_grid)
+        self._snaps_to_grid = snaps_to_grid
+
+        # update quantizable feature extractors
+        for quantizable_extractor in (ext for ext in self._feature_extractors.values() if isinstance(ext, Quantizable)):
+            quantizable_extractor.set_quantize_enabled(snaps_to_grid)
+
+    def draw(
+            self,
+            rhythm_loop: RhythmLoop,
+            figure: tp.Optional[plt.Figure] = None,
+            figure_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
+            legend_kwargs: tp.Dict[str, tp.Any] = None,
+            subplot_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
+    ) -> plt.Figure:
+        """
+        Plots the the given drum loop on a matplotlib figure and returns the figure object.
+
+        :param rhythm_loop: the rhythm loop to plot
+        :param figure: figure to draw the loop
+        :param figure_kwargs: keyword arguments for the creation of the figure. This argument is ignored if a custom
+                              figure has been provided
+        :param subplot_kwargs: keyword arguments for the call to Figure.add_subplot
+        :param legend_kwargs: keyword arguments for the call to Figure.legend
+        :return: matplotlib figure object
+        """
+
+        concrete_unit = rhythm_loop.get_resolution() if self.unit == "ticks" else self.unit
+        n_tracks = rhythm_loop.get_track_count()
+
+        # the figure to add the subplot(s) to
+        plot_type_name = self.get_plot_type_name()
+        figure = figure or plt.figure("%s - %s" % (plot_type_name, rhythm_loop.name), **(figure_kwargs or {}))
+
+        # add subplots to figure
+        subplots = iter(self._subplot_layout.inflate(figure, n_tracks, subplot_kwargs or dict()))
+        color_pool = cycle(self.COLORS)
+        prev_subplot, subplot_setup_ret = None, None
+
+        # named arguments given both to __setup_subplot__ and __draw_track__
+        common_kwargs = {
+            'concrete_unit': concrete_unit,
+            'n_pulses': int(math.ceil(rhythm_loop.get_duration(concrete_unit))),
+            'n_tracks': rhythm_loop.get_track_count()
+        }
+
+        # keep track of track names and plot handles for legend
+        track_names = []
+        subplots_handles = []
+
+        for ix, track in enumerate(rhythm_loop.get_track_iterator()):
+            subplot = next(subplots)
+
+            # don't setup subplot if we already did
+            if subplot != prev_subplot:
+                subplot_setup_ret = self.__setup_subplot__(rhythm_loop, subplot, **common_kwargs)
+
+            # draw the track on the subplot
+            handle = self.__draw_track__(
+                track, subplot, track_ix=ix, color=next(color_pool),
+                setup_ret=subplot_setup_ret, **common_kwargs
+            )[0]
+
+            track_names.append(track.name)
+            subplots_handles.append(handle)
+            prev_subplot = subplot
+
+        figure.legend(subplots_handles, track_names, loc="center right", **(legend_kwargs or {}))
+        return figure
+
+    def get_feature_extractor(self, feature_extractor_name):
+        return self._feature_extractors[feature_extractor_name]
 
     @classmethod
-    def get_plot_function_info(cls, plot_function) -> PlotTypeInfo:
-        function_name = plot_function.__name__
+    @abstractmethod
+    def get_plot_type_name(cls):
+        raise NotImplementedError
 
-        try:
-            plot_descriptor = cls.__dict__[function_name]
-        except KeyError:
-            raise ValueError("no such plot function %s.%s" % (cls.__name__, function_name))
+    @abstractmethod
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        raise NotImplementedError
 
-        return plot_descriptor.get_info()
+    @abstractmethod
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        raise NotImplementedError
 
-    @plot("Schillinger Rhythm Notation", SnapsToGrid.ALWAYS)
-    def schillinger(self, track: Track, **kwargs):
-        axes = kwargs['axes']
+
+class SchillingerRhythmNotation(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Schillinger rhythm notation"
+
+    def __init__(self, unit="eighths"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'schillinger': BinarySchillingerChain()},
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+        )
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         axes.yaxis.set_ticklabels([])
         axes.yaxis.set_visible(False)
+        plot_rhythm_grid(axes, rhythm_loop, kw['concrete_unit'])  # plot musical grid
 
-        # each schillinger chain is drawn on a different vertical position
-        lo_y = kwargs['track_i'] + kwargs['track_i'] * 0.25
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        # each schillinger chain is drawn on a different vertical pos
+        lo_y = kw['track_ix'] + kw['track_ix'] * 0.25
         hi_y = lo_y + 1.0
 
-        # plot musical grid
-        self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'])
+        schillinger_extractor = self.get_feature_extractor("schillinger")  # type: BinarySchillingerChain
+        schillinger_extractor.values = (lo_y, hi_y)
 
         # compute schillinger chain and plot it
-        schillinger_chain = track.get_binary_schillinger_chain(kwargs['concrete_unit'], (lo_y, hi_y))
-        return axes.plot(schillinger_chain, drawstyle='steps-pre', color=kwargs['color'], linewidth=2.5)
+        schillinger_chain = schillinger_extractor.process(rhythm_track)
+        return axes.plot(schillinger_chain, drawstyle="steps-pre", color=kw['color'], linewidth=2.5)
 
-    @plot("Chronotonic notation", SnapsToGrid.ALWAYS)
-    def chronotonic(self, track: Track, **kwargs):
-        axes = kwargs['axes']
-        chronotonic_chain = track.get_chronotonic_chain(kwargs['concrete_unit'])
-        self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'])
-        return axes.plot(chronotonic_chain, '--.', color=kwargs['color'])
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
 
-    @plot("Polygon notation", SnapsToGrid.ADJUSTABLE, subplot_layout='combined')
-    def polygon(self, track: Track, snap_to_grid=False, **kwargs):
-        axes = kwargs['axes']
-        n_pulses = kwargs['n_pulses']
 
-        # disable labels
-        axes.xaxis.set_visible(False)
-        axes.yaxis.set_visible(False)
-        axes.xaxis.set_ticklabels([])
-        axes.yaxis.set_ticklabels([])
+class ChronotonicNotation(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Chronotonic notation"
 
-        # get main circle size and position
-        main_center = kwargs['setup_result'].center
-        main_radius = kwargs['setup_result'].radius
+    def __init__(self, unit="eighths"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'chronotonic': ChronotonicChain()},
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+        )
 
-        # retrieve onset times
-        onset_times = track.get_onset_times(kwargs['concrete_unit'], quantize=snap_to_grid)
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
 
-        # coordinates of line end points
-        coordinates_x = []
-        coordinates_y = []
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        plot_rhythm_grid(axes, rhythm_loop, kw['concrete_unit'])
 
-        for t in onset_times:
-            relative_t = float(t) / n_pulses
-            x, y, = get_coordinates_on_circle(main_center, main_radius, relative_t)
-            coordinates_x.append(x)
-            coordinates_y.append(y)
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        chronotonic_chain = self.get_feature_extractor("chronotonic").process(rhythm_track)
+        return axes.plot(chronotonic_chain, "--.", color=kw['color'])
 
-        # add first coordinate at the end to close the shape
-        coordinates_x.append(coordinates_x[0])
-        coordinates_y.append(coordinates_y[0])
 
-        # plot the lines on the circle
-        return axes.plot(coordinates_x, coordinates_y, '-o', color=kwargs['color'])
+class PolygonNotation(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Polygon notation"
 
-    @polygon.setup
-    def polygon(self, **kwargs):
+    def __init__(self, unit="eighths"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'onset_positions': OnsetPositionVector()},
+            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
+        )
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         # avoid stretching the aspect ratio
-        axes = kwargs['axes']
         axes.axis('equal')
+        # noinspection PyTypeChecker
         axes.axis([0, 1, 0, 1])
 
         # add base rhythm circle
@@ -338,14 +378,13 @@ class RhythmLoopPlotter(object):
         main_center = 0.5, 0.5
 
         # draws a wedge from the given start pulse to the given end pulse
-        def draw_wedge(pulse_start, pulse_end, center=main_center, radius=main_radius, **kw):
+        def draw_wedge(pulse_start, pulse_end, center=main_center, radius=main_radius, **kw_):
             theta_1, theta_2 = (((90 - (pulse / n_pulses * 360)) % 360) for pulse in (pulse_end, pulse_start))
-            axes.add_artist(Wedge(center, radius, theta_1, theta_2, **kw))
+            axes.add_artist(Wedge(center, radius, theta_1, theta_2, **kw_))
 
-        unit = kwargs['concrete_unit']
-        rhythm = kwargs['rhythm']
-        n_pulses = kwargs['n_pulses']
-        n_pulses_per_measure = int(rhythm.get_measure_duration(unit))
+        unit = kw['concrete_unit']
+        n_pulses = kw['n_pulses']
+        n_pulses_per_measure = int(rhythm_loop.get_measure_duration(unit))
 
         try:
             n_measures = int(n_pulses / n_pulses_per_measure)
@@ -368,71 +407,127 @@ class RhythmLoopPlotter(object):
 
         return circle
 
-    @plot("Spectral notation", SnapsToGrid.ADJUSTABLE, subplot_layout='v_stack', share_axis='x')
-    def spectral(self, track: Track, snap_to_grid=False, **kwargs):
-        axes = kwargs['axes']
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        n_pulses = kw['n_pulses']
+
+        # disable labels
+        axes.xaxis.set_visible(False)
+        axes.yaxis.set_visible(False)
+        axes.xaxis.set_ticklabels([])
+        axes.yaxis.set_ticklabels([])
+
+        # get main circle size and position
+        main_center = kw['setup_ret'].center
+        main_radius = kw['setup_ret'].radius
+
+        # retrieve onset times
+        onset_times = self.get_feature_extractor("onset_positions").process(rhythm_track)
+
+        # coordinates of line end points
+        coordinates_x = []
+        coordinates_y = []
+
+        for t in onset_times:
+            relative_t = float(t) / n_pulses
+            x, y, = get_coordinates_on_circle(main_center, main_radius, relative_t)
+            coordinates_x.append(x)
+            coordinates_y.append(y)
+
+        # add first coordinate at the end to close the shape
+        coordinates_x.append(coordinates_x[0])
+        coordinates_y.append(coordinates_y[0])
+
+        # plot the lines on the circle
+        return axes.plot(coordinates_x, coordinates_y, '-o', color=kw['color'])
+
+
+class SpectralNotation(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Spectral notation"
+
+    def __init__(self, unit="eighths"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
+            feature_extractors={'ioi_vector': IOIVector()},
+            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
+        )
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         axes.xaxis.set_visible(False)
         axes.xaxis.set_ticklabels([])
 
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
         # compute inter onset intervals and draw bars
-        concrete_unit = kwargs['concrete_unit']
-        inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=snap_to_grid)
-        return axes.bar(list(range(len(inter_onsets))), inter_onsets, width=0.95, color=kwargs['color'])
+        ioi_vector = self.get_feature_extractor("ioi_vector").process(rhythm_track)
+        return axes.bar(list(range(len(ioi_vector))), ioi_vector, width=0.95, color=kw['color'])
 
-    @plot("TEDAS Notation", SnapsToGrid.ADJUSTABLE, subplot_layout='v_stack', share_axis='x')
-    def tedas(self, track: Track, snap_to_grid=False, **kwargs):
-        axes = kwargs['axes']
-        concrete_unit = kwargs['concrete_unit']
-        inter_onsets = track.get_post_note_inter_onset_intervals(concrete_unit, quantize=snap_to_grid)
-        onset_times = track.get_onset_times(concrete_unit, quantize=snap_to_grid)
 
+class TEDASNotation(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "TEDAS Notation"
+
+    def __init__(self, unit="eighths"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
+            feature_extractors={
+                'onset_positions': OnsetPositionVector(quantize_enabled=True),
+                'ioi_vector': IOIVector(quantize_enabled=True)
+            },
+            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
+        )
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        plot_rhythm_grid(axes, rhythm_loop, kw['concrete_unit'])
+
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        ioi_vector = self.get_feature_extractor("ioi_vector").process(rhythm_track)
+        onset_positions = self.get_feature_extractor("onset_positions").process(rhythm_track)
+
+        # noinspection SpellCheckingInspection
         styles = {
-            'edgecolor': kwargs['color'],
-            'facecolor': colors.to_rgba(kwargs['color'], 0.18),
+            'edgecolor': kw['color'],
+            'facecolor': colors.to_rgba(kw['color'], 0.18),
             'linewidth': 2.0
         }
 
-        self._plot_rhythm_grid(axes, track, kwargs['concrete_unit'], )
-        return axes.bar(onset_times, inter_onsets, width=inter_onsets, align='edge', **styles)
-
-    @plot("Inter-onset interval histogram", SnapsToGrid.NOT_APPLICABLE)
-    def inter_onset_interval_histogram(self, track: Track, **kwargs):
-        axes = kwargs['axes']
-        occurrences, interval_durations = track.get_interval_histogram(kwargs['concrete_unit'])
-        return axes.bar(interval_durations, occurrences, color=kwargs['color'])
-
-    @staticmethod
-    @concretize_unit(lambda ax, rhythm, *args, **kw: rhythm)
-    def _plot_rhythm_grid(axes, rhythm: Rhythm, unit, axis='x'):
-        duration = rhythm.get_duration(unit)
-        measure_duration = rhythm.get_measure_duration(unit)
-        beat_duration = rhythm.get_beat_duration(unit)
-
-        measure_grid_ticks = np.arange(0, duration + 1, measure_duration)
-        beat_grid_ticks = np.arange(0, duration + 1, beat_duration)
-
-        if len(axis) > 2:
-            raise ValueError("Illegal axis: %s" % axis)
-
-        axes.set_xticks(measure_grid_ticks)
-        axes.set_xticks(beat_grid_ticks, minor=True)
-        axes.set_yticks(measure_grid_ticks)
-        axes.set_yticks(beat_grid_ticks, minor=True)
-
-        axes.set_axisbelow(True)
-        axes.grid(which='minor', alpha=0.2, axis=axis)
-        axes.grid(which='major', alpha=0.5, axis=axis)
+        return axes.bar(onset_positions, ioi_vector, width=ioi_vector, align="edge", **styles)
 
 
-def get_coordinates_on_circle(circle_position, circle_radius, x):
-    x *= 2.0
-    p_x = circle_radius * math.sin(x * math.pi) + circle_position[0]
-    p_y = circle_radius * math.cos(x * math.pi) + circle_position[1]
-    return p_x, p_y
+class IOIHistogramPlot(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Inter-onset interval histogram"
+
+    def __init__(self, unit="eighths"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'ioi_histogram': IOIHistogram()},
+            snap_to_grid_policy=SnapsToGridPolicy.NOT_APPLICABLE
+        )
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        return None
+
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        occurrences, interval_durations = self.get_feature_extractor("ioi_histogram").process(rhythm_track)
+        return axes.bar(interval_durations, occurrences, color=kw['color'])
 
 
-# TODO replace whatever calls this function with @concretize_unit decorator
-def to_concrete_unit(unit, rhythm):
-    if unit == 'ticks':
-        return rhythm.get_resolution()
-    return unit
+def get_rhythm_loop_plotter_classes():
+    """Returns RhythmLoopPlotter subclasses
+
+    :return: RhythmLoopPlotter subclasses as a list
+    """
+
+    return RhythmLoopPlotter.__subclasses__()

@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 import typing as tp
 from abc import ABCMeta, abstractmethod
+from beatsearch.utils import Quantizable
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, Unit, convert_time
 
 ######################################
@@ -13,7 +14,7 @@ from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, Unit, 
 
 class FeatureExtractor(object, metaclass=ABCMeta):
     @abstractmethod
-    def process(self, obj):
+    def process(self, obj) -> tp.Any:
         """Computes and returns a feature
         Computes a feature of the given object and returns it.
 
@@ -25,51 +26,37 @@ class FeatureExtractor(object, metaclass=ABCMeta):
 
 
 class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
-    def __init__(self, unit="eighths"):
-        self._pre_processors = tuple(self.init_pre_processors())  # type: tp.Tuple[RhythmFeatureExtractor, ...]
-        self._unit = None
-        self.unit = unit  # calling setter, which also sets the unit of the preprocessors
+    @abstractmethod
+    def get_pre_processors(self):  # type: () -> tp.Tuple[RhythmFeatureExtractor, ...]
+        """Returns the preprocessors of this rhythm feature extractor
 
-    @property
-    def pre_processors(self):
-        """The preprocessors, whose result is passed to __process__. This is a read-only property."""
-        return self._pre_processors
+        Preprocessors are also instances of RhythmFeatureExtractor. When calling process(), the preprocessors will
+        process the given rhythm and their results will be passed down to __process__.
 
-    def get_unit(self):
-        """Returns the time unit of this feature extractor"""
-        return self._unit
-
-    def set_unit(self, unit: str):
-        """Sets the time unit of this feature extractor
-
-        :param unit: new time unit as a string
-        :return: None
+        :return: tuple with this rhythm feature extractor's preprocessors
         """
 
-        unit = str(unit)
+        raise NotImplementedError
 
-        if not Unit.exists(unit) and unit != "ticks":
-            raise Unit.UnknownTimeUnit(unit)
+    @abstractmethod
+    def get_unit(self) -> str:
+        """Returns the musical unit of this preprocessor
 
-        for pre_processor in self._pre_processors:
-            pre_processor.set_unit(unit)
-
-        self._unit = unit
-
-    @property
-    def unit(self):
-        """The time unit of this feature extractor
-
-        This time unit will be used when computing the feature.
+        :return: musical unit of this preprocessor as a string
         """
 
-        return self.get_unit()
+        raise NotImplementedError
 
-    @unit.setter
-    def unit(self, unit: str):  # setter
-        self.set_unit(unit)
+    @abstractmethod
+    def set_unit(self, unit: str) -> None:
+        """Sets the musical unit of this preprocessor
 
-    def process(self, rhythm: Rhythm):
+        :return:
+        """
+
+        raise NotImplementedError
+
+    def process(self, rhythm: Rhythm) -> tp.Any:
         """Computes and returns a rhythm feature
         Computes a feature of the given rhythm and returns it.
 
@@ -77,9 +64,9 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
         :return: the rhythm feature value
         """
 
-        unit = self._unit
-        concrete_unit = rhythm.get_resolution() if "ticks" else unit
-        pre_processor_results = list(pre_processor.process(rhythm) for pre_processor in self._pre_processors)
+        unit = self.get_unit()
+        concrete_unit = rhythm.get_resolution() if unit == "ticks" else unit
+        pre_processor_results = list(pre_processor.process(rhythm) for pre_processor in self.get_pre_processors())
         return self.__process__(rhythm, concrete_unit, pre_processor_results)
 
     @abstractmethod
@@ -97,16 +84,89 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
     @staticmethod
     def init_pre_processors():
         """
-        Override this method to add preprocessors to the feature extractor. Preprocessors are RhythmFeatureExtractor
+        Override this method to add preprocessors to the feature extractor. Preprocessors are RhythmFeatureExtractorBase
         objects themselves and their results will be passed down to __process__ as the last arguments.
 
-        :return: an iterable of RhythmFeatureExtractor instances
+        :return: an iterable of RhythmFeatureExtractorBase instances
         """
 
         return []
 
+    ##############
+    # properties #
+    ##############
 
-class MonophonicRhythmFeatureExtractor(RhythmFeatureExtractor, metaclass=ABCMeta):
+    @property
+    def pre_processors(self):  # type: () -> tp.Tuple[RhythmFeatureExtractor, ...]
+        """See get_pre_processors. This is a read-only property."""
+        return self.get_pre_processors()
+
+    @property
+    def unit(self) -> str:
+        """See get_unit and set_unit"""
+        return self.get_unit()
+
+    @unit.setter
+    def unit(self, unit: str):
+        self.set_unit(unit)
+
+
+class RhythmFeatureExtractorBase(RhythmFeatureExtractor, metaclass=ABCMeta):
+    def __init__(self, unit="eighths"):
+        self._pre_processors = tuple(self.init_pre_processors())  # type: tp.Tuple[RhythmFeatureExtractorBase, ...]
+        self._unit = None
+        self.unit = unit  # calling setter, which also sets the unit of the preprocessors
+
+    def get_pre_processors(self) -> tp.Tuple[RhythmFeatureExtractor, ...]:
+        """Returns the preprocessors, whose result is passed to __process__.
+
+        Preprocessors are also rhythm feature extractors. Their unit is linked to this extractor's unit.
+        """
+
+        return self._pre_processors
+
+    def get_unit(self):
+        """Returns the time unit of this feature extractor"""
+        return self._unit
+
+    def set_unit(self, unit: str):
+        """Sets the time unit of this feature extractor
+
+        Sets the time unit of this rhythm feature extractor. This method will also set the unit of the preprocessors.
+
+        :param unit: new time unit as a string
+        :return: None
+        """
+
+        unit = str(unit)
+
+        if not Unit.exists(unit) and unit != "ticks":
+            raise Unit.UnknownTimeUnit(unit)
+
+        for pre_processor in self._pre_processors:
+            pre_processor.set_unit(unit)
+
+        self._unit = unit
+
+
+class QuantizableRhythmFeatureExtractorMixin(RhythmFeatureExtractor, Quantizable, metaclass=ABCMeta):
+    def __init__(self, quantize_enabled):
+        self._quantize_enabled = None
+        self.set_quantize_enabled(quantize_enabled)
+
+    def set_quantize_enabled(self, quantize_enabled: bool):
+        quantize_enabled = bool(quantize_enabled)
+        for feature_extractor in self.pre_processors:
+            if not isinstance(feature_extractor, Quantizable):
+                continue
+            feature_extractor.set_quantize_enabled(quantize_enabled)
+        self._quantize_enabled = quantize_enabled
+
+    def is_quantize_enabled(self) -> bool:
+        return self._quantize_enabled
+
+
+class MonophonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABCMeta):
     @abstractmethod
     def __process__(
             self,
@@ -125,7 +185,7 @@ class MonophonicRhythmFeatureExtractor(RhythmFeatureExtractor, metaclass=ABCMeta
         raise NotImplementedError
 
 
-class PolyphonicRhythmFeatureExtractor(RhythmFeatureExtractor, metaclass=ABCMeta):
+class PolyphonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABCMeta):
     @abstractmethod
     def __process__(
             self,
@@ -176,17 +236,17 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
         return binary_string
 
 
-class IOIVector(MonophonicRhythmFeatureExtractor):
+class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
     class Mode(enum.Enum):
         PRE_NOTE = enum.auto()
         POST_NOTE = enum.auto()
 
     # noinspection PyShadowingBuiltins
-    def __init__(self, unit="eighths", mode: Mode = Mode.POST_NOTE, quantize=True):
-        super().__init__(unit)
+    def __init__(self, unit="eighths", mode: Mode = Mode.POST_NOTE, quantize_enabled=True):
+        MonophonicRhythmFeatureExtractor.__init__(self, unit)
+        QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
         self._mode = None
-        self.quantize = quantize
-        self.mode = mode
+        self.mode = mode  # call setter
 
     @property
     def mode(self):
@@ -242,10 +302,11 @@ class IOIVector(MonophonicRhythmFeatureExtractor):
         resolution = rhythm.get_resolution()
         current_tick = 0
         intervals = []
+        quantize = self.is_quantize_enabled()
 
         for onset in rhythm.get_onsets():
             delta_tick = onset.tick - current_tick
-            intervals.append(convert_time(delta_tick, resolution, unit, quantize=self.quantize))
+            intervals.append(convert_time(delta_tick, resolution, unit, quantize=quantize))
             current_tick = onset.tick
 
         return intervals
@@ -255,6 +316,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor):
         intervals = []
         onset_positions = itertools.chain((onset.tick for onset in rhythm.get_onsets()), [rhythm.duration_in_ticks])
         last_onset_tick = -1
+        quantize = self.is_quantize_enabled()
 
         for onset_tick in onset_positions:
             if last_onset_tick < 0:
@@ -262,7 +324,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor):
                 continue
 
             delta_in_ticks = onset_tick - last_onset_tick
-            delta_in_units = convert_time(delta_in_ticks, rhythm.resolution, unit, quantize=self.quantize)
+            delta_in_units = convert_time(delta_in_ticks, rhythm.resolution, unit, quantize=quantize)
 
             intervals.append(delta_in_units)
             last_onset_tick = onset_tick
@@ -276,7 +338,7 @@ class IOIHistogram(MonophonicRhythmFeatureExtractor):
 
     @staticmethod
     def init_pre_processors():
-        return [IOIVector(mode=IOIVector.Mode.POST_NOTE, quantize=True)]
+        return [IOIVector(mode=IOIVector.Mode.POST_NOTE, quantize_enabled=True)]
 
     def __process__(
             self,
@@ -397,27 +459,16 @@ class ChronotonicChain(MonophonicRhythmFeatureExtractor):
         return chain
 
 
-class IOIDifferenceVector(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="eighths", quantize=True, cyclic=True):
-        super().__init__(unit)  # super constructor must be called after self._ioi_vector_extractor definition
+class IOIDifferenceVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
+    def __init__(self, unit="eighths", quantize_enabled=True, cyclic=True):
+        MonophonicRhythmFeatureExtractor.__init__(self, unit)
+        QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
         self._cyclic = None
-        # calling setters
-        self.cyclic = cyclic
-        self.quantize = quantize
+        self.cyclic = cyclic  # call setters
 
     @staticmethod
     def init_pre_processors():
         yield IOIVector(mode=IOIVector.Mode.POST_NOTE)
-
-    @property
-    def quantize(self):
-        ioi_vector_extractor = self.pre_processors[0]  # type: IOIVector
-        return ioi_vector_extractor.quantize
-
-    @quantize.setter
-    def quantize(self, quantize):
-        ioi_vector_extractor = self.pre_processors[0]  # type: IOIVector
-        ioi_vector_extractor.quantize = bool(quantize)
 
     @property
     def cyclic(self):
@@ -470,10 +521,10 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractor):
         return vector
 
 
-class OnsetPositionVector(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="eighths", quantize=True):
-        super().__init__(unit)
-        self.quantize = quantize
+class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
+    def __init__(self, unit="eighths", quantize_enabled=True):
+        MonophonicRhythmFeatureExtractor.__init__(self, unit)
+        QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
 
     def __process__(
             self,
@@ -490,7 +541,7 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor):
 
         Rhythm.Precondition.check_resolution(rhythm)
         resolution = rhythm.get_resolution()
-        quantize = self.quantize
+        quantize = self.is_quantize_enabled()
         return [convert_time(onset[0], resolution, unit, quantize) for onset in rhythm.get_onsets()]
 
 

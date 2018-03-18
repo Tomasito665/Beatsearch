@@ -43,6 +43,11 @@ class Unit(object):
     def exists(unit_value):
         return unit_value in Unit._units
 
+    @classmethod
+    def check_unit(cls, unit_value):
+        if not cls.exists(unit_value):
+            raise cls.UnknownTimeUnit("Unknown unit: %s" % unit_value)
+
     @staticmethod
     def get(unit):  # type: (tp.Union[str, Unit]) -> Unit
         """
