@@ -1,8 +1,9 @@
 import enum
+import textwrap
 import typing as tp
 from functools import wraps, partial
 from unittest import TestCase, main
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 from abc import ABCMeta, abstractmethod
 
 # rhythm interfaces
@@ -1224,25 +1225,108 @@ class TestMidiRhythm(TestRhythmLoop):
 
 class TestMonophonicRhythmFactory(TestCase):
     @patch("beatsearch.rhythm.MonophonicRhythmImpl")
-    def test_from_binary_chain(self, mock_monophonic_rhythm_impl_constructor):
+    def test_from_binary_vector(self, mock_monophonic_rhythm_impl_constructor):
         binary_onset_vector = [True, False, False, True, False, False, True, False]
-        MonophonicRhythm.create.from_binary_chain(binary_onset_vector, time_signature=(1, 2), velocity=87, resolution=2)
+        MonophonicRhythm.create.from_binary_vector(binary_onset_vector, time_signature=(1, 2), velocity=87, resolution=2)
         mock_monophonic_rhythm_impl_constructor.assert_called_once_with(
             onsets=((0, 87), (3, 87), (6, 87)),
             time_signature=(1, 2),
             resolution=2,
-            duration=len(binary_onset_vector)
+            duration_in_ticks=len(binary_onset_vector)
         )
 
-    @patch.object(MonophonicRhythm.create, "from_binary_chain")
+    @patch.object(MonophonicRhythm.create, "from_binary_vector")
     def test_from_string(self, mock_from_binary_chain):
         MonophonicRhythm.create.from_string("O..O..OO", (7, 8), onset_character="O", velocity=20, resolution=2)
         mock_from_binary_chain.assert_called_once_with(
-            binary_chain=(True, False, False, True, False, False, True, True),
+            binary_vector=(True, False, False, True, False, False, True, True),
             time_signature=(7, 8),
             velocity=20,
             resolution=2
         )
+
+
+class TestPolyphonicRhythmFactory(TestCase):
+    def setUp(self):
+        self.track_names = ["kick", "snare"]
+        self.track_onset_vectors = [
+            [False, False, False, True, False, False, True, False],  # kick
+            [True, False, False, True, False, False, False, True]   # snare
+        ]
+
+    @patch("beatsearch.rhythm.Track")
+    def test_from_binary_vector_track_creation(self, mock_track_constructor):
+        velocity = 34
+
+        with patch.object(PolyphonicRhythmImpl, "set_tracks", return_value=None) as mock_set_tracks:
+            PolyphonicRhythm.create.from_binary_vector(
+                self.track_onset_vectors, track_names=self.track_names, velocity=velocity)
+            mock_set_tracks.assert_called_once()
+
+            tracks_iter = mock_set_tracks.call_args_list[0][0][0]  # first call, first positional argument
+            _ = tuple(tracks_iter)  # ensure that Track constructor is called
+
+        call_args_list = mock_track_constructor.call_args_list
+        self.assertEqual(2, len(call_args_list), "Track constructor should be called twice")
+
+        kick_call, snare_call = call_args_list
+        expected_kick_onsets = ((3, velocity), (6, velocity))
+        expected_snare_onsets = ((0, velocity), (3, velocity), (7, velocity))
+
+        self.assertSequenceEqual(expected_kick_onsets, tuple(kick_call[0][0]), "onsets sequences not correct")
+        self.assertSequenceEqual(expected_snare_onsets, tuple(snare_call[0][0]), "onsets sequences not correct")
+
+        self.assertEqual(self.track_names[0], kick_call[0][1], "track name not passed correctly to track constructor")
+        self.assertEqual(self.track_names[1], snare_call[0][1], "track name not passed correctly to track constructor")
+
+    @patch("beatsearch.rhythm.PolyphonicRhythmImpl")
+    @patch("beatsearch.rhythm.Track")
+    def test_from_binary_vector(self, mock_track_constructor, mock_polyphonic_rhythm_impl_constructor):
+        mock_track_constructor.return_value = "fake-track"
+        n_tracks = 2
+
+        rhythm_kwargs = {
+            'time_signature': (7, 8),
+            'resolution': 123
+        }
+
+        PolyphonicRhythm.create.from_binary_vector(
+            "fake-onset-vectors", velocity=87, track_names=["fake-name"] * n_tracks, **rhythm_kwargs)
+
+        mock_polyphonic_rhythm_impl_constructor.assert_called_once()
+        constructor_call_args, constructor_call_kwargs = mock_polyphonic_rhythm_impl_constructor.call_args_list[0]
+
+        with self.subTest("tracks"):
+            self.assertSequenceEqual(
+                tuple(constructor_call_args[0]), [mock_track_constructor.return_value] * n_tracks)
+
+        for arg_name, arg_value in sorted(rhythm_kwargs.items()):
+            with self.subTest(arg_name):
+                self.assertIn(arg_name, constructor_call_kwargs)
+                self.assertEqual(arg_value, constructor_call_kwargs.get(arg_name))
+
+    @patch.object(PolyphonicRhythm.create, "from_binary_vector")
+    def test_from_string(self, mock_from_binary_chain):
+        kwargs = dict(time_signature=(4, 4), velocity=123, resolution=2,
+                      onset_character="O", track_separator_char="\n", name_separator_char="=")
+
+        PolyphonicRhythm.create.from_string(textwrap.dedent("""
+            kick   =  O---O-O-
+            snare  =  -OO--O-O
+            hi-hat =  OO-OO-OO
+        """), **kwargs)
+
+        track_names = ["kick", "snare", "hi-hat"]
+
+        binary_vectors = [
+            (True, False, False, False, True, False, True, False),
+            (False, True, True, False, False, True, False, True),
+            (True, True, False, True, True, False, True, True)
+        ]
+
+        mock_from_binary_chain.assert_called_once_with(
+            binary_vector_tracks=binary_vectors, track_names=track_names,
+            time_signature=(4, 4), velocity=123, resolution=2)
 
 
 class TestOnset(TestCase):

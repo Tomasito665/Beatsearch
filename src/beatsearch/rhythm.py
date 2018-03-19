@@ -651,6 +651,48 @@ class Rhythm(object, metaclass=ABCMeta):
         self.set_duration_in_ticks(duration)
 
 
+class RhythmFactory(object, metaclass=ABCMeta):
+    """Interface for rhythm factory utility classes"""
+
+    def __init__(self):
+        raise Exception("Can't instantiate RhythmFactory. It is a utility class and only contains static methods.")
+
+    @classmethod
+    @abstractmethod
+    def from_string(
+            cls,
+            onset_string: str,
+            time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+            velocity: int = 100,
+            resolution: int = 4,
+            onset_character: str = "x",
+            **kwargs) -> Rhythm:
+        """Creates and returns a rhythm, given a string representation of its onsets"""
+
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
+    def from_binary_vector(
+            cls,
+            binary_vector: tp.Iterable[tp.Any],
+            time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+            velocity: int = 100,
+            resolution: int = 4,
+            **kwargs) -> Rhythm:
+        """Creates and returns a rhythm, given a sequence representation of its onsets"""
+
+        raise NotImplementedError
+
+    @staticmethod
+    def __string_to_binary_onset_vector__(onset_string, onset_char) -> tp.Tuple[bool, ...]:
+        return tuple((char == onset_char) for char in onset_string)
+
+    @staticmethod
+    def __binary_vector_to_onsets__(binary_vector: tp.Sequence[bool], velocity: int) -> tp.Tuple[tp.Tuple[int, int]]:
+        return tuple(filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_vector))))
+
+
 class RhythmBase(Rhythm, metaclass=ABCMeta):
     """Rhythm abstract base class
 
@@ -891,70 +933,65 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         return len(self.onsets)
 
     # noinspection PyPep8Naming
-    class create(object):  # not intended like a class but more like a namespace for factory methods
-        def __init__(self):
-            raise Exception("can't instantiate this class, it is a factory and only contains static methods")
-
+    class create(RhythmFactory):  # not intended like a class but like a namespace for factory methods
         @classmethod
         def from_string(
                 cls,
-                onset_string: tp.Sequence[bool],
+                onset_string: str,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
-                onset_character: str = "x",
                 velocity: int = 100,
-                resolution: int = 4
-        ):
-            # type: () -> MonophonicRhythmImpl
-            # NOTE: Return type hinting as an "old-style" comment because MonophonicRhythmImpl not defined yet here
+                resolution: int = 4,
+                onset_character="x",
+                **kwargs):  # type: () -> MonophonicRhythmImpl
             """
-            Creates a new monophonic rhythm, given a given string. Each character in the string will represent one tick
-            and each onset character will represent an onset in the rhythm, e.g. "x--x---x--x-x---", given onset
-            character "x".
+            Creates a new monophonic rhythm from a string. Each character in the string will represent one tick and each
+            onset character will represent an onset in the rhythm, e.g. "x--x---x--x-x---", given onset character "x".
+            The length of the onset string will determine the duration of the rhythm.
 
-            :param onset_string:    onset string where each onset character will result in an onset, the length of the
-                                    string will determine the duration of the rhythm
-            :param time_signature:  time signature of the rhythm as a (numerator, denominator) tuple
-            :param onset_character: the onset character
-            :param velocity:        the velocity of the onsets (velocity is the same for all onsets)
-            :param resolution:      resolution in pulses per quarter note (if res=4, four characters in the onset string
-                                    will represent one quarter note)
+            :param onset_string:   onset string where each onset character will result in an onset
+            :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
+            :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
+            :param resolution:     resolution in pulses per quarter note (e.g., if resolution is set to 4, four
+                                   characters in the onset string will represent one quarter note)
+            :param onset_character: onset character (see onset_string)
+            :param kwargs:         unused
+
             :return: monophonic rhythm object
             """
 
-            return cls.from_binary_chain(
-                binary_chain=tuple((char == onset_character) for char in onset_string),
+            return cls.from_binary_vector(
+                binary_vector=cls.__string_to_binary_onset_vector__(onset_string, onset_character),
                 time_signature=time_signature,
                 velocity=velocity,
                 resolution=resolution
             )
 
         @classmethod
-        def from_binary_chain(
+        def from_binary_vector(
                 cls,
-                binary_chain: tp.Sequence[bool],
+                binary_vector: tp.Sequence[tp.Any],
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                resolution: int = 4
-        ):
-            # type: () -> MonophonicRhythmImpl
-            # NOTE: Return type hinting as an "old-style" comment because MonophonicRhythmImpl not defined yet here
+                resolution: int = 4,
+                **kwargs):  # type: () -> MonophonicRhythmImpl
             """
             Creates a new monophonic rhythm, given a binary chain (iterable). Each element in the iterable represents
             one tick. If the element is True, that will result in an onset, e.g. [1, 0, 1, 0, 1, 1, 1, 0].
 
-            :param binary_chain:   iterable containing true or false elements
-            :param time_signature: the time signature of the rhythm as a (numerator, denominator) tuple
-            :param velocity:       the velocity of the onsets (velocity is the same for all onsets)
-            :param resolution:     resolution in pulses per quarter note (if res=4, four elements in the binary chain
-                                   will represent one quarter note)
+            :param binary_vector:  sequence where each true-evaluated element will result in an onset
+            :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
+            :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
+            :param resolution:     resolution in pulses per quarter note (e.g., if resolution is set to 4, four
+                                   elements in the binary vector will represent one quarter note)
+            :param kwargs:         unused
+
             :return: monophonic rhythm object
             """
 
-            onsets = filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_chain)))
-
             return MonophonicRhythmImpl(
-                onsets=tuple(onsets), duration=len(binary_chain),
-                resolution=resolution, time_signature=time_signature
+                onsets=cls.__binary_vector_to_onsets__(binary_vector, velocity),
+                duration_in_ticks=len(binary_vector), resolution=resolution,
+                time_signature=time_signature
             )
 
 
@@ -1233,8 +1270,8 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
     @abstractmethod
     def get_track_iterator(self) -> tp.Iterator[Track]:
         """
-        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a PolyphonicRhythmImpl.Track
-        object.
+        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a
+        PolyphonicRhythmImpl.Track object.
 
         :return: iterator over this rhythm's tracks yielding PolyphonicRhythmImpl.Track objects
         """
@@ -1267,6 +1304,107 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         # TODO add docstring
         for name, onsets in onsets_by_track_name.items():
             yield Track(onsets=onsets, track_name=name)
+
+    # noinspection PyPep8Naming
+    class create(RhythmFactory):  # not intended like a class but like a namespace for factory methods
+        @staticmethod
+        def __track_name_generator(n: int) -> tp.Generator[str, None, None]:
+            for i in range(n):
+                yield "track %i" % n
+
+        @classmethod
+        def from_string(
+                cls,
+                input_string: str,
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+                velocity: int = 100,
+                resolution: int = 4,
+                onset_character: str = "x",
+                *_,
+                track_separator_char: str = "\n",
+                name_separator_char: str = ":",
+                **kwargs):  # type: () -> PolyphonicRhythmImpl
+            """
+            Creates a new polyphonic rhythm from a string. The input string should contain one binary onset vector per
+            track. The string should also provide the track names. The binary onset vector is a string where each onset
+            character represents an onset. The tracks must be separated by the track separator character, which defaults
+            to a new line.
+
+            For example, given name separator ":", track separator "\n" and onset character "x", to create a simple
+            rhythm with two tracks we could do:
+
+                PolyphonicRhythm.create.from_string(textwrap.dedent(\"""
+                    kick:   x---x---x---x---
+                    snare:  ----x-------x-x-
+                    hi-hat: x-xxx-xxx-xxx-xx
+                \"""))
+
+            :param input_string:         The input string contains information for all tracks, separated by the given
+                                         track separator character. The track string is divided into the track name and
+                                         the binary onset vector with the given name separator character. The binary
+                                         onset vector is a string whose length determines the duration of the rhythm.
+                                         Each onset character in the binary onset vector will result in an onset.
+            :param time_signature:       time signature of the rhythm as a (numerator, denominator) tuple or a
+                                         TimeSignature object
+            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
+            :param resolution:           resolution in pulses per quarter note (e.g., if resolution is set to 4, four
+                                         characters in the binary onset onset string will represent one quarter note)
+            :param onset_character:      onset character (see onset_string)
+            :param track_separator_char: see input_string
+            :param name_separator_char:  see input_string
+            :param kwargs:               unused
+
+            :return: polyphonic rhythm object
+            """
+
+            input_string = input_string.strip()
+            track_names, track_onset_vectors = [], []
+
+            for track_string in input_string.split(track_separator_char):
+                track_name, onset_string = track_string.split(name_separator_char)
+                track_onset_vectors.append(tuple((char == onset_character) for char in onset_string.strip()))
+                track_names.append(track_name.strip())
+
+            return cls.from_binary_vector(
+                binary_vector_tracks=track_onset_vectors,
+                time_signature=time_signature,
+                velocity=velocity,
+                resolution=resolution,
+                track_names=track_names
+            )
+
+        @classmethod
+        def from_binary_vector(
+                cls,
+                binary_vector_tracks: tp.Sequence[tp.Sequence[tp.Any]],
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+                velocity: int = 100,
+                resolution: int = 4,
+                *_, track_names: tp.Sequence[str] = None,
+                **kwargs):  # type: () -> PolyphonicRhythmImpl
+            """
+            Creates a new polyphonic rhythm from a sequence containing one binary onset vector per track. Track names
+            are optional and are given to the track_names parameter.
+
+            :param binary_vector_tracks: sequence holding one binary onset vector per track
+            :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
+            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
+            :param resolution:           resolution in pulses per quarter note (e.g., if resolution is set to 4, four
+                                         characters in the onset string will represent one quarter note)
+            :param track_names:          names of the tracks
+            :param kwargs:               unused
+            :return: polyphonic rhythm object
+            """
+
+            n_tracks = len(binary_vector_tracks)
+            track_names = track_names or cls.__track_name_generator(n_tracks)
+
+            def track_generator():
+                for track_name, binary_vector in zip(track_names, binary_vector_tracks):
+                    onsets = filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_vector)))
+                    yield Track(onsets, track_name)
+
+            return PolyphonicRhythmImpl(track_generator(), time_signature=time_signature, resolution=resolution)
 
     #####################################
     # Polyphonic rhythm representations #
