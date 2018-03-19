@@ -28,7 +28,7 @@ from beatsearch.utils import (
     color_variant,
 )
 from beatsearch.app.control import BSController, BSMidiRhythmLoader
-from beatsearch.graphics.plot import RhythmLoopPlotter, SnapsToGridPolicy, get_rhythm_loop_plotter_classes
+from beatsearch.plot import RhythmLoopPlotter, SnapsToGridPolicy, get_rhythm_loop_plotter_classes
 from beatsearch.rhythm import (
     RhythmLoop,
     MidiRhythm,
@@ -38,8 +38,6 @@ from beatsearch.rhythm import (
     get_drum_mapping_reducer_implementation,
 )
 from beatsearch.config import BSConfig
-from beatsearch.rhythmcorpus import RhythmCorpus
-import midi  # after beatsearch imports!
 
 
 class BSAppWidgetMixin(object):

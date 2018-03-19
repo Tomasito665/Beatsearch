@@ -11,7 +11,7 @@ from create_pickle import log_replace
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.utils import err_print, print_progress_bar, make_dir_if_not_exist, get_default_beatsearch_rhythms_fpath
-from beatsearch.graphics.plot import RhythmLoopPlotter
+from beatsearch.plot import RhythmLoopPlotter
 from beatsearch.rhythm import Rhythm
 from beatsearch.metrics import MonophonicRhythmDistanceMeasure, PolyphonicRhythmDistanceMeasure
 

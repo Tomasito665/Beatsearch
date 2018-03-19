@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "src"))
 from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.rhythm import Unit
-from beatsearch.graphics.plot import RhythmLoopPlotter
+from beatsearch.plot import RhythmLoopPlotter
 from beatsearch.utils import print_progress_bar, get_default_beatsearch_rhythms_fpath
 
 
