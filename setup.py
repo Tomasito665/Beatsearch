@@ -1,14 +1,19 @@
 import sys
 from setuptools import setup
-from build_dependencies import Python3Midi, get_third_party_dir
 
-if not Python3Midi(get_third_party_dir()).has_build():
+try:
+    from build_dependencies import Python3Midi, get_third_party_dir
+    build_dependencies = True
+except ModuleNotFoundError:
+    build_dependencies = False
+
+if build_dependencies and not Python3Midi(get_third_party_dir()).has_build():
     print("Python3Midi hasn't built yet, please run build_dependencies.py")
     sys.exit(-1)
 
 setup(
     name='beatsearch',
-    version='0.0.0',
+    version='0.0.1',
     packages=['beatsearch', 'midi'],
     package_dir={
         '': "src",
