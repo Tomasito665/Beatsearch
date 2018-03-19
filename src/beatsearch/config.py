@@ -332,3 +332,6 @@ class BSConfig(object):
         parser = self._config_parser
         midi_directory = normalize_directory(midi_directory)
         return parser.get(BSConfigSection.SERIALIZED_RHYTHM_CORPORA, midi_directory, fallback=None)
+
+
+__all__ = ['BSConfigSettingHandle', 'BSConfigSection', 'BSConfig']

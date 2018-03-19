@@ -2,6 +2,7 @@
 import os
 import enum
 import inspect
+import textwrap
 import itertools
 from abc import abstractmethod, ABCMeta
 from io import IOBase
@@ -2294,15 +2295,42 @@ class MidiRhythm(RhythmLoop):
             self.set_duration_in_ticks(eot_event.tick)
 
 
-def create_rumba_rhythm(resolution=240):
+def create_rumba_rhythm(resolution=240, polyphonic=True):
     """
     Utility function that creates a one-bar rumba rhythm.
 
     :param resolution: rhythm resolution
-    :return: rumba rhythm
+    :param polyphonic: when true, a polyphonic rhythm will be returned (kick, snare and hi-hat), when false only the
+                       snare is returned (which plays the rumba clave pattern)
+    :return: monophonic/polyphonic rhythm object
     """
 
-    track = Track(((0, 127), (3, 127), (7, 127), (10, 127), (12, 127)), "main_track")
-    rhythm = PolyphonicRhythmImpl([track], 4, time_signature=(4, 4))
+    if polyphonic:
+        rhythm = PolyphonicRhythm.create.from_string(textwrap.dedent("""
+            kick:   ---x--x----x--x-
+            snare:  --x-x---x--x---x
+            hi-hat: x-x-xxxx-xxxx-xx
+        """), TimeSignature(4, 4))
+    else:
+        rhythm = MonophonicRhythm.create.from_string("--x-x---x--x---x", TimeSignature(4, 4))
+
     rhythm.set_resolution(resolution)
     return rhythm
+
+
+__all__ = [
+    # Rhythm classes
+    'Rhythm', 'MonophonicRhythm', 'PolyphonicRhythm',
+    'RhythmLoop', 'MidiRhythm',
+
+    # Misc
+    'Unit', 'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'convert_time', 'create_rumba_rhythm',
+
+    # MIDI drum mapping
+    'MidiDrumMapping', 'GMDrumMapping', 'FrequencyBand', 'DecayTime',
+    'MidiDrumMappingReducer', 'FrequencyBandMidiDrumMappingReducer',
+    'DecayTimeMidiDrumMappingReducer', 'UniquePropertyComboMidiDrumMappingReducer',
+    'get_drum_mapping_reducer_implementation_names',
+    'get_drum_mapping_reducer_implementation_friendly_names',
+    'get_drum_mapping_reducer_implementation'
+]

@@ -9,26 +9,25 @@ from sortedcollections import OrderedSet
 from beatsearch.rhythm import (
     RhythmLoop,
     MidiRhythm,
-    PolyphonicRhythmImpl,
+    PolyphonicRhythm,
     create_rumba_rhythm,
     MidiDrumMappingReducer
 )
 from beatsearch.metrics import (
     MonophonicRhythmDistanceMeasure,
     HammingDistanceMeasure,
-    SummedMonophonicRhythmDistance,
-    Quantizable
+    SummedMonophonicRhythmDistance
 )
 from beatsearch.rhythmcorpus import RhythmCorpus
 from beatsearch.config import BSConfig
-from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary
+from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, Quantizable
 
 
 class BSRhythmPlayer(object):
     def __init__(self):
         self._on_playback_ended_callback = no_callback
 
-    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythmImpl]) -> None:
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
         raise NotImplementedError
 
     def stop_playback(self):  # type: () -> None
@@ -54,14 +53,14 @@ class BSRhythmPlayer(object):
 
 class BSFakeRhythmPlayer(BSRhythmPlayer):
 
-    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythmImpl = create_rumba_rhythm()):
+    def __init__(self, playback_duration: float = 2.0, rhythm: PolyphonicRhythm = create_rumba_rhythm()):
         super(BSFakeRhythmPlayer, self).__init__()
         self._playback_duration = playback_duration  # type: float
         self._timer = None                           # type: tp.Union[threading.Timer, None]
-        self._rhythm = rhythm                        # type: PolyphonicRhythmImpl
+        self._rhythm = rhythm                        # type: PolyphonicRhythm
         self._repeat = False                         # type: bool
 
-    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythmImpl]) -> None:
+    def playback_rhythms(self, rhythms: tp.Iterable[PolyphonicRhythm]) -> None:
         @wraps(self.on_playback_ended)
         def on_playback_ended():
             if self.get_repeat():

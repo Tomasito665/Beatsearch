@@ -628,3 +628,14 @@ class OnsetDensity(MonophonicRhythmFeatureExtractor):
         binary_vector = pre_processor_results[0]
         n_onsets = sum(binary_vector)  # onsets are ones, non-onsets are zeros
         return float(n_onsets) / len(binary_vector)
+
+
+__all__ = [
+    # Feature extractor abstract base classes (or interfaces)
+    'FeatureExtractor', 'RhythmFeatureExtractor',
+    'MonophonicRhythmFeatureExtractor', 'PolyphonicRhythmFeatureExtractor',
+
+    # Monophonic rhythm feature extractor implementations
+    'BinaryOnsetVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
+    'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'OnsetDensity'
+]

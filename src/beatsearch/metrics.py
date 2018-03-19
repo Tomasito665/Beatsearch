@@ -624,3 +624,16 @@ class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
 
         average_distance = float(total_distance) / n_tracks
         return average_distance / duration if self.normalize else average_distance
+
+
+__all__ = [
+    # Distance measure abstract base classes
+    'DistanceMeasure', 'MonophonicRhythmDistanceMeasure', 'PolyphonicRhythmDistanceMeasure',
+
+    # Monophonic rhythm distance measure implementations
+    'HammingDistanceMeasure', 'EuclideanIntervalVectorDistanceMeasure',
+    'IntervalDifferenceVectorDistanceMeasure', 'SwapDistanceMeasure', 'ChronotonicDistanceMeasure',
+
+    # Polyphonic rhythm distance measure implementations
+    'SummedMonophonicRhythmDistance'
+]

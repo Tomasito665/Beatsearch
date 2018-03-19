@@ -263,3 +263,6 @@ class RhythmCorpus(object):
 
         # won't be equal if new MIDI files have been added
         return n_cached_midi_files == n_actual_midi_files
+
+
+__all__ = ['RhythmCorpus']

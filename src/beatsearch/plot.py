@@ -531,3 +531,18 @@ def get_rhythm_loop_plotter_classes():
     """
 
     return RhythmLoopPlotter.__subclasses__()
+
+
+__all__ = [
+    # Rhythm plotters
+    'RhythmLoopPlotter',
+
+    'SchillingerRhythmNotation', 'ChronotonicNotation', 'PolygonNotation',
+    'SpectralNotation', 'TEDASNotation', 'IOIHistogram', 'get_rhythm_loop_plotter_classes',
+
+    # Subplot layouts
+    'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
+
+    # Misc
+    'SnapsToGridPolicy', 'plot_rhythm_grid'
+]
