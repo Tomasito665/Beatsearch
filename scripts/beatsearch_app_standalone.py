@@ -1,4 +1,3 @@
-from beatsearch.utils import get_default_beatsearch_rhythms_fpath
 from beatsearch.app.control import BSController
 from beatsearch.app.view import BSApp
 

@@ -1,18 +1,39 @@
 import os
 import sys
-import subprocess
 
-BEATSEARCH_LIB_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-BEATSEARCH_PROJECT_DIR = os.path.dirname(BEATSEARCH_LIB_DIR)
-THIRD_PARTY_DIR = os.path.join(BEATSEARCH_PROJECT_DIR, "third-party")
 
-PYTHON3_MIDI_PROJECT_DIR = os.path.join(THIRD_PARTY_DIR, "python3-midi")
-PYTHON3_MIDI_LIB_DIR = os.path.join(PYTHON3_MIDI_PROJECT_DIR, "build", "lib")
+def find_beatsearch_project_dir(max_levels=5):
+    cd = os.path.dirname(os.path.realpath(__file__))
 
-sys.path.append(BEATSEARCH_LIB_DIR)
+    def check_directory(directory):
+        return all(os.path.isfile(os.path.join(directory, fname)) for fname in [
+            "build_dependencies.py", "setup.py"
+        ])
 
-if not os.path.isdir(os.path.join(PYTHON3_MIDI_LIB_DIR, "midi")):
-    subprocess.check_call((sys.executable, os.path.join(PYTHON3_MIDI_PROJECT_DIR, "setup.py"), "build"),
-                          cwd=PYTHON3_MIDI_PROJECT_DIR)
+    for level in range(max_levels):
+        if check_directory(cd):
+            return cd
+        next_dir = os.path.dirname(cd)
+        if next_dir == cd:
+            break
+        cd = os.path.dirname(cd)
 
-sys.path.append(PYTHON3_MIDI_LIB_DIR)
+    return ""
+
+
+BEATSEARCH_PROJECT_DIR = find_beatsearch_project_dir()
+
+if BEATSEARCH_PROJECT_DIR:
+    sys.path.append(BEATSEARCH_PROJECT_DIR)
+    from build_dependencies import Python3Midi, get_third_party_dir
+
+    python3_midi = Python3Midi(get_third_party_dir(BEATSEARCH_PROJECT_DIR))
+
+    if not python3_midi.has_build():
+        print("Python3Midi hasn't built yet, please run build_dependencies.py")
+        sys.exit(-1)
+
+    try:
+        import midi
+    except ModuleNotFoundError:
+        sys.path.append(python3_midi.lib_dir)

@@ -11,4 +11,6 @@ __pycache__/
 # BeatSearch generated stuff
 data/**/*.pkl
 output/
-
+build/
+dist/
+src/beatsearch.egg-info/
