@@ -16,7 +16,6 @@ def get_git_revision_short_hash():
 
 if __name__ == "__main__":
     controller = BSController()
-    controller.set_corpus(CORPUS)
     short_hash = get_git_revision_short_hash()
 
     print("BeatSearch, commit: %s" % short_hash)
