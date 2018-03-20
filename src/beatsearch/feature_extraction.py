@@ -5,7 +5,8 @@ import numpy as np
 import typing as tp
 from abc import ABCMeta, abstractmethod
 from beatsearch.utils import Quantizable
-from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, Unit, convert_time
+from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
+    Unit, UnitType, parse_unit_argument, rescale_tick, convert_tick
 
 ######################################
 # Feature extractor abstract classes #
@@ -39,7 +40,7 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def get_unit(self) -> str:
+    def get_unit(self) -> tp.Union[Unit, None]:
         """Returns the musical unit of this preprocessor
 
         :return: musical unit of this preprocessor as a string
@@ -48,7 +49,7 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def set_unit(self, unit: str) -> None:
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         """Sets the musical unit of this preprocessor
 
         :return:
@@ -58,24 +59,22 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
 
     def process(self, rhythm: Rhythm) -> tp.Any:
         """Computes and returns a rhythm feature
-        Computes a feature of the given rhythm and returns it.
 
         :param rhythm: rhythm of which to compute the feature
         :return: the rhythm feature value
         """
 
-        unit = self.get_unit()
-        concrete_unit = rhythm.get_resolution() if unit == "ticks" else unit
         pre_processor_results = list(pre_processor.process(rhythm) for pre_processor in self.get_pre_processors())
-        return self.__process__(rhythm, concrete_unit, pre_processor_results)
+        return self.__process__(rhythm, pre_processor_results)
 
     @abstractmethod
-    def __process__(self, rhythm: Rhythm, unit: tp.Union[int, str], pre_processor_results: tp.List[tp.Any]):
+    def __process__(self, rhythm: Rhythm, pre_processor_results: tp.List[tp.Any]):
         """Computes and returns a rhythm feature
-        Computes a feature of the given rhythm and returns it.
 
-        :param rhythm: rhythm of which to compute the feature
-        :param unit: concrete unit ("ticks" unit will be converted to rhythm's resolution)
+        :param rhythm:                 rhythm of which to compute the feature
+        :param pre_processor_results:  results of the preprocessors, which process the given rhythm
+                                       immediately before the call to this method
+
         :return: the rhythm feature value
         """
 
@@ -102,19 +101,21 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
         return self.get_pre_processors()
 
     @property
-    def unit(self) -> str:
+    def unit(self) -> tp.Union[Unit, None]:
         """See get_unit and set_unit"""
         return self.get_unit()
 
     @unit.setter
-    def unit(self, unit: str):
+    def unit(self, unit: tp.Optional[UnitType]):
         self.set_unit(unit)
 
 
 class RhythmFeatureExtractorBase(RhythmFeatureExtractor, metaclass=ABCMeta):
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH):
         self._pre_processors = tuple(self.init_pre_processors())  # type: tp.Tuple[RhythmFeatureExtractorBase, ...]
-        self._unit = None
+        self.__tick_to_unit__ = None
+
+        self._unit = None  # type: tp.Union[Unit, None]
         self.unit = unit  # calling setter, which also sets the unit of the preprocessors
 
     def get_pre_processors(self) -> tp.Tuple[RhythmFeatureExtractor, ...]:
@@ -125,23 +126,19 @@ class RhythmFeatureExtractorBase(RhythmFeatureExtractor, metaclass=ABCMeta):
 
         return self._pre_processors
 
-    def get_unit(self):
+    def get_unit(self) -> tp.Union[Unit, None]:
         """Returns the time unit of this feature extractor"""
         return self._unit
 
-    def set_unit(self, unit: str):
+    @parse_unit_argument
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         """Sets the time unit of this feature extractor
 
         Sets the time unit of this rhythm feature extractor. This method will also set the unit of the preprocessors.
 
-        :param unit: new time unit as a string
+        :param unit: new unit
         :return: None
         """
-
-        unit = str(unit)
-
-        if not Unit.exists(unit) and unit != "ticks":
-            raise Unit.UnknownTimeUnit(unit)
 
         for pre_processor in self._pre_processors:
             pre_processor.set_unit(unit)
@@ -168,17 +165,11 @@ class QuantizableRhythmFeatureExtractorMixin(RhythmFeatureExtractor, Quantizable
 
 class MonophonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABCMeta):
     @abstractmethod
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """Computes and returns a monophonic rhythm feature
         Computes a feature of the given monophonic rhythm and returns it.
 
         :param rhythm: monophonic rhythm of which to compute the feature
-        :param unit: concrete time unit
         :return: the monophonic rhythm feature value
         """
 
@@ -210,7 +201,7 @@ class PolyphonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABC
 
 
 class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
-    def __process__(self, rhythm: MonophonicRhythm, unit: tp.Union[int, str], *_):
+    def __process__(self, rhythm: MonophonicRhythm, _):
         """
         Returns the binary representation of the note onsets of the given rhythm where each step where a note onset
         happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
@@ -222,14 +213,20 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
 
         Rhythm.Precondition.check_resolution(rhythm)
 
-        resolution = rhythm.get_resolution()
+        unit = self.unit
         duration = rhythm.get_duration(unit)
         binary_string = [0] * int(math.ceil(duration))
 
+        if unit is None:
+            get_onset_position = lambda t: t
+        else:
+            resolution = rhythm.get_resolution()
+            get_onset_position = lambda t: unit.from_ticks(t, resolution, True)
+
         for onset in rhythm.get_onsets():
-            pulse = convert_time(onset.tick, resolution, unit, quantize=True)
+            onset_position = get_onset_position(onset.tick)
             try:
-                binary_string[pulse] = 1
+                binary_string[onset_position] = 1
             except IndexError:
                 pass  # when quantization pushes note after end of rhythm
 
@@ -242,7 +239,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
         POST_NOTE = enum.auto()
 
     # noinspection PyShadowingBuiltins
-    def __init__(self, unit="eighths", mode: Mode = Mode.POST_NOTE, quantize_enabled=True):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, mode: Mode = Mode.POST_NOTE, quantize_enabled=True):
         MonophonicRhythmFeatureExtractor.__init__(self, unit)
         QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
         self._mode = None
@@ -257,12 +254,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
     def mode(self, mode: Mode):
         self._mode = mode
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the time difference between the notes in the given rhythm. The elements of the vector will depend on
         this IOIVector extractor's mode property:
@@ -292,31 +284,34 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
         # TODO Implement both modes generically here
 
         if self.mode == self.Mode.PRE_NOTE:
-            return self._pre_note_ioi(rhythm, unit)
+            return self._pre_note_ioi(rhythm)
         elif self.mode == self.Mode.POST_NOTE:
-            return self._post_note_ioi(rhythm, unit)
+            return self._post_note_ioi(rhythm)
         else:
             raise RuntimeError("Unknown mode: \"%s\"" % self.mode)
 
-    def _pre_note_ioi(self, rhythm: MonophonicRhythm, unit: tp.Union[int, str]):
+    def _pre_note_ioi(self, rhythm: MonophonicRhythm):
+        quantize = self.is_quantize_enabled()
         resolution = rhythm.get_resolution()
+        unit = self.get_unit()
         current_tick = 0
         intervals = []
-        quantize = self.is_quantize_enabled()
 
         for onset in rhythm.get_onsets():
             delta_tick = onset.tick - current_tick
-            intervals.append(convert_time(delta_tick, resolution, unit, quantize=quantize))
+            intervals.append(convert_tick(delta_tick, resolution, unit, quantize))
             current_tick = onset.tick
 
         return intervals
 
     # TODO Add cyclic option to include the offset in the last onset's interval
-    def _post_note_ioi(self, rhythm: MonophonicRhythm, unit: tp.Union[int, str]):
+    def _post_note_ioi(self, rhythm: MonophonicRhythm):
+        quantize = self.is_quantize_enabled()
+        resolution = rhythm.get_resolution()
+        unit = self.get_unit()
         intervals = []
         onset_positions = itertools.chain((onset.tick for onset in rhythm.get_onsets()), [rhythm.duration_in_ticks])
         last_onset_tick = -1
-        quantize = self.is_quantize_enabled()
 
         for onset_tick in onset_positions:
             if last_onset_tick < 0:
@@ -324,8 +319,7 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
                 continue
 
             delta_in_ticks = onset_tick - last_onset_tick
-            delta_in_units = convert_time(delta_in_ticks, rhythm.resolution, unit, quantize=quantize)
-
+            delta_in_units = convert_tick(delta_in_ticks, resolution, unit, quantize)
             intervals.append(delta_in_units)
             last_onset_tick = onset_tick
 
@@ -333,19 +327,14 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
 
 
 class IOIHistogram(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH):
         super().__init__(unit)
 
     @staticmethod
     def init_pre_processors():
         return [IOIVector(mode=IOIVector.Mode.POST_NOTE, quantize_enabled=True)]
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the number of occurrences of the inter-onset intervals of the notes of the given rhythm in ascending
         order. The inter onset intervals are computed in POST_NOTE mode.
@@ -368,7 +357,7 @@ class IOIHistogram(MonophonicRhythmFeatureExtractor):
 
 
 class BinarySchillingerChain(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="eighths", values=(1, 0)):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, values=(1, 0)):
         super().__init__(unit)
         self._values = None
         self.values = values  # calls setter
@@ -379,6 +368,12 @@ class BinarySchillingerChain(MonophonicRhythmFeatureExtractor):
 
     @property
     def values(self):
+        """The two values of the schillinger chain returned by process
+
+        Binary vector to be used in the schillinger chain returned by process(). E.g. when set to ('a', 'b'), the
+        schillinger chain returned by process() will consist of 'a' and 'b'.
+        """
+
         return self._values
 
     @values.setter
@@ -386,12 +381,7 @@ class BinarySchillingerChain(MonophonicRhythmFeatureExtractor):
         values = iter(values)
         self._values = next(values), next(values)
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the Schillinger notation of this rhythm where each onset is a change of a "binary note".
 
@@ -403,9 +393,6 @@ class BinarySchillingerChain(MonophonicRhythmFeatureExtractor):
           X--X---X--X-X---
           1110000111001111
 
-        :param unit: the unit to quantize on ('ticks' is no quantization)
-        :param values: binary vector to be used in the schillinger chain. E.g. when given ('a', 'b'), the returned
-                       schillinger chain will consist of 'a' and 'b'.
         :return: Schillinger rhythm vector as a list
         """
 
@@ -427,12 +414,7 @@ class ChronotonicChain(MonophonicRhythmFeatureExtractor):
     def init_pre_processors():
         yield BinaryOnsetVector()
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the chronotonic chain representation of the given rhythm.
 
@@ -440,7 +422,6 @@ class ChronotonicChain(MonophonicRhythmFeatureExtractor):
           X--X---X--X-X---
           3334444333224444
 
-        :param unit: unit
         :return: the chronotonic chain as a list
         """
 
@@ -460,7 +441,7 @@ class ChronotonicChain(MonophonicRhythmFeatureExtractor):
 
 
 class IOIDifferenceVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
-    def __init__(self, unit="eighths", quantize_enabled=True, cyclic=True):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, quantize_enabled=True, cyclic=True):
         MonophonicRhythmFeatureExtractor.__init__(self, unit)
         QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
         self._cyclic = None
@@ -479,18 +460,12 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
     def cyclic(self, cyclic):
         self._cyclic = bool(cyclic)
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the interval difference vector (aka difference of rhythm vector) of the given rhythm. Per note, this is
         the difference between the current onset interval and the next onset interval. So, if N is the number of onsets,
         the returned vector will have a length of N - 1. This is different with cyclic rhythms, where the last onset's
         interval is compared with the first onset's interval. In this case, the length will be N.
-
         The inter-onset interval vector is computed in POST_NOTE mode.
 
         For example, given the POST_NOTE inter-onset interval vector for the Rumba clave:
@@ -501,7 +476,6 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
            With cyclic set to True:  [4/3, 3/4, 2/3, 4/2, 3/4]
 
         :param rhythm: monophonic rhythm of which to compute the inter-onset difference vector
-        :param unit: time unit
         :return: interval difference vector of the given rhythm
         """
 
@@ -522,27 +496,23 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
 
 
 class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
-    def __init__(self, unit="eighths", quantize_enabled=True):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, quantize_enabled=True):
         MonophonicRhythmFeatureExtractor.__init__(self, unit)
         QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the absolute onset times of the notes in the given rhythm.
 
-        :param unit: the unit of the onset times
         :return: a list with the onset times of this rhythm
         """
 
         Rhythm.Precondition.check_resolution(rhythm)
         resolution = rhythm.get_resolution()
         quantize = self.is_quantize_enabled()
-        return [convert_time(onset[0], resolution, unit, quantize) for onset in rhythm.get_onsets()]
+        unit = self.get_unit()
+
+        return [convert_tick(onset[0], resolution, unit, quantize) for onset in rhythm.get_onsets()]
 
 
 class SyncopationVector(MonophonicRhythmFeatureExtractor):
@@ -550,17 +520,12 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
     def init_pre_processors():
         yield BinaryOnsetVector()
 
-    def set_unit(self, unit: str):
-        if unit == "ticks":
-            raise ValueError("SyncopationVector only supports musical units, not ticks")
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        if unit is None:
+            raise ValueError("SyncopationVector does not support tick-based computation")
         super().set_unit(unit)
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Extracts the syncopations from the given monophonic rhythm. The syncopations are computed with the method
         proposed by H.C. Longuet-Higgins and C. S. Lee in their work titled: "The Rhythmic Interpretation of
@@ -572,7 +537,6 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
             - the syncopation strength
 
         :param rhythm: rhythm to extract the syncopations from
-        :param unit: time unit
         :return: a two-dimensional tuple containing the onset positions in the first dimension and the syncopation
                  strengths in the second dimension
         """
@@ -581,7 +545,7 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
 
         binary_vector = pre_processor_results[0]
         time_signature = rhythm.get_time_signature()
-        metrical_weights = time_signature.get_metrical_weights(unit)
+        metrical_weights = time_signature.get_metrical_weights(self.unit)
 
         def get_syncopations():
             for step, curr_step_is_onset in enumerate(binary_vector):
@@ -603,25 +567,19 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
 
 
 class OnsetDensity(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH):
         super().__init__(unit)
 
     @staticmethod
     def init_pre_processors():
         yield BinaryOnsetVector()
 
-    def __process__(
-            self,
-            rhythm: MonophonicRhythm,
-            unit: tp.Union[int, str],
-            pre_processor_results: tp.List[tp.Any]
-    ):
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Computes the onset density of the given rhythm. The onset density is the number of onsets over the number of
         positions in the binary onset vector of the given rhythm.
 
         :param rhythm: monophonic rhythm to compute the onset density of
-        :param unit: time unit
         :return: onset density of the given rhythm
         """
 

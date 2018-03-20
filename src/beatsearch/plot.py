@@ -8,9 +8,9 @@ from matplotlib.colors import to_rgba
 from matplotlib.patches import Wedge
 from abc import ABCMeta, abstractmethod
 from itertools import cycle, repeat
-from beatsearch.rhythm import Unit, RhythmLoop, Rhythm, Track
+from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
-    RhythmFeatureExtractorBase, ChronotonicChain, OnsetPositionVector, IOIHistogram
+    RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram
 from beatsearch.utils import Quantizable
 
 # make room for the labels
@@ -32,14 +32,7 @@ def get_coordinates_on_circle(circle_position, circle_radius, x):
     return p_x, p_y
 
 
-# TODO replace whatever calls this function with @concretize_unit decorator
-def to_concrete_unit(unit, rhythm):
-    if unit == 'ticks':
-        return rhythm.get_resolution()
-    return unit
-
-
-def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit, axis='x'):
+def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis='x'):
     duration = rhythm.get_duration(unit)
     measure_duration = rhythm.get_measure_duration(unit)
     beat_duration = rhythm.get_beat_duration(unit)
@@ -148,15 +141,18 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
     # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
     COLORS = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
 
-    def __init__(self, unit: str, subplot_layout: SubplotLayout,
-                 feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractorBase]] = None,
-                 snap_to_grid_policy: SnapsToGridPolicy = SnapsToGridPolicy.NOT_APPLICABLE, snaps_to_grid: bool = None):
-
-        self._subplot_layout = subplot_layout  # type: SubplotLayout
-        self._feature_extractors = feature_extractors
-        self._unit = None
-        self._snaps_to_grid = None
-        self._snap_to_grid_policy = snap_to_grid_policy
+    def __init__(
+            self, unit: UnitType,
+            subplot_layout: SubplotLayout,
+            feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractor]] = None,
+            snap_to_grid_policy: SnapsToGridPolicy = SnapsToGridPolicy.NOT_APPLICABLE,
+            snaps_to_grid: bool = None
+    ):
+        self._subplot_layout = subplot_layout            # type: SubplotLayout
+        self._feature_extractors = feature_extractors or dict()  # type: tp.Dict[str, RhythmFeatureExtractor]
+        self._unit = None                                # type: Unit
+        self._snaps_to_grid = None                       # type: bool
+        self._snap_to_grid_policy = snap_to_grid_policy  # type: SnapsToGridPolicy
 
         if snaps_to_grid is None:
             if snap_to_grid_policy in [SnapsToGridPolicy.NEVER, SnapsToGridPolicy.ADJUSTABLE]:
@@ -167,23 +163,22 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
         self.snaps_to_grid = snaps_to_grid  # call setter
         self.set_unit(unit)
 
-    def set_unit(self, unit):
-        if unit != "ticks":
-            Unit.check_unit(unit)
+    @parse_unit_argument
+    def set_unit(self, unit: UnitType) -> None:
         # bind unit of feature extractors to rhythm loop plotter unit
         for feature_extractor in self._feature_extractors.values():
             feature_extractor.set_unit(unit)
         self._unit = unit
 
-    def get_unit(self):
+    def get_unit(self) -> Unit:
         return self._unit
 
     @property
-    def unit(self):
+    def unit(self) -> Unit:
         return self.get_unit()
 
     @unit.setter
-    def unit(self, unit):
+    def unit(self, unit: UnitType):
         self.set_unit(unit)
 
     @property
@@ -236,7 +231,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
         :return: matplotlib figure object
         """
 
-        concrete_unit = rhythm_loop.get_resolution() if self.unit == "ticks" else self.unit
+        unit = self.get_unit()
         n_tracks = rhythm_loop.get_track_count()
 
         # the figure to add the subplot(s) to
@@ -250,8 +245,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
 
         # named arguments given both to __setup_subplot__ and __draw_track__
         common_kwargs = {
-            'concrete_unit': concrete_unit,
-            'n_pulses': int(math.ceil(rhythm_loop.get_duration(concrete_unit))),
+            'n_pulses': int(math.ceil(rhythm_loop.get_duration(unit))),
             'n_tracks': rhythm_loop.get_track_count()
         }
 
@@ -299,7 +293,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
 class SchillingerRhythmNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Schillinger rhythm notation"
 
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
@@ -310,7 +304,7 @@ class SchillingerRhythmNotation(RhythmLoopPlotter):
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         axes.yaxis.set_ticklabels([])
         axes.yaxis.set_visible(False)
-        plot_rhythm_grid(axes, rhythm_loop, kw['concrete_unit'])  # plot musical grid
+        plot_rhythm_grid(axes, rhythm_loop, self.get_unit())  # plot musical grid
 
     def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
         # each schillinger chain is drawn on a different vertical pos
@@ -332,7 +326,7 @@ class SchillingerRhythmNotation(RhythmLoopPlotter):
 class ChronotonicNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Chronotonic notation"
 
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
@@ -345,7 +339,7 @@ class ChronotonicNotation(RhythmLoopPlotter):
         return cls.PLOT_TYPE_NAME
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
-        plot_rhythm_grid(axes, rhythm_loop, kw['concrete_unit'])
+        plot_rhythm_grid(axes, rhythm_loop, self.get_unit())
 
     def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
         chronotonic_chain = self.get_feature_extractor("chronotonic").process(rhythm_track)
@@ -355,7 +349,7 @@ class ChronotonicNotation(RhythmLoopPlotter):
 class PolygonNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Polygon notation"
 
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
@@ -382,7 +376,7 @@ class PolygonNotation(RhythmLoopPlotter):
             theta_1, theta_2 = (((90 - (pulse / n_pulses * 360)) % 360) for pulse in (pulse_end, pulse_start))
             axes.add_artist(Wedge(center, radius, theta_1, theta_2, **kw_))
 
-        unit = kw['concrete_unit']
+        unit = self.get_unit()
         n_pulses = kw['n_pulses']
         n_pulses_per_measure = int(rhythm_loop.get_measure_duration(unit))
 
@@ -427,15 +421,16 @@ class PolygonNotation(RhythmLoopPlotter):
         coordinates_x = []
         coordinates_y = []
 
-        for t in onset_times:
-            relative_t = float(t) / n_pulses
-            x, y, = get_coordinates_on_circle(main_center, main_radius, relative_t)
-            coordinates_x.append(x)
-            coordinates_y.append(y)
+        if n_pulses > 0:
+            for t in onset_times:
+                relative_t = float(t) / n_pulses
+                x, y, = get_coordinates_on_circle(main_center, main_radius, relative_t)
+                coordinates_x.append(x)
+                coordinates_y.append(y)
 
-        # add first coordinate at the end to close the shape
-        coordinates_x.append(coordinates_x[0])
-        coordinates_y.append(coordinates_y[0])
+            # add first coordinate at the end to close the shape
+            coordinates_x.append(coordinates_x[0])
+            coordinates_y.append(coordinates_y[0])
 
         # plot the lines on the circle
         return axes.plot(coordinates_x, coordinates_y, '-o', color=kw['color'])
@@ -444,7 +439,7 @@ class PolygonNotation(RhythmLoopPlotter):
 class SpectralNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Spectral notation"
 
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
         super().__init__(
             unit=unit,
             subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
@@ -469,7 +464,7 @@ class SpectralNotation(RhythmLoopPlotter):
 class TEDASNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "TEDAS Notation"
 
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
         super().__init__(
             unit=unit,
             subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
@@ -485,7 +480,7 @@ class TEDASNotation(RhythmLoopPlotter):
         return cls.PLOT_TYPE_NAME
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
-        plot_rhythm_grid(axes, rhythm_loop, kw['concrete_unit'])
+        plot_rhythm_grid(axes, rhythm_loop, self.get_unit())
 
     def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
         ioi_vector = self.get_feature_extractor("ioi_vector").process(rhythm_track)
@@ -504,7 +499,7 @@ class TEDASNotation(RhythmLoopPlotter):
 class IOIHistogramPlot(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Inter-onset interval histogram"
 
-    def __init__(self, unit="eighths"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),

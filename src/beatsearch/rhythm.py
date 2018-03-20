@@ -8,6 +8,7 @@ from abc import abstractmethod, ABCMeta
 from io import IOBase
 from functools import wraps
 import typing as tp
+from fractions import Fraction
 from collections import OrderedDict, namedtuple, defaultdict
 from beatsearch.utils import TupleView, friendly_named_class, most_common_element, sequence_product
 import math
@@ -15,204 +16,234 @@ import numpy as np
 import midi
 
 
-class Unit(object):
-    _units = OrderedDict()  # units by unit values
-    _unit_names = []  # unit names
+class UnitError(Exception):
+    pass
 
-    def __init__(self, name, value, scale_factor_from_quarter_note):
-        self._name = str(name)
-        self._value = value
-        self._scale_from_quarter = float(scale_factor_from_quarter_note)
-        Unit._units[value] = self
 
-    class UnknownTimeUnit(Exception):
-        pass
+class Unit(enum.Enum):
+    OCTUPLE_WHOLE = Fraction(8, 1), ("octuple whole", "octuple", "large", "duplex longa", "maxima")
+    QUADRUPLE_WHOLE = Fraction(4, 1), ("long", "longa")
+    DOUBLE_WHOLE = Fraction(2, 1), ("double", "breve")
+    WHOLE = Fraction(1, 1), ("whole", "semibreve")
+    HALF = Fraction(1, 2), ("half", "minim")
+    QUARTER = Fraction(1, 4), ("quarter", "crotchet")
+    EIGHTH = Fraction(1, 8), ("eighth", "quaver")
+    SIXTEENTH = Fraction(1, 16), ("sixteenth", "semiquaver")
+    THIRTY_SECOND = Fraction(1, 32), ("thirty-second", "demisemiquaver")
+    SIXTY_FOURTH = Fraction(1, 64), ("sixty-fourth", "hemidemisemiquaver")
 
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def value(self):
-        return self._value
-
-    @property
-    def scale_factor_from_quarter_note(self):
-        return self._scale_from_quarter
-
-    @staticmethod
-    def exists(unit_value):
-        return unit_value in Unit._units
+    __by_note_names__ = dict()    # type: tp.Dict[str, Unit]
+    __by_note_values__ = dict()   # type: tp.Dict[float, Unit]
 
     @classmethod
-    def check_unit(cls, unit_value):
-        if not cls.exists(unit_value):
-            raise cls.UnknownTimeUnit("Unknown unit: %s" % unit_value)
+    def get(cls, query):  # type: (tp.Union[Fraction, str, float, Unit]) -> tp.Union[Unit, None]
+        """Returns a unit given either its note value or one of its names
 
-    @staticmethod
-    def get(unit):  # type: (tp.Union[str, Unit]) -> Unit
-        """
-        Returns the Unit object for the given unit value, e.g. "quarters" or "eighths". If the given unit is already
-        a Unit object, this method will return that.
+        Returns a Unit enum object given either:
+            note value: its note value as a float (e.g., 1/4 for Unit.QUARTER)
+            note name: one of its names (e.g., "quarter" or "crotchet" for Unit.QUARTER)
+            Unit enum: the unit enumeration object itself (this will be returned)
 
-        :return: Unit object for given unit value or Unit if given Unit as argument
-        """
+        This method only returns None if the given query is None. In all other cases it will return a Unit enum object
+        or raise UnitError.
 
-        try:
-            unit_value = unit.value
-        except AttributeError:
-            unit_value = unit
+        :param query: either a note value or a note name
+        :return: unit enum object or None if query is None
 
-        try:
-            return Unit._units[unit_value]
-        except KeyError:
-            raise Unit.UnknownTimeUnit(unit_value)
-
-    @staticmethod
-    def get_unit_names():
-        """
-        Returns a tuple containing the names of the units.
-
-        :return: tuple with unit names
+        :raises UnitError: if unit not found
         """
 
-        if len(Unit._unit_names) != len(Unit._units):
-            Unit._unit_names = tuple(unit.name for unit in Unit._units.values())
-        return Unit._unit_names
+        if query is None:
+            return None
 
-    @classmethod
-    def get_unit_values(cls):
-        """
-        Returns a tuple containing the unit values ("quarters", "eighths", "sixteenths", etc)
-
-        :return: tuple containing the unit values
-        """
-
-        return tuple(cls._units.keys())
-
-    @classmethod
-    def get_unit_by_name(cls, unit_name):
-        """
-        Returns a unit given its unit name.
-
-        :param unit_name: unit name
-        :return: Unit object
-        """
-
-        try:
-            unit_ix = cls._unit_names.index(unit_name)
-        except IndexError:
-            raise Unit.UnknownTimeUnit("No time unit named \"%s\"" % unit_name)
-        return tuple(cls._units.values())[unit_ix]
-
-
-Unit.FULL = Unit("Full", "fulls", 0.25)
-Unit.HALF = Unit("Half", "halves", 0.5)
-Unit.QUARTER = Unit("Quarter", "quarters", 1.0)
-Unit.EIGHTH = Unit("Eighth", "eighths", 2.0)
-Unit.SIXTEENTH = Unit("Sixteenth", "sixteenths", 4.0)
-Unit.THIRTY_SECOND = Unit("Thirty-second", "thirty-seconds", 8.0)
-
-
-def convert_time(time, unit_from, unit_to, quantize=False):
-    """
-    Converts the given time to a given unit. The given units can be either a resolution (in Pulses
-    Per Quarter Note) or one of these musical time units: 'fulls', 'halves', 'quarters', 'eighths or,
-    'sixteenths'.
-
-    :param time: time value
-    :param unit_from: the original unit of the given time value.
-    :param unit_to: the unit to convert the time value to.
-    :param quantize: whether or not to round to the nearest target unit. If quantize is true, this
-                     function will return an integer. If false, this function will return a float.
-    :return: converted time
-    """
-
-    if unit_from == unit_to:
-        return int(round(time)) if quantize else time
-
-    if time == 0:
-        return int(time) if quantize else float(time)
-
-    try:
-        # if unit_from is a time resolution
-        time_in_quarters = time / float(unit_from)  # if unit_from is a time resolution
-    except (ValueError, TypeError):
-        # if unit_from is musical unit
-        unit_from = Unit.get(unit_from)
-        time_in_quarters = time / unit_from.scale_factor_from_quarter_note
-
-    try:
-        # if unit_to is a time resolution
-        converted_time = time_in_quarters * float(unit_to)
-    except (ValueError, TypeError):
-        # if unit_to is a musical unit
-        unit_to = Unit.get(unit_to)
-        converted_time = time_in_quarters * unit_to.scale_factor_from_quarter_note
-
-    return int(round(converted_time)) if quantize else converted_time
-
-
-def concretize_unit(f_get_res=lambda *args, **kwargs: args[0].get_resolution()):
-    """
-    This function returns a decorator which converts the "unit" argument of a function to a resolution in PPQ.
-
-    :param f_get_res: callable that should return the resolution. The result of this function will be replaced for
-                      "unit" arguments with a value of 'ticks'. This callable is passed the *args and **kwargs of the
-                      function being decorated.
-    :return: a decorator function
-    """
-
-    def concretize_unit_decorator(func):
-        arg_spec = inspect.getfullargspec(func)
-
-        try:
-            unit_arg_index = arg_spec.args.index("unit")
-            n_args_before_default_args = len(arg_spec.args) - len(arg_spec.defaults)
-            default_unit = arg_spec.defaults[unit_arg_index - n_args_before_default_args]
-        except ValueError:
-            unit_arg_index = -1
-            if not arg_spec.keywords:
-                raise ValueError("Function %s doesn't have a 'unit' argument, "
-                                 "neither does it accept **kwargs" % func.__name__)
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Retrieve the unit or get the default unit if not given
+        if isinstance(query, str):
             try:
-                unit = kwargs["unit"]
-                unit_in_kwargs = True
+                return cls.__by_note_names__[query]
             except KeyError:
-                try:
-                    unit = args[unit_arg_index]
-                except IndexError:
-                    try:
-                        unit = default_unit
-                    except NameError:
-                        raise ValueError("Required named 'unit' argument not found")
-                unit_in_kwargs = False
-
-            # Concretize the unit to the rhythm's resolution for tick unit
-            if unit == 'ticks':
-                unit = f_get_res(*args, **kwargs)
-                if unit <= 0:
-                    raise ValueError("Requested unit is \"ticks\", but resolution %i <= 0" % unit)
-
-            # Replace unit by concretized unit
-            if unit_in_kwargs:
-                kwargs["unit"] = unit
+                raise UnitError("No unit named: %s" % query)
+        elif not isinstance(query, Unit):
+            if isinstance(query, Fraction):
+                # we don't do the conversion to Fraction if not necessary
+                # as it is quite an expensive operation
+                fraction = query
             else:
-                try:
-                    args = list(args)
-                    args[unit_arg_index] = unit
-                except IndexError:
-                    kwargs["unit"] = unit
+                # unit with largest denominator (=64) is SIXTY_FOURTH
+                fraction = Fraction(query).limit_denominator(64)
+            try:
+                return cls.__by_note_values__[fraction]
+            except KeyError:
+                raise UnitError("No unit with note value: %s (query=%s)" % (str(fraction), query))
 
-            return func(*args, **kwargs)
+        assert isinstance(query, Unit)
+        return query
 
-        return wrapper
+    @classmethod
+    def check(cls, query: tp.Union[str, float]) -> None:
+        """Tries to find a unit, raises UnitError if no such unit
 
-    return concretize_unit_decorator
+        :param query: query (see get())
+        :return: None
+
+        :raises UnitError: if no unit found with given query
+        """
+
+        cls.get(query)
+
+    def __init__(self, note_value: Fraction, note_names: tp.Tuple[str]):
+        assert isinstance(note_names, tuple)
+        self._note_value_float = float(note_value)
+
+    def get_note_value(self) -> Fraction:
+        """Returns the note value of this musical unit as a fraction
+
+        :return: note value of this musical unit as a Fraction
+        """
+
+        return self.value[0]
+
+    def get_note_names(self):
+        """Returns the common names of this musical unit
+
+        :return: names of this musical unit as a tuple of strings
+        """
+
+        return self.value[1]
+
+    def convert(self, value, to_unit, quantize=False):
+        # type: (tp.Union[int, float], Unit, bool) -> tp.Union[int, float]
+        """Converts a value from this unit to another unit
+
+        :param value: the value to convert
+        :param to_unit: the musical unit to convert this value to
+        :param quantize: if true, the converted value will be rounded
+        :return: the converted value as a float (as an int if quantize is true)
+        """
+
+        from_note_value = self._note_value_float
+        to_note_value = to_unit._note_value_float
+        converted_value = value * (from_note_value / to_note_value)
+        return round(converted_value) if quantize else converted_value
+
+    def from_ticks(self, ticks: int, resolution: int, quantize=False) -> tp.Union[int, float]:
+        """Converts the given ticks to this musical time unit
+
+        :param ticks: tick value to convert
+        :param resolution: tick resolution in PPQN
+        :param quantize: if true, the returned value will be rounded
+        :return: the given tick value in this time unit
+        """
+
+        quarter_value = ticks / int(resolution)
+        return Unit.QUARTER.convert(quarter_value, self, quantize)
+
+    def to_ticks(self, value: float, resolution: int) -> int:
+        """Converts a value from this musical time unit to ticks
+
+        :param value: value in this musical time unit
+        :param resolution: tick resolution in PPQN
+        :return: tick value
+        """
+
+        quarter_value = self.convert(value, self.QUARTER, False)
+        return round(quarter_value * resolution)
+
+
+Unit.__by_note_names__ = dict((name, unit) for unit in Unit for name in unit.get_note_names())
+Unit.__by_note_values__ = dict((unit.get_note_value(), unit) for unit in Unit)
+UnitType = tp.Union[Unit, Fraction, str, float]
+
+
+def parse_unit_argument(func: tp.Callable[[tp.Any], tp.Any]) -> tp.Callable[[tp.Any], tp.Any]:
+    """Decorator that replaces the "unit" parameter with a Unit enum object
+
+    Replaces the unit argument of the decorated function with Unit.get(unit). For example:
+
+        @parse_unit_argument
+        def foo(unit):
+            return unit
+
+        quarter = foo("quarter")  # returns Unit.QUARTER
+        sixteenth = foo(1/16)  # returns Unit.SIXTEENTH
+
+    :param func: function receiving a "unit" parameter
+    :return: function receiving a Unit object parameter
+    """
+
+    func_parameters = inspect.signature(func).parameters
+
+    try:
+        unit_param_position = tuple(func_parameters.keys()).index("unit")
+    except ValueError:
+        raise ValueError("Functions decorated with parse_unit_argument should have a \"unit\" parameter")
+
+    unit_param = func_parameters.get("unit")  # type: inspect.Parameter
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        given_positional_param = len(args) > unit_param_position
+        given_named_param = "unit" in kwargs
+
+        if given_named_param:
+            kwargs['unit'] = Unit.get(kwargs['unit'])
+        elif given_positional_param:
+            assert len(args) > unit_param_position
+            unit = args[unit_param_position]
+            unit = Unit.get(unit)
+            args = itertools.chain(args[:unit_param_position], [unit], args[unit_param_position + 1:])
+        else:
+            kwargs['unit'] = Unit.get(unit_param.default)
+
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def rescale_tick(tick: int, old_res: int, new_res):
+    """Rescales the given tick from one resolution to another
+
+    :param tick:    tick value to rescale
+    :param old_res: original tick resolution in PPQN
+    :param new_res: new tick resolution in PPQN
+
+    :return: rescaled tick value as an integer
+
+    :raises ValueError: if one of the resolutions is equal or smaller than zero
+    """
+
+    if old_res <= 0 or new_res <= 0:
+        raise ValueError("expected resolution greater than zero")
+
+    return round(tick / old_res * new_res)
+
+
+def convert_tick(tick: int, old_res: int, target: tp.Union[UnitType, int, None], quantize=False):
+    """Utility function to either rescale a tick to another PPQN resolution or to convert it to a musical unit
+
+    This function function has two behaviours:
+        * rescale given tick to another PPQN       ->  When given an integer as "target" parameter, which is then
+                                                       used as new PPQN resolution. The tick rescaling is done by
+                                                       calling rescale_tick().
+        * represent given tick in a musical unit   ->  When given a musical unit (see Unit.get) as "target" parameter.
+                                                       This representation is done with Unit.from_tick().
+
+    When the "target" parameter is None, this function will return the tick.
+
+    :param tick:     tick value to convert
+    :param old_res:  original tick resolution in PPQN
+    :param target:   Either a musical unit (see Unit.get) or a new tick resolution in PPQN as an integer. When given
+                     None, the same tick will be returned.
+    :param quantize: When converting to a musical unit, when given true, the returned value will be rounded. This
+                     parameter is ignored when converting to another resolution.
+
+    :return: converted tick
+    """
+
+    if target is None:
+        return tick
+
+    if isinstance(target, int):
+        return rescale_tick(tick, old_res, target)
+
+    return Unit.get(target).from_ticks(tick, old_res, quantize)
 
 
 class TimeSignature(object):
@@ -223,13 +254,7 @@ class TimeSignature(object):
     def __init__(self, numerator, denominator):
         self._numerator = numerator
         self._denominator = denominator
-
-        if denominator == 4:
-            self._beat_unit = Unit.QUARTER
-        elif denominator == 8:
-            self._beat_unit = Unit.EIGHTH
-        else:
-            raise ValueError("Unknown denominator: %s" % str(denominator))
+        self._beat_unit = Unit.get(Fraction(1, denominator))
 
     @property
     def numerator(self):
@@ -239,7 +264,7 @@ class TimeSignature(object):
     def denominator(self):
         return self._denominator
 
-    def get_beat_unit(self):
+    def get_beat_unit(self) -> Unit:
         return self._beat_unit
 
     def to_midi_event(self, metronome=24, thirty_seconds=8):
@@ -250,7 +275,8 @@ class TimeSignature(object):
             thirtyseconds=thirty_seconds
         )
 
-    def get_meter_tree(self, unit="eighths"):
+    @parse_unit_argument
+    def get_meter_tree(self, unit: UnitType = Unit.EIGHTH):
         """Returns a vector containing subdivision counts needed to construct a hierarchical meter tree structure
 
         A meter is representable as a tree structure, e.g. time signature 6/8 is represented by this tree:
@@ -275,10 +301,7 @@ class TimeSignature(object):
                             eighths or sixteenths)
         """
 
-        if unit == "ticks":
-            raise ValueError("Can't express meter in ticks")
-
-        n_units_per_beat = convert_time(1, self.get_beat_unit().value, unit)
+        n_units_per_beat = self.get_beat_unit().convert(1, unit, False)
         curr_branch = self.numerator
         divisions = []
 
@@ -300,7 +323,8 @@ class TimeSignature(object):
         divisions.extend(itertools.repeat(2, n_units_per_beat - 1))
         return tuple(divisions)
 
-    def get_metrical_weights(self, unit="eighths", root_weight=0):
+    @parse_unit_argument
+    def get_metrical_weights(self, unit=Unit.EIGHTH, root_weight=0):
         """Returns the metrical weights for a full measure of this time signature
 
         Constructs a hierarchical meter tree structure (see get_meter_tree) ands assigns a weight to each node. Then it
@@ -519,63 +543,82 @@ class Rhythm(object, metaclass=ABCMeta):
     # Non-abstract methods #
     ########################
 
-    @concretize_unit()
-    def get_duration(self, unit="ticks") -> float:
+    @parse_unit_argument
+    def get_duration(self, unit: tp.Optional[UnitType] = None) -> tp.Union[int, float]:
         """
-        Returns the duration of this rhythm in the given time unit.
+        Returns the duration of this rhythm in the given musical time unit or in ticks if no unit is given.
 
-        :param unit: time unit
-        :return: duration of this rhythm in the given time unit
+        :param unit: time unit in which to return the duration or None to get the duration in ticks
+        :return: duration of this rhythm in given unit or in ticks if no unit is given
         """
 
         duration_in_ticks = self.get_duration_in_ticks()
+
+        if unit is None:
+            return duration_in_ticks
+
         resolution = self.get_resolution()
-        return convert_time(duration_in_ticks, resolution, unit, quantize=False)
+        return unit.from_ticks(duration_in_ticks, resolution, True)
 
-    @concretize_unit()
-    def set_duration(self, duration: tp.Union[int, float], unit="ticks") -> None:
+    @parse_unit_argument
+    def set_duration(self, duration: tp.Union[int, float], unit: tp.Optional[UnitType] = None) -> None:
         """
-        Sets the duration of this rhythm in the given time unit.
+        Sets the duration of this rhythm in the given time unit (in ticks if not unit given)
 
-        :param duration: new duration
-        :param unit: time unit of the given duration
+        :param duration: new duration in the given unit or in ticks if no unit provided
+        :param unit: time unit of the given duration or None to set the duration in ticks
         :return: None
         """
 
-        resolution = self.get_resolution()
-        duration_in_ticks = convert_time(duration, unit, resolution)
-        self.set_duration_in_ticks(round(duration_in_ticks))
+        if unit is None:
+            duration_in_ticks = round(duration)
+        else:
+            resolution = self.get_resolution()
+            duration_in_ticks = unit.to_ticks(duration, resolution)
+
+        self.set_duration_in_ticks(duration_in_ticks)
 
     @Precondition.needs_time_signature
-    @concretize_unit()
-    def get_beat_duration(self, unit="ticks") -> float:
+    @parse_unit_argument
+    def get_beat_duration(self, unit: tp.Optional[UnitType] = None) -> tp.Union[int, float]:
+        # TODO change to pulse_duration
         """
         Returns the duration of one musical beat, based on the time signature.
 
-        :param unit: unit of the returned duration
-        :return: the duration of one beat in the given unit
+        :param unit: musical unit in which to return the beat duration or None to get the beat duration in ticks
+        :return: the duration of one beat in the given musical unit or in ticks if no unit is given
         :raises TimeSignatureNotSet: if no time signature has been set
         """
 
         time_signature = self.get_time_signature()
         beat_unit = time_signature.get_beat_unit()
-        return convert_time(1.0, beat_unit, unit, quantize=False)
+
+        if unit is None:
+            resolution = self.get_resolution()
+            return beat_unit.to_ticks(1, resolution)
+
+        return beat_unit.convert(1, unit, False)
 
     @Precondition.needs_time_signature
-    @concretize_unit()
-    def get_measure_duration(self, unit="ticks") -> float:
+    @parse_unit_argument
+    def get_measure_duration(self, unit: tp.Optional[UnitType] = None) -> tp.Union[int, float]:
         """
         Returns the duration of one musical measure, based on the time signature.
 
-        :param unit: unit of the returned duration
-        :return: the duration of one measure in the given unit
+        :param unit: musical unit in which to return the measure duration or None to get the measure duration in ticks
+        :return: the duration of one measure in the given unit or in ticks if no unit is given
         :raises TimeSignatureNotSet: if no time signature has been set
         """
 
         time_signature = self.get_time_signature()
-        numerator = time_signature.numerator
+        n_beats_per_measure = time_signature.numerator
         beat_unit = time_signature.get_beat_unit()
-        return convert_time(numerator, beat_unit, unit, quantize=False)
+
+        if unit is None:
+            resolution = self.get_resolution()
+            return beat_unit.to_ticks(n_beats_per_measure, resolution)
+
+        return beat_unit.convert(n_beats_per_measure, unit, False)
 
     def get_duration_in_measures(self):
         """
@@ -585,8 +628,8 @@ class Rhythm(object, metaclass=ABCMeta):
         :raises TimeSignatureNotSet: if no time signature has been set
         """
 
-        measure_duration = self.get_measure_duration("ticks")
-        duration = self.get_duration_in_ticks()
+        measure_duration = self.get_measure_duration(None)
+        duration = self.get_duration(None)
         return duration / measure_duration
 
     ##############
@@ -778,7 +821,7 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
 
         if old_res > 0 and new_res > 0:
             self.__rescale_onset_ticks__(old_res, new_res)
-            new_dur = convert_time(old_dur, old_res, new_res, quantize=True)
+            new_dur = rescale_tick(old_dur, old_res, new_res)
         else:
             new_dur = old_dur
 
@@ -879,7 +922,7 @@ class Onset(namedtuple("Onset", ["tick", "velocity"])):
         :return: new Onset object with the given new resolution
         """
 
-        scaled_tick = convert_time(self.tick, resolution_from, resolution_to, quantize=True)
+        scaled_tick = rescale_tick(self.tick, resolution_from, resolution_to)
         return Onset(scaled_tick, self.velocity)
 
 
@@ -1412,23 +1455,26 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
     #####################################
 
     # TODO remove duplicate functionality (see MonophonicRhythm.get_interval_histogram)
-    def get_interval_histogram(self, unit="ticks") -> (int, int):
-        """
-        Returns the interval histogram of all the tracks combined.
-
-        :return: combined interval histogram of all the tracks in this rhythm
-        """
-
-        intervals = []
-
-        for track in self.get_track_iterator():
-            track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=True)
-            intervals.extend(track_intervals)
-
-        histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
-        occurrences = histogram[0].tolist()
-        bins = histogram[1].tolist()[:-1]
-        return occurrences, bins
+    # TODO adapt to new feature extraction API (create PolyphonicRhythmFeatureExtractor impl for this)
+    # @parse_unit_argument
+    # def get_interval_histogram(self, unit: tp.Optional[UnitType] = None) \
+    #         -> tp.Tuple[tp.Iterable[int], tp.Iterable[int]]:
+    #     """
+    #     Returns the interval histogram of all the tracks combined.
+    #
+    #     :return: combined interval histogram of all the tracks in this rhythm
+    #     """
+    #
+    #     intervals = []
+    #
+    #     for track in self.get_track_iterator():
+    #         track_intervals = track.get_post_note_inter_onset_intervals(unit, quantize=True)
+    #         intervals.extend(track_intervals)
+    #
+    #     histogram = np.histogram(intervals, tuple(range(min(intervals), max(intervals) + 2)))
+    #     occurrences = histogram[0].tolist()
+    #     bins = histogram[1].tolist()[:-1]
+    #     return occurrences, bins
 
 
 class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
@@ -1826,7 +1872,8 @@ class MidiDrumMappingReducer(object, metaclass=ABCMeta):
             group_name = self.get_group_name(key)
             group_indices[group_name].append(ix)
 
-        self._groups = dict((name, MidiDrumMappingGroup(name, mapping, indices)) for name, indices in group_indices.items())
+        self._groups = dict((name, MidiDrumMappingGroup(
+            name, mapping, indices)) for name, indices in group_indices.items())
 
     @staticmethod
     @abstractmethod
@@ -1999,7 +2046,7 @@ class RhythmLoop(PolyphonicRhythmImpl):
             # a downbeat whenever a time signature or resolution is set (it is updated in those methods)
             return super().set_duration_in_ticks(requested_duration)
 
-        measure_duration = int(self.get_measure_duration("ticks"))
+        measure_duration = int(self.get_measure_duration(None))
         n_measures = int(math.ceil(requested_duration / measure_duration))
         t_next_downbeat = n_measures * measure_duration
         assert t_next_downbeat >= requested_duration
@@ -2323,8 +2370,11 @@ __all__ = [
     'Rhythm', 'MonophonicRhythm', 'PolyphonicRhythm',
     'RhythmLoop', 'MidiRhythm',
 
+    # Time unit
+    'Unit', 'UnitType', 'UnitError', 'parse_unit_argument', 'rescale_tick', 'convert_tick',
+
     # Misc
-    'Unit', 'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'convert_time', 'create_rumba_rhythm',
+    'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm',
 
     # MIDI drum mapping
     'MidiDrumMapping', 'GMDrumMapping', 'FrequencyBand', 'DecayTime',

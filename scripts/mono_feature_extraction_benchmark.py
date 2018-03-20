@@ -1,7 +1,7 @@
 import subprocess
 from collections import OrderedDict
 from time import time
-from beatsearch.rhythm import MonophonicRhythm
+from beatsearch.rhythm import MonophonicRhythm, Unit
 from beatsearch.feature_extraction import MonophonicRhythmFeatureExtractor
 
 N_ITER_PER_REPRESENTATION_PER_RHYTHM = 10000
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # noinspection PyUnresolvedReferences
     rhythms['clave23'] = MonophonicRhythm.create.from_string("x--x---x--x-x---", (4, 4))
 
-    mono_feature_extractors = tuple(cls(unit="eighth") for cls in MonophonicRhythmFeatureExtractor.__subclasses__())
+    mono_feature_extractors = tuple(cls(unit=Unit.EIGHTH) for cls in MonophonicRhythmFeatureExtractor.__subclasses__())
     n_iters_per_representation = N_ITER_PER_REPRESENTATION_PER_RHYTHM * len(rhythms)
 
     print("Monophonic Rhythm Representations Benchmark")

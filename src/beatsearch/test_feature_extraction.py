@@ -76,7 +76,7 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=
     def setUp(self):
         cls = self.get_impl_class()
         self.feature_extractor = cls()
-        self.feature_extractor.unit = "ticks"
+        self.feature_extractor.unit = None
 
     # noinspection PyUnresolvedReferences
     def test_unit_set_with_first_positional_constructor_argument(self):
@@ -124,7 +124,8 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=
 
     @staticmethod
     def get_legal_units():
-        return ["ticks"] + list(Unit.get_unit_values())
+        # noinspection PyTypeChecker
+        return [None] + list(Unit)
 
     @staticmethod
     @abstractmethod

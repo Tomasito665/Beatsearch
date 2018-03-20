@@ -4,11 +4,10 @@ from abc import ABCMeta, abstractmethod
 from collections import namedtuple
 from unittest import TestCase, main
 from unittest.mock import patch, MagicMock, PropertyMock, call
-from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, MonophonicRhythmImpl
+from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm
 
 # miscellaneous
-from beatsearch.metrics import Quantizable
-from beatsearch.utils import friendly_named_class
+from beatsearch.utils import friendly_named_class, Quantizable
 from beatsearch.rhythm import Unit
 
 # feature extractors
@@ -58,7 +57,7 @@ class TestMonophonicRhythmDistanceMeasureBase(TestCase):
                 except AttributeError:
                     self.assertTrue(False, "no __friendly_name__ found in '%s'" % clazz.__name__)
 
-    @patch.object(Unit, "exists", return_value=True)
+    @patch.object(Unit, "get")
     def test_all_concrete_subclasses_have_unit_and_length_policy_as_first_arguments_and_set_the_props_accordingly(
             self, _):
         def patch_prop(prop_name):
@@ -113,8 +112,8 @@ class TestMonophonicRhythmDistanceMeasureBase(TestCase):
                 self.assertEqual(m.length_policy, lp)
 
     def test_internal_unit(self):
-        m = self.create_measure(unit="sixteenths")
-        self.assertEqual(m.unit, "sixteenths")
+        m = self.create_measure(unit=Unit.SIXTEENTH)
+        self.assertEqual(m.unit, Unit.SIXTEENTH)
 
     @patch.object(MonophonicRhythmDistanceMeasure, "LENGTH_POLICIES", tuple())
     def test_length_policy_setter_raises_unknown_length_policy_exception(self):
@@ -143,7 +142,7 @@ class TestMonophonicRhythmDistanceMeasureBase(TestCase):
         for r in [rhythm_a, rhythm_b]:
             r.get_resolution = MagicMock(return_value=ppq)
 
-        m = self.create_measure(unit="ticks")
+        m = self.create_measure(unit=None)
         m.__get_iterable__ = MagicMock(side_effect=["iterable_a", "iterable_b"])  # second is longer, len = 14
         m.__get_cookie__ = MagicMock(side_effect=["cookie_a", "cookie_b"])
         m.__compute_distance__ = MagicMock(return_value=distance)
@@ -279,7 +278,7 @@ class TestHammingDistanceMeasure(TestCase, TestMonophonicRhythmDistanceMeasureIm
 
     @patch.object(BinaryOnsetVector, "process", return_value="fake-binary-onset-vector")
     def test_get_iterable(self, mock_binary_onset_vector_process, *args):
-        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythmImpl
+        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythm
         measure = HammingDistanceMeasure()
         result = measure.__get_iterable__(rhythm)
 
@@ -319,7 +318,7 @@ class TestEuclideanIntervalVectorDistanceMeasure(TestCase, TestMonophonicRhythmD
 
     @patch.object(IOIVector, "process", return_value="fake-ioi-vector")
     def test_get_iterable(self, mock_ioi_vector_process):
-        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythmImpl
+        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythm
         measure = EuclideanIntervalVectorDistanceMeasure()
         result = measure.__get_iterable__(rhythm)
 
@@ -353,7 +352,7 @@ class TestIntervalDifferenceVectorDistanceMeasure(TestCase, TestMonophonicRhythm
 
     @patch.object(IOIDifferenceVector, "process", return_value="fake-ioi-diff-vector")
     def test_get_iterable(self, mock_ioi_diff_vector_process):
-        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythmImpl
+        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythm
         measure = IntervalDifferenceVectorDistanceMeasure()
         result = measure.__get_iterable__(rhythm)
 
@@ -397,7 +396,7 @@ class TestSwapDistanceMeasure(TestCase, TestMonophonicRhythmDistanceMeasureImple
 
     @patch.object(OnsetPositionVector, "process", return_value="fake-onset-pos-vector")
     def test_get_iterable(self, mock_onset_pos_vector_process):
-        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythmImpl
+        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythm
         measure = SwapDistanceMeasure()
         result = measure.__get_iterable__(rhythm)
         self.assertEqual(result, "fake-onset-pos-vector")
@@ -436,7 +435,7 @@ class TestChronotonicDistanceMeasure(TestCase, TestMonophonicRhythmDistanceMeasu
 
     @patch.object(OnsetPositionVector, "process", return_value="fake-onset-position-vector")
     def test_get_iterable(self, mock_onset_position_vector_process):
-        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythmImpl
+        rhythm = MagicMock(MonophonicRhythm)  # type: MonophonicRhythm
         measure = SwapDistanceMeasure()
         result = measure.__get_iterable__(rhythm)
         mock_onset_position_vector_process.assert_called_once_with(rhythm)

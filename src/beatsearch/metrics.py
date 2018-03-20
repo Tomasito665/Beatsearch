@@ -3,7 +3,7 @@ import math
 import typing as tp
 from collections import OrderedDict
 from abc import abstractmethod, ABCMeta
-from beatsearch.rhythm import MonophonicRhythm, MonophonicRhythmImpl, PolyphonicRhythm, Unit
+from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, Unit, UnitType, parse_unit_argument
 from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, \
     IOIDifferenceVector, OnsetPositionVector, ChronotonicChain
 from beatsearch.utils import friendly_named_class, Quantizable
@@ -43,18 +43,18 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
             msg = self.MESSAGES[length_policy]
             super().__init__(msg)
 
-    def __init__(self, unit="ticks", length_policy=DEFAULT_LENGTH_POLICY):
+    def __init__(self, unit: tp.Optional[UnitType] = None, length_policy=DEFAULT_LENGTH_POLICY):
         """
         Creates a new monophonic rhythm distance measure.
 
-        :param unit: see internal_unit property
+        :param unit: see unit property
         :param length_policy: see documentation on length_policy property
         """
 
-        self._len_policy = ''
-        self._unit = 0
+        self._len_policy = ''   # type: str
+        self._unit = None       # type: tp.Union[None, Unit]
 
-        self.length_policy = length_policy
+        self.length_policy = length_policy  # calling setter
         self.set_unit(unit)
 
     @property
@@ -81,58 +81,56 @@ class MonophonicRhythmDistanceMeasure(DistanceMeasure, metaclass=ABCMeta):
             raise self.UnknownLengthPolicy(length_policy)
         self._len_policy = length_policy
 
-    def set_unit(self, unit: str):
+    @parse_unit_argument
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         """Sets the time unit
 
-        This time unit is used internally for distance computation..
+        This time unit is used internally for distance computation. When the unit is set to None, distance computation
+        will be tick-based.
 
-        :param unit: new time unit as a string
+        :param unit: Unit enum object or None for tick-based distance computation
         :return: None
         """
 
-        unit = str(unit)
-        if not Unit.exists(unit) and unit != "ticks":
-            raise Unit.UnknownTimeUnit(unit)
         self._unit = unit
 
-    def get_unit(self):
+    def get_unit(self) -> tp.Union[Unit, None]:
         """Returns the time unit
 
-        This time unit is used internally for distance computation.
+        This time unit is used internally for distance computation. If the unit is None, distance computation is
+        tick-based.
 
-        :return: time unit as a string
+        :return: Unit enum object or None
         """
 
         return self._unit
 
     @property
-    def unit(self):
-        """
-        Unit used internally for distance computation.
-        """
-
+    def unit(self) -> tp.Union[Unit, None]:
+        """Unit used internally for distance computation."""
         return self.get_unit()
 
     @unit.setter
     def unit(self, unit):
         self.set_unit(unit)
 
-    def get_distance(self, rhythm_a: MonophonicRhythm, rhythm_b: MonophonicRhythm):
+    def get_distance(self, rhythm_a: MonophonicRhythm, rhythm_b: MonophonicRhythm) -> tp.Any:
         """
-        Returns the distance between the given tracks.
+        Returns the distance between the given tracks. If no unit is set the computation will be tick-based and both
+        rhythms must have the same tick resolution.
 
         :param rhythm_a: monophonic rhythm to compare to monophonic rhythm b
         :param rhythm_b: monophonic rhythm to compare to monophonic rhythm a
         :return: distance between the given monophonic rhythms
+        :raises ValueError: if no unit is set and given rhythms don't have the same tick resolution
         """
 
-        unit_in_ticks = self._unit == "ticks"
+        tick_based = self.unit is None
         res_a, res_b = rhythm_a.get_resolution(), rhythm_b.get_resolution()
 
-        if unit_in_ticks and res_a != res_b:
-            raise ValueError("%s unit set to 'ticks', but given rhythms have "
-                             "different resolutions (%i != %i)" %
-                             ("Internal" if unit_in_ticks else "Output", res_a, res_b))
+        if tick_based and res_a != res_b:
+            raise ValueError("Can't do a tick-based distance computation for rhythms "
+                             "with different tick resolutions (%i vs %i)" % (res_a, res_b))
 
         rhythms = [rhythm_a, rhythm_b]
         iterables = [self.__get_iterable__(t) for t in rhythms]
@@ -275,15 +273,15 @@ class HammingDistanceMeasure(MonophonicRhythmDistanceMeasure):
     where the binary rhythm chains do not match. The hamming distance is always an integer.
     """
 
-    def __init__(self, unit="eighths", length_policy="multiple"):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, length_policy="multiple"):
         self._binary_onset_vector = BinaryOnsetVector(unit)
         super().__init__(unit, length_policy)
 
-    def set_unit(self, unit: str):
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._binary_onset_vector.set_unit(unit)
 
-    def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
+    def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._binary_onset_vector.unit == self.unit
         return self._binary_onset_vector.process(rhythm)
 
@@ -304,12 +302,12 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
     The euclidean interval vector distance is the euclidean distance between the inter-onset vectors of the rhythms.
     """
 
-    def __init__(self, unit="ticks", length_policy="exact", quantize=False):
+    def __init__(self, unit: tp.Optional[UnitType] = None, length_policy="exact", quantize=False):
         self._ioi_vector = IOIVector(unit, mode=IOIVector.Mode.POST_NOTE, quantize_enabled=quantize)
         super().__init__(unit, length_policy)  # super constructor must be called after self._ioi_vector definition
         self.quantize_enabled = quantize
 
-    def set_unit(self, unit: str):
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._ioi_vector.set_unit(unit)
 
@@ -319,7 +317,7 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
     def is_quantize_enabled(self) -> bool:
         return self._ioi_vector.is_quantize_enabled()
 
-    def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
+    def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._ioi_vector.unit == self.unit
         return self._ioi_vector.process(rhythm)
 
@@ -339,13 +337,13 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
     The interval difference vector distance is based on the interval difference vectors of the rhythms.
     """
 
-    def __init__(self, unit="ticks", length_policy="fill", quantize=False, cyclic=True):
+    def __init__(self, unit: tp.Optional[UnitType] = None, length_policy="fill", quantize=False, cyclic=True):
         self._ioi_diff_vector = IOIDifferenceVector(unit, cyclic)
         super().__init__(unit, length_policy)
         self.quantize_enabled = quantize
         self.cyclic = cyclic  # call setter
 
-    def set_unit(self, unit: str):
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._ioi_diff_vector.set_unit(unit)
 
@@ -363,7 +361,7 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
     def is_quantize_enabled(self) -> bool:
         return self._ioi_diff_vector.is_quantize_enabled()
 
-    def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
+    def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._ioi_diff_vector.unit == self.unit
         return self._ioi_diff_vector.process(rhythm)
 
@@ -393,12 +391,12 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     operation). Enable this by setting quantize to True in the constructor.
     """
 
-    def __init__(self, unit="eighths", length_policy="multiple", quantize=False):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, length_policy="multiple", quantize=False):
         self._onset_position_vector = OnsetPositionVector(unit, quantize)
         super().__init__(unit, length_policy)  # super constructor must be called after _onset_position_vector attr def
         self.quantize_enabled = quantize
 
-    def set_unit(self, unit: str):
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._onset_position_vector.set_unit(unit)
 
@@ -408,11 +406,11 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     def is_quantize_enabled(self) -> bool:
         return self._onset_position_vector.is_quantize_enabled()
 
-    def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
+    def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._onset_position_vector.unit == self.unit
         return self._onset_position_vector.process(rhythm)
 
-    def __get_cookie__(self, rhythm: MonophonicRhythmImpl):
+    def __get_cookie__(self, rhythm: MonophonicRhythm):
         return int(math.ceil(rhythm.get_duration(self.unit)))
 
     @staticmethod
@@ -434,15 +432,15 @@ class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
     The chronotonic distance is the area difference (aka measure K) of the rhythm's chronotonic chains.
     """
 
-    def __init__(self, unit="eighths", length_policy="multiple"):
+    def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, length_policy="multiple"):
         self._chronotonic_vector = ChronotonicChain(unit)
         super().__init__(unit, length_policy)  # super constructor must be called after _chronotonic_vector attr def
 
-    def set_unit(self, unit: str):
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._chronotonic_vector.set_unit(unit)
 
-    def __get_iterable__(self, rhythm: MonophonicRhythmImpl):
+    def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._chronotonic_vector.unit == self.unit
         return self._chronotonic_vector.process(rhythm)
 
@@ -608,7 +606,7 @@ class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
         """
 
         measure = self.monophonic_measure
-        unit = measure.unit
+        unit = measure.unit  # type: tp.Union[Unit, None]
         duration = max(rhythm_a.get_duration(unit), rhythm_b.get_duration(unit))
         n_tracks, total_distance = 0, 0
 

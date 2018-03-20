@@ -2,7 +2,6 @@ import os
 import signal
 import tkinter.ttk
 from abc import ABCMeta, abstractmethod
-# noinspection PyPep8Naming
 import tkinter as tk
 import tkinter.font
 import tkinter.filedialog
@@ -38,6 +37,11 @@ from beatsearch.rhythm import (
     get_drum_mapping_reducer_implementation,
 )
 from beatsearch.config import BSConfig
+
+
+UNITS_BY_UNIT_TITLES = OrderedDict((u.get_note_names()[0].capitalize(), u) for u in Unit)  # type: tp.Dict[str, Unit]
+UNIT_TITLES_BY_UNITS = OrderedDict((u, t) for t, u in UNITS_BY_UNIT_TITLES.items())  # type: tp.Dict[Unit, str]
+UNIT_TITLES = tuple(UNITS_BY_UNIT_TITLES.keys())
 
 
 class BSAppWidgetMixin(object):
@@ -112,7 +116,7 @@ class BSSearchForm(BSAppFrame):
         combobox_info = [
             (self.COMBO_DISTANCE_MEASURE, "Distance measure", MonophonicRhythmDistanceMeasure.get_measure_names()),
             (self.COMBO_TRACKS, "Tracks to compare", TRACK_WILDCARDS),
-            (self.COMBO_QUANTIZE, "Quantize", Unit.get_unit_names())
+            (self.COMBO_QUANTIZE, "Quantize", UNIT_TITLES)
         ]
 
         widgets = []
@@ -572,7 +576,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
             btn_snap_to_grid.config(state=tk.DISABLED)
 
     def set_rhythm_plot_unit(self, unit: Unit):
-        self.rhythm_plotter.unit = unit.value
+        self.rhythm_plotter.unit = unit
         # the plot function didn't change and the selected rhythms won't redraw,
         # that's why we force redraw
         self.redraw_rhythm_plots(force_redraw=True)
@@ -617,7 +621,7 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         combo_plot_type.set(self.LABELS_BY_RHYTHM_PLOTTERS[self.rhythm_plotter])
         combo_plot_type.bind("<<ComboboxSelected>>", self._on_plot_type_combobox)
 
-        combo_plot_unit = tkinter.ttk.Combobox(header, values=Unit.get_unit_names(), state="readonly")
+        combo_plot_unit = tkinter.ttk.Combobox(header, values=UNIT_TITLES, state="readonly")
         combo_plot_unit.set(self._rhythm_plot_unit.name)
         combo_plot_unit.bind("<<ComboboxSelected>>", self._on_plot_unit_combobox)
 
@@ -638,8 +642,8 @@ class BSRhythmComparisonStrip(BSAppTtkFrame):
         self.set_rhythm_plotter(plotter)
 
     def _on_plot_unit_combobox(self, event):
-        unit_name = event.widget.get()
-        unit = Unit.get_unit_by_name(unit_name)
+        unit_title = event.widget.get()
+        unit = UNITS_BY_UNIT_TITLES[unit_title]
         self.set_rhythm_plot_unit(unit)
 
     def _on_rhythm_load(self, source_type):
@@ -1225,8 +1229,8 @@ class BSApp(tk.Tk, object):
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
 
-        def on_new_quantize_unit(unit_name, controller):  # type: (str, BSController) -> None
-            unit = Unit.get_unit_by_name(unit_name)
+        def on_new_quantize_unit(unit_title, controller):  # type: (str, BSController) -> None
+            unit = UNITS_BY_UNIT_TITLES[unit_title]
             controller.set_measure_quantization_unit(unit)
 
         search_frame.on_new_quantize = partial(on_new_quantize_unit, controller=self.controller)
