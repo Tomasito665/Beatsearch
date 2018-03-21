@@ -5,6 +5,9 @@ python:
   - "3.6-dev"  # 3.6 development branch
   - "3.7-dev"  # 3.7 development branch
 
+before_install:
+  - python build_dependencies.py
+
 install:
   - pip install .
 
