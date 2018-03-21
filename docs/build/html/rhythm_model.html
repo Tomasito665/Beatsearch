@@ -1,0 +1,282 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Rhythm model &mdash; Beatsearch 0.0.1.dev1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="genindex.html"/>
+        <link rel="search" title="Search" href="search.html"/>
+    <link rel="top" title="Beatsearch 0.0.1.dev1 documentation" href="index.html"/>
+        <link rel="next" title="Distance metrics" href="distance_metrics.html"/>
+        <link rel="prev" title="Installation" href="installation.html"/> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Beatsearch
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                0.0.1.dev1
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Rhythm model</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#monophonic-rhythm">Monophonic rhythm</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#polyphonic-rhythm">Polyphonic rhythm</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="distance_metrics.html">Distance metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="feature_extraction.html">Feature extraction</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Beatsearch</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Rhythm model</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/rhythm_model.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="rhythm-model">
+<h1>Rhythm model<a class="headerlink" href="#rhythm-model" title="Permalink to this headline">¶</a></h1>
+<p>The main building block of Beatsearch is the rhythm model, which defines
+two types of rhythms: monophonic and polyphonic rhythms.</p>
+<object data="_images/graphviz-fe5abc57ffcbea4e1b02ceb8b5402da5f3779950.svg" type="image/svg+xml">
+            <p class="warning">digraph Rhythm {
+   rhythm [label=&quot;Rhythm&quot;];
+   mono [label=&quot;Monophonic rhythm&quot;];
+   poly [label=&quot;Polyphonic rhythm&quot;];
+
+   rhythm -&gt; mono;
+   rhythm -&gt; poly;
+}</p></object>
+<p>Monophonic and polyphonic rhythms have common properties, such as tempo,
+duration and time signature. In the diagram displayed above, these properties
+live in the <cite>Rhythm</cite> node.</p>
+<div class="section" id="monophonic-rhythm">
+<h2>Monophonic rhythm<a class="headerlink" href="#monophonic-rhythm" title="Permalink to this headline">¶</a></h2>
+<p>A monophonic rhythm consists of one single track (one instrument). To create a
+simple monophonic rhythm from a string:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">MonophonicRhythm</span>
+<span class="n">clave_23</span> <span class="o">=</span> <span class="n">MonophonicRhythm</span><span class="o">.</span><span class="n">create</span><span class="o">.</span><span class="n">from_string</span><span class="p">(</span><span class="s2">&quot;--x-x---x--x--x-&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="polyphonic-rhythm">
+<h2>Polyphonic rhythm<a class="headerlink" href="#polyphonic-rhythm" title="Permalink to this headline">¶</a></h2>
+<p>A polyphonic rhythm consists of multiple tracks (multiple instruments). To create a
+simple polyphonic rhythm from a string:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">textwrap</span> <span class="kn">import</span> <span class="n">dedent</span>
+<span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">PolyphonicRhythm</span>
+
+<span class="n">cascara</span> <span class="o">=</span> <span class="n">MonophonicRhythm</span><span class="o">.</span><span class="n">create</span><span class="o">.</span><span class="n">from_string</span><span class="p">(</span><span class="n">dedent</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    clave:       --x-x---x--x--x-</span>
+<span class="s2">    timbales:    x-x-xx-xx-xx-x-x</span>
+<span class="s2">    kick:        ---x------------</span>
+<span class="s2">    side stick:  --x------x------</span>
+<span class="s2">    toms:        ------xx------xx</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="distance_metrics.html" class="btn btn-neutral float-right" title="Distance metrics" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="installation.html" class="btn btn-neutral" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2018, Jordi Ortolá Ankum.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'./',
+            VERSION:'0.0.1.dev1',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="_static/jquery.js"></script>
+      <script type="text/javascript" src="_static/underscore.js"></script>
+      <script type="text/javascript" src="_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>
