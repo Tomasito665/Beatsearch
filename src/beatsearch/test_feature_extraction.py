@@ -1,18 +1,30 @@
 import typing as tp
+from fractions import Fraction
 from unittest import TestCase, main
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from abc import ABCMeta, abstractmethod
 
 # feature extractor base classes
 from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtractorBase, \
-    MonophonicRhythmFeatureExtractor, PolyphonicRhythmFeatureExtractor, OnsetPositionVector
+    MonophonicRhythmFeatureExtractor, PolyphonicRhythmFeatureExtractor
 
 # feature extractor implementations
-from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, IOIHistogram, \
-    BinarySchillingerChain, ChronotonicChain, IOIDifferenceVector, OnsetDensity
+from beatsearch.feature_extraction import (
+    BinaryOnsetVector,
+    BinarySchillingerChain,
+    ChronotonicChain,
+    OnsetDensity,
+    OnsetPositionVector,
+    SyncopationVector,
+    SyncopatedOnsetRatio,
+    MeanSyncopationStrength,
+    IOIVector,
+    IOIDifferenceVector,
+    IOIHistogram
+)
 
 # misc
-from beatsearch.rhythm import MonophonicRhythm, Unit
+from beatsearch.rhythm import Rhythm, MonophonicRhythm, Unit
 from beatsearch.test_rhythm import mock_onset
 
 
@@ -76,7 +88,7 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=
     def setUp(self):
         cls = self.get_impl_class()
         self.feature_extractor = cls()
-        self.feature_extractor.unit = None
+        self.feature_extractor.unit = 1/16
 
     # noinspection PyUnresolvedReferences
     def test_unit_set_with_first_positional_constructor_argument(self):
@@ -246,10 +258,78 @@ class TestOnsetPositionVector(TestMonophonicRhythmFeatureExtractorImplementation
         self.assertEqual(actual_vector, expected_vector)
 
 
-# TODO Add test for SyncopationVector
+class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return SyncopationVector
+
+    @staticmethod
+    def get_legal_units():
+        # noinspection PyTypeChecker
+        # Syncopation vector does not support tick-based computation
+        return list(Unit)
+
+    # TODO Add test_process
+
+
+class TestSyncopatedOnsetRatio(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return SyncopatedOnsetRatio
+
+    @staticmethod
+    def get_legal_units():
+        return TestSyncopationVector.get_legal_units()
+
+    def test_default_ret_float(self):
+        self.assertFalse(self.feature_extractor.ret_fraction, "should return a float by default")
+
+    @patch.object(SyncopationVector, "process")
+    def test_process_ret_fraction(self, mock_syncopation_vector_process):
+        syncopations = "first", "second", "third"
+        mock_syncopation_vector_process.return_value = syncopations
+
+        extractor = self.feature_extractor  # type: SyncopatedOnsetRatio
+        extractor.ret_fraction = True
+
+        expected_ratio = Fraction(len(syncopations), 5)  # self.rhythm contains 5 onsets
+        actual_ratio = extractor.process(self.rhythm)
+        self.assertEqual(actual_ratio, expected_ratio)
+
+    @patch.object(SyncopationVector, "process")
+    def test_process_ret_float(self, mock_syncopation_vector_process):
+        syncopations = "first", "second", "third"
+        mock_syncopation_vector_process.return_value = syncopations
+
+        extractor = self.feature_extractor  # type: SyncopatedOnsetRatio
+        extractor.ret_fraction = False
+
+        expected_ratio = 3 / float(5)
+        actual_ratio = extractor.process(self.rhythm)
+        self.assertAlmostEqual(actual_ratio, expected_ratio)
+
+
+class TestMeanSyncopationStrength(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return MeanSyncopationStrength
+
+    @staticmethod
+    def get_legal_units():
+        return TestSyncopationVector.get_legal_units()
+
+    @patch.object(SyncopationVector, "process")
+    def test_process(self, mock_syncopation_vector_process):
+        syncopations = [0, 7], [1, 2], [2, 5]  # total sync strength = 14
+        mock_syncopation_vector_process.return_value = syncopations
+        self.rhythm.get_duration.return_value = 123
+
+        expected_mean_sync_strength = 14 / 123
+        actual_mean_sync_strength = self.feature_extractor.process(self.rhythm)
+        self.assertEqual(actual_mean_sync_strength, expected_mean_sync_strength)
+
 
 class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
-
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         return OnsetDensity
