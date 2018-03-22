@@ -2,6 +2,7 @@ import math
 import enum
 import numpy as np
 import typing as tp
+import matplotlib.artist
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.colors import to_rgba
@@ -261,20 +262,39 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
                 subplot_setup_ret = self.__setup_subplot__(rhythm_loop, subplot, **common_kwargs)
 
             # draw the track on the subplot
-            handle = self.__draw_track__(
+            draw_ret = self.__draw_track__(
                 track, subplot, track_ix=ix, color=next(color_pool),
                 setup_ret=subplot_setup_ret, **common_kwargs
-            )[0]
+            )
+
+            if isinstance(draw_ret, matplotlib.artist.Artist):
+                handle = draw_ret
+            elif isinstance(draw_ret[0], matplotlib.artist.Artist):
+                handle = draw_ret[0]
+            else:
+                raise TypeError("__draw_track__ must return either a single artist or a non-empty list of artists")
 
             track_names.append(track.name)
             subplots_handles.append(handle)
             prev_subplot = subplot
 
-        figure.legend(subplots_handles, track_names, loc="center right", **(legend_kwargs or {}))
+        legend_kwargs = {
+            'loc': "center right",
+            **(legend_kwargs or {}),
+            **self.get_legend_kwargs()
+        }
+
+        figure.legend(subplots_handles, track_names, **legend_kwargs)
         return figure
 
     def get_feature_extractor(self, feature_extractor_name):
         return self._feature_extractors[feature_extractor_name]
+
+    # noinspection PyMethodMayBeStatic
+    def get_legend_kwargs(self):
+        """Override this method to add extra named arguments to the figure.legend() function call in draw()"""
+
+        return {}
 
     @classmethod
     @abstractmethod
@@ -519,6 +539,92 @@ class IOIHistogramPlot(RhythmLoopPlotter):
         return axes.bar(interval_durations, occurrences, color=kw['color'])
 
 
+class BoxNotation(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Box notation"
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'onset_positions': OnsetPositionVector()},
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+        )
+
+        self.line_width = 1
+        self.line_color = "black"
+        self.rel_padx = 0.25, 0.05
+        self.rel_pady = 0.15, 0.15
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        # axes.axis("equal")  # avoid stretching the aspect ratio
+
+        for axis in [axes.xaxis, axes.yaxis]:
+            axis.set_ticklabels([])
+            axis.set_visible(False)
+
+        line_color = self.line_color
+        line_width = self.line_width
+
+        main_width = kw['n_pulses'] + 1
+        main_height = kw['n_tracks']
+
+        padx = tuple(rel_pad * main_width for rel_pad in self.rel_padx)
+        pady = tuple(rel_pad * main_height for rel_pad in self.rel_pady)
+
+        # reversed Y axis so that 0, 0 is in the upper left corner
+        axes.set_ylim(main_height + pady[1], 0 - pady[0])
+        axes.set_xlim(0 - padx[0], main_width + padx[1])
+
+        # main rectangle (containing everything but the track names)
+        axes.add_artist(plt.Rectangle(
+            [0, 0], main_width, main_height, fill=False,
+            edgecolor=line_color, linewidth=line_width
+        ))
+
+        # add horizontal lines
+        for track_ix in range(1, kw['n_tracks']):
+            axes.add_artist(plt.Line2D(
+                [0, main_width], [track_ix, track_ix],
+                color=line_color, linewidth=line_width
+            ))
+
+        # add vertical lines
+        for pulse in range(kw['n_pulses'] + 1):
+            axes.add_artist(plt.Line2D(
+                [pulse, pulse], [0, main_height],
+                color=line_color, linewidth=line_width
+            ))
+
+        # add track names
+        for track_ix, track in enumerate(rhythm_loop.get_track_iterator()):
+            axes.text(
+                0, track_ix + 0.5, "%s " % track.get_name(),  # one ' ' character spacing
+                verticalalignment="center", horizontalalignment="right"
+            )
+
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        onset_positions = self.get_feature_extractor("onset_positions").process(rhythm_track)
+        track_ix = kw['track_ix']
+
+        for onset in onset_positions:
+            axes.add_artist(plt.Rectangle(
+                [onset, track_ix],
+                width=1, height=1, facecolor=kw['color'],
+                edgecolor="black", linewidth=0.75
+            ))
+
+        return plt.Rectangle([0, 0], 1, 1)
+
+    def get_legend_kwargs(self):
+        # effectively hide the legend (move so far out that it's not visible anymore)
+        # we don't need the legend as we already draw the track names in the plot itself
+        return {'loc': "lower right", 'bbox_to_anchor': (0, 0)}
+
+
 def get_rhythm_loop_plotter_classes():
     """Returns RhythmLoopPlotter subclasses
 
@@ -533,7 +639,8 @@ __all__ = [
     'RhythmLoopPlotter',
 
     'SchillingerRhythmNotation', 'ChronotonicNotation', 'PolygonNotation',
-    'SpectralNotation', 'TEDASNotation', 'IOIHistogram', 'get_rhythm_loop_plotter_classes',
+    'SpectralNotation', 'TEDASNotation', 'IOIHistogram', 'BoxNotation',
+    'get_rhythm_loop_plotter_classes',
 
     # Subplot layouts
     'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
