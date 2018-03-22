@@ -35,7 +35,6 @@ Monophonic rhythm features
 Monophonic rhythm features are based on monophonic rhythm properties and are implemented as
 ``MonophonicRhythmFeatureExtractor`` subclasses. For example, to compute the onset density of a rhythm:
 
-
 .. code-block:: python
 
    from beatsearch.rhythm import MonophonicRhythm
@@ -43,6 +42,19 @@ Monophonic rhythm features are based on monophonic rhythm properties and are imp
 
    rhythm = MonophonicRhythm.create.from_string("x--x--x---x-x---")
    onset_density = OnsetDensity().process(rhythm)
+
+**Implementations**
+
+* :class:`beatsearch.feature_extraction.BinaryOnsetVector`
+* :class:`beatsearch.feature_extraction.IOIVector`
+* :class:`beatsearch.feature_extraction.IOIHistogram`
+* :class:`beatsearch.feature_extraction.BinarySchillingerChain`
+* :class:`beatsearch.feature_extraction.ChronotonicChain`
+* :class:`beatsearch.feature_extraction.IOIDifferenceVector`
+* :class:`beatsearch.feature_extraction.OnsetPositionVector`
+* :class:`beatsearch.feature_extraction.SyncopationVector`
+* :class:`beatsearch.feature_extraction.SyncopatedOnsetRatio`
+* :class:`beatsearch.feature_extraction.OnsetDensity`
 
 Polyphonic rhythm features
 --------------------------
