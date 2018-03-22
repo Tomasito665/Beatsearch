@@ -544,11 +544,12 @@ class Rhythm(object, metaclass=ABCMeta):
     ########################
 
     @parse_unit_argument
-    def get_duration(self, unit: tp.Optional[UnitType] = None) -> tp.Union[int, float]:
+    def get_duration(self, unit: tp.Optional[UnitType] = None, ceil: bool = False) -> tp.Union[int, float]:
         """
         Returns the duration of this rhythm in the given musical time unit or in ticks if no unit is given.
 
         :param unit: time unit in which to return the duration or None to get the duration in ticks
+        :param ceil: if True, the returned duration will be rounded up (ignored if unit is set to None)
         :return: duration of this rhythm in given unit or in ticks if no unit is given
         """
 
@@ -558,7 +559,8 @@ class Rhythm(object, metaclass=ABCMeta):
             return duration_in_ticks
 
         resolution = self.get_resolution()
-        return unit.from_ticks(duration_in_ticks, resolution, True)
+        duration = unit.from_ticks(duration_in_ticks, resolution, False)
+        return int(math.ceil(duration)) if ceil else duration
 
     @parse_unit_argument
     def set_duration(self, duration: tp.Union[int, float], unit: tp.Optional[UnitType] = None) -> None:

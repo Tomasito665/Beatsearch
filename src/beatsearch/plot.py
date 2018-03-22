@@ -33,8 +33,8 @@ def get_coordinates_on_circle(circle_position, circle_radius, x):
     return p_x, p_y
 
 
-def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis='x'):
-    duration = rhythm.get_duration(unit)
+def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis='x'):  # TODO fix axis option
+    duration = rhythm.get_duration(unit, ceil=True)
     measure_duration = rhythm.get_measure_duration(unit)
     beat_duration = rhythm.get_beat_duration(unit)
 
@@ -246,7 +246,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
 
         # named arguments given both to __setup_subplot__ and __draw_track__
         common_kwargs = {
-            'n_pulses': int(math.ceil(rhythm_loop.get_duration(unit))),
+            'n_pulses': rhythm_loop.get_duration(unit, ceil=True),
             'n_tracks': rhythm_loop.get_track_count()
         }
 

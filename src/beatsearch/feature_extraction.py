@@ -216,8 +216,8 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
         Rhythm.Precondition.check_resolution(rhythm)
 
         unit = self.unit
-        duration = rhythm.get_duration(unit)
-        binary_string = [0] * int(math.ceil(duration))
+        n_steps = rhythm.get_duration(unit, ceil=True)
+        binary_string = [0] * n_steps
 
         if unit is None:
             get_onset_position = lambda t: t
@@ -612,6 +612,30 @@ class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractor):
             return n_syncopated_onsets / float(n_onsets)
 
 
+class MeanSyncopationStrength(MonophonicRhythmFeatureExtractor):
+    @staticmethod
+    def init_pre_processors():
+        yield SyncopationVector()
+
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        """
+        Returns the average syncopation strength per step. The step size depends on the unit (see set_unit). The
+        syncopations are computed with SyncopationVector.
+
+        :param rhythm: rhythm of which to compute the average syncopation strength
+        :return: average syncopation strength per step
+        """
+
+        syncopation_vector = pre_processor_results[0]
+        total_syncopation_strength = sum(info[1] for info in syncopation_vector)
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+
+        try:
+            return total_syncopation_strength / n_steps
+        except ZeroDivisionError:
+            return 0
+
+
 class OnsetDensity(MonophonicRhythmFeatureExtractor):
     def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH):
         super().__init__(unit)
@@ -641,5 +665,6 @@ __all__ = [
 
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
-    'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio', 'OnsetDensity'
+    'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
+    'MeanSyncopationStrength', 'OnsetDensity'
 ]

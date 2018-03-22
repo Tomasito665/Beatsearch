@@ -411,7 +411,7 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
         return self._onset_position_vector.process(rhythm)
 
     def __get_cookie__(self, rhythm: MonophonicRhythm):
-        return int(math.ceil(rhythm.get_duration(self.unit)))
+        return rhythm.get_duration(self.unit, ceil=True)
 
     @staticmethod
     def __compute_distance__(n, vx, vy, dur_x, dur_y):
