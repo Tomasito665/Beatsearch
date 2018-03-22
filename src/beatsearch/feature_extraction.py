@@ -3,10 +3,12 @@ import math
 import itertools
 import numpy as np
 import typing as tp
+from fractions import Fraction
 from abc import ABCMeta, abstractmethod
 from beatsearch.utils import Quantizable
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
-    Unit, UnitType, parse_unit_argument, rescale_tick, convert_tick
+    Unit, UnitType, parse_unit_argument, convert_tick
+
 
 ######################################
 # Feature extractor abstract classes #
@@ -531,12 +533,12 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
         proposed by H.C. Longuet-Higgins and C. S. Lee in their work titled: "The Rhythmic Interpretation of
         Monophonic Music".
 
-        The syncopations are returned as a two-dimensional tuple. If the given rhythm contains N syncopations, the
-        returned tuple will have a length of N. Each element of the returned tuple contains two elements:
+        The syncopations are returned as two-dimensional tuples. If the given rhythm contains N syncopations, the
+        returned tuples will have a length of N. Each element of the returned tuple contains two elements:
             - the position of the syncopation in the binary onset vector of the rhythm
             - the syncopation strength
 
-        :param rhythm: rhythm to extract the syncopations from
+        :param rhythm: rhythm from which to extract the syncopations
         :return: a two-dimensional tuple containing the onset positions in the first dimension and the syncopation
                  strengths in the second dimension
         """
@@ -564,6 +566,50 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
                     yield step, syncopation_strength
 
         return tuple(get_syncopations())
+
+
+class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractor):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, ret_fraction: bool = False):
+        super().__init__(unit)
+        self._ret_fraction = None
+        self.ret_fraction = ret_fraction  # calling setter
+
+    @staticmethod
+    def init_pre_processors():
+        # NOTE: Order is important (__process__ depends on it)
+        yield BinaryOnsetVector()
+        yield SyncopationVector()
+
+    @property
+    def ret_fraction(self) -> bool:
+        return self._ret_fraction
+
+    @ret_fraction.setter
+    def ret_fraction(self, ret_fraction):
+        self._ret_fraction = bool(ret_fraction)
+
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        """
+        Returns the number of syncopated onsets over the total number of onsets. The syncopations are computed
+        SyncopationVector.
+
+        :param rhythm: rhythm for which to compute the syncopated onset ratio
+        :return: either if ret_fraction is True a Fraction object, otherwise a float
+        """
+
+        binary_onset_vector = pre_processor_results[0]
+        syncopation_vector = pre_processor_results[1]
+
+        # NOTE: We use binary onset vector and don't call rhythm.get_onset_count because the onset count might be
+        # different for different units (onsets might merge with large unit like Unit.QUARTER)
+        n_onsets = sum(binary_onset_vector)
+        n_syncopated_onsets = len(syncopation_vector)
+        assert n_syncopated_onsets <= n_onsets
+
+        if self.ret_fraction:
+            return Fraction(n_syncopated_onsets, n_onsets)
+        else:
+            return n_syncopated_onsets / float(n_onsets)
 
 
 class OnsetDensity(MonophonicRhythmFeatureExtractor):
@@ -595,5 +641,5 @@ __all__ = [
 
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
-    'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'OnsetDensity'
+    'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio', 'OnsetDensity'
 ]
