@@ -257,6 +257,12 @@ class TimeSignature(object):
     """
 
     def __init__(self, numerator, denominator):
+        numerator = int(numerator)
+        denominator = int(denominator)
+
+        if numerator < 1:
+            raise ValueError("Expected numerator equal or greater than 1 but got %i" % numerator)
+
         self._numerator = numerator
         self._denominator = denominator
         self._beat_unit = Unit.get(Fraction(1, denominator))
@@ -329,29 +335,45 @@ class TimeSignature(object):
         return tuple(divisions)
 
     @parse_unit_argument
-    def get_metrical_weights(self, unit=Unit.EIGHTH, root_weight=0):
+    def get_salience_profile(self, unit: UnitType = Unit.EIGHTH, equal_upbeats: bool = False, root_weight: int = 0):
         """Returns the metrical weights for a full measure of this time signature
 
-        Constructs a hierarchical meter tree structure (see get_meter_tree) ands assigns a weight to each node. Then it
-        flattens the tree and returns it as a list. The weight of a node is the weight of the parent node minus one. The
-        weight of the root node is specified with the root_weight argument of this method.
+        Returns the metrical weights for a full measure of this time signature with a step size of the given unit. When
+        equal_upbeats is false, the salience profile will be based on a fully hierarchical metrical structure of the
+        meter. Otherwise, if equal_upbeats is true, all beat weights will be equal except for the downbeat, which will
+        have a greater weight.
 
-        For example, given the "eighths" tree structure of a 4/4 time signature:
+        This method constructs a hierarchical meter tree structure (see get_meter_tree) and assigns a weight to each
+        node. Then it flattens the tree and returns it as a list. The weight of a node is the weight of its parent node
+        minus one. The weight of the root node is specified with the root_weight argument of this method. This way of
+        computing the salience profile corresponds to the method proposed by H.C. Longuet-Higgins & C.S. Lee in their
+        work titled "The Rhythmic Interpretation of Monophonic Music".
 
-                         --------------- R -------------
-                 ------ A ------                 ------ A ------        note value = 𝅝 (whole note)
-             -- B --         -- B --         -- B --         -- B --    note value = ♩ (quarter note)
-            C       C       C       C       C       C       C       C   note value = 𝅘𝅥𝅮 (eighth note)
-
-        if root_weight is 0, then the weights of the R, A, B and C nodes are 0, -1, -2 and -3 respectively. This will
-        yield these metrical weights: [0, -3, -2, -3, -1, -3, -2, -3].
+        When equal_upbeats is set to true, this method will only construct a hierarchical meter for one beat of this
+        time signature with a root weight of the given root weight minus one. It will flatten that tree and repeat it
+        till one measure is filled after which the downbeat weight is set to the given root weight. This way of
+        computing the salience profile corresponds to the method proposed Maria A.G. Witek et al. in their work titled
+        "Syncopation, Body-Movement and Pleasure in Groove Music".
 
         :param unit: step time unit
+        :param equal_upbeats: when true, all beats will have the same weight except for the downbeat, which will have a
+                              greater weight
         :param root_weight: weight of first node in the
         :return: the metrical weights for a full measure of this time signature with the given time unit
         """
 
+        f = self.__get_salience_profile_with_equal_upbeats if \
+            equal_upbeats else self.__get_salience_profile_full_hierarchical
+
+        return f(unit, root_weight)
+
+    def __get_salience_profile_full_hierarchical(self, unit: Unit, root_weight: int):
         subdivisions = self.get_meter_tree(unit)
+
+        if not subdivisions:
+            assert self.get_beat_unit().convert(self.numerator, unit, True) == 1
+            return [root_weight]
+
         metrical_weights = [None] * sequence_product(subdivisions)
         n_branches = 1
 
@@ -364,6 +386,17 @@ class TimeSignature(object):
                     metrical_weights[ix] = curr_subdivision_weight
 
         return metrical_weights
+
+    def __get_salience_profile_with_equal_upbeats(self, unit: Unit, root_weight: int):
+        # get the fully hierarchical salience profile of one beat
+        one_beat_ts = TimeSignature(1, self.denominator)
+        one_beat_weights = one_beat_ts.__get_salience_profile_full_hierarchical(unit, root_weight=root_weight-1)
+
+        # repeat the one-beat salience profile to fill one measure and assign the root weight to the downbeat
+        salience_profile = one_beat_weights * self.numerator
+        salience_profile[0] = root_weight
+
+        return salience_profile
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):

@@ -287,11 +287,16 @@ def most_common_element(sequence: tp.Sequence[tp.Any]) -> tp.Any:
 def sequence_product(iterable):
     """Returns the product of the given iterable
 
+    Returns 0 if reduce() raise a TypeError.
+
     :param iterable: iterable to return the product of
     :return: product of given iterable
     """
 
-    return reduce((lambda x, y: x * y), iterable)
+    try:
+        return reduce((lambda x, y: x * y), iterable)
+    except TypeError:
+        return 0
 
 
 class Quantizable(object, metaclass=ABCMeta):

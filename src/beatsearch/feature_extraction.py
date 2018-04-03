@@ -1,5 +1,4 @@
 import enum
-import math
 import itertools
 import numpy as np
 import typing as tp
@@ -59,7 +58,7 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
 
         raise NotImplementedError
 
-    def process(self, rhythm: Rhythm) -> tp.Any:
+    def process(self, rhythm: Rhythm) -> object:
         """Computes and returns a rhythm feature
 
         :param rhythm: rhythm of which to compute the feature
@@ -197,9 +196,14 @@ class PolyphonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABC
         raise NotImplementedError
 
 
-#####################################
-# Feature extractor implementations #
-#####################################
+####################################################
+# Generic rhythm feature extractor implementations #
+####################################################
+
+
+#######################################################
+# Monophonic rhythm feature extractor implementations #
+#######################################################
 
 
 class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
@@ -251,7 +255,6 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
     def mode(self):
         return self._mode
 
-    # noinspection PyShadowingBuiltins
     @mode.setter
     def mode(self, mode: Mode):
         self._mode = mode
@@ -518,6 +521,10 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
 
 
 class SyncopationVector(MonophonicRhythmFeatureExtractor):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, equal_upbeat_salience_profile: bool = False):
+        super().__init__(unit)
+        self.equal_upbeat_salience_profile = equal_upbeat_salience_profile
+
     @staticmethod
     def init_pre_processors():
         yield BinaryOnsetVector()
@@ -547,7 +554,8 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
 
         binary_vector = pre_processor_results[0]
         time_signature = rhythm.get_time_signature()
-        metrical_weights = time_signature.get_metrical_weights(self.unit)
+        metrical_weights = time_signature.get_salience_profile(
+            self.unit, equal_upbeats=self.equal_upbeat_salience_profile)
 
         def get_syncopations():
             for step, curr_step_is_onset in enumerate(binary_vector):
