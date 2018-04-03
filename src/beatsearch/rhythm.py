@@ -6,9 +6,9 @@ import textwrap
 import itertools
 from abc import abstractmethod, ABCMeta
 from io import IOBase
-from functools import wraps
 import typing as tp
 from fractions import Fraction
+from functools import wraps, total_ordering
 from collections import OrderedDict, namedtuple, defaultdict
 from beatsearch.utils import TupleView, friendly_named_class, most_common_element, sequence_product
 import math
@@ -20,6 +20,7 @@ class UnitError(Exception):
     pass
 
 
+@total_ordering  # enable <, > <= and >= operators
 class Unit(enum.Enum):
     OCTUPLE_WHOLE = Fraction(8, 1), ("octuple whole", "octuple", "large", "duplex longa", "maxima")
     QUADRUPLE_WHOLE = Fraction(4, 1), ("long", "longa")
@@ -146,6 +147,10 @@ class Unit(enum.Enum):
 
         quarter_value = self.convert(value, self.QUARTER, False)
         return round(quarter_value * resolution)
+
+    def __lt__(self, other):
+        other_note_value = other._note_value_float if isinstance(other, Unit) else other
+        return self._note_value_float < other_note_value
 
 
 Unit.__by_note_names__ = dict((name, unit) for unit in Unit for name in unit.get_note_names())
