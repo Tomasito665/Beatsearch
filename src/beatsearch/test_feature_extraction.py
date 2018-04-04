@@ -109,9 +109,7 @@ def get_poly_rhythm_mock_with_songo_onsets(resolution):
         int(resolution / 4.0 * 12)
     ], resolution, ts, duration_in_ticks)
 
-    mocked_tracks = OrderedDict((t.get_name(), t) for t in [kick_track_mock, snare_track_mock, hihat_track_mock])
-    rhythm_mock.get_track_iterator.return_value = iter(mocked_tracks.items())
-
+    rhythm_mock.get_track_iterator.return_value = iter([kick_track_mock, snare_track_mock, hihat_track_mock])
     set_rhythm_mock_properties(rhythm_mock, resolution, ts, duration_in_ticks)
     return rhythm_mock
 
@@ -466,6 +464,9 @@ class TestMultiChannelMonophonicRhythmFeatureVector(TestPolyphonicRhythmFeatureE
         poly_extractor.monophonic_extractor = mono_extractor_mock
         actual_result_items = tuple(poly_extractor.process(self.rhythm).items())
         self.assertEqual(actual_result_items, expected_result_items)
+
+
+# TODO: Add tests for polyphonic syncopation vector
 
 
 if __name__ == "__main__":

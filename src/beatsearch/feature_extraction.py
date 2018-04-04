@@ -1,4 +1,5 @@
 import enum
+import types
 import itertools
 import numpy as np
 import typing as tp
@@ -67,11 +68,14 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
         """
 
         pre_processor_results = list(pre_processor.process(rhythm) for pre_processor in self.get_pre_processors())
-        return self.__process__(rhythm, pre_processor_results)
+        ret = self.__process__(rhythm, pre_processor_results)
+        return tuple(ret) if isinstance(ret, types.GeneratorType) else ret
 
     @abstractmethod
     def __process__(self, rhythm: Rhythm, pre_processor_results: tp.List[tp.Any]):
         """Computes and returns a rhythm feature
+
+        If this method is implemented as a generator, it will be evaluated by process() and returned as a tuple.
 
         :param rhythm:                 rhythm of which to compute the feature
         :param pre_processor_results:  results of the preprocessors, which process the given rhythm
@@ -523,7 +527,7 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
 class SyncopationVector(MonophonicRhythmFeatureExtractor):
     def __init__(self, unit: UnitType = Unit.EIGHTH, equal_upbeat_salience_profile: bool = False):
         super().__init__(unit)
-        self.equal_upbeat_salience_profile = equal_upbeat_salience_profile
+        self.equal_upbeat_salience_profile = bool(equal_upbeat_salience_profile)
 
     @staticmethod
     def init_pre_processors():
@@ -557,23 +561,20 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
         metrical_weights = time_signature.get_salience_profile(
             self.unit, equal_upbeats=self.equal_upbeat_salience_profile)
 
-        def get_syncopations():
-            for step, curr_step_is_onset in enumerate(binary_vector):
-                next_step = (step + 1) % len(binary_vector)
-                next_step_is_onset = binary_vector[next_step]
+        for step, curr_step_is_onset in enumerate(binary_vector):
+            next_step = (step + 1) % len(binary_vector)
+            next_step_is_onset = binary_vector[next_step]
 
-                # iterate only over note-rest pairs
-                if not curr_step_is_onset or next_step_is_onset:
-                    continue
+            # iterate only over note-rest pairs
+            if not curr_step_is_onset or next_step_is_onset:
+                continue
 
-                note_weight = metrical_weights[step]
-                rest_weight = metrical_weights[next_step]
+            note_weight = metrical_weights[step]
+            rest_weight = metrical_weights[next_step]
 
-                if note_weight <= rest_weight:
-                    syncopation_strength = rest_weight - note_weight
-                    yield step, syncopation_strength
-
-        return tuple(get_syncopations())
+            if rest_weight >= note_weight:
+                syncopation_strength = rest_weight - note_weight
+                yield step, syncopation_strength
 
 
 class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractor):
@@ -708,8 +709,131 @@ class MultiChannelMonophonicRhythmFeatureVector(PolyphonicRhythmFeatureExtractor
         return OrderedDict(self.__compute_features_per_track(rhythm))
 
     def __compute_features_per_track(self, rhythm: PolyphonicRhythm) -> tp.Generator[tp.Tuple[str, tp.Any], None, None]:
-        for name, track in rhythm.get_track_iterator():
-            yield name, self._mono_extractor.process(track)
+        for track in rhythm.get_track_iterator():
+            yield track.get_name(), self._mono_extractor.process(track)
+
+
+class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractor):
+    def __init__(self, unit: UnitType, equal_upbeat_salience_profile: bool = False):
+        super().__init__(unit)
+        self.equal_upbeat_salience_profile = bool(equal_upbeat_salience_profile)
+        self._f_get_instrumentation_weight = None
+        # type: tp.Optional[tp.Callable[[tp.Set[str], tp.Set[str]], tp.Union[int, float]]]
+
+    @staticmethod
+    def init_pre_processors():
+        multi_channel_binary_onset_extractor = MultiChannelMonophonicRhythmFeatureVector()
+        multi_channel_binary_onset_extractor.monophonic_extractor = BinaryOnsetVector()
+        yield multi_channel_binary_onset_extractor
+
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        if unit is None:
+            raise ValueError("PolyphonicSyncopationVector does not support tick-based computation")
+        super().set_unit(unit)
+
+    def set_instrumentation_weight_function(
+            self,
+            func: tp.Union[tp.Callable[[tp.Set[str], tp.Set[str]], tp.Union[int, float]], None]
+    ):
+        if func and not callable(func):
+            raise TypeError
+
+        self._f_get_instrumentation_weight = func or None
+
+    def get_instrumentation_weight_function(self) -> \
+            tp.Union[tp.Callable[[tp.Set[str], tp.Set[str]], tp.Union[int, float]], None]:
+        return self._f_get_instrumentation_weight
+
+    # noinspection PyUnusedLocal
+    @staticmethod
+    def default_instrumentation_weight_function(
+            syncopated_instruments: tp.Set[str],
+            other_instruments: tp.Set[str]
+    ) -> int:
+        return 0
+        # n_other_instruments = len(other_instruments)
+        # return min(3 - n_other_instruments, 0)
+
+    def __process__(self, rhythm: PolyphonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        """
+        Finds the polyphonic syncopations and their syncopation strengths. This is an implementation of the method
+        proposed by Maria A.G. Witek et al in their work titled "Syncopation, Body-Movement and Pleasure in Groove
+        Music".
+
+        The definition of syncopation, as proposed in the work of Witek, goes as follows:
+
+            If N is a note that precedes a rest, R, and R has a metric weight greater than or equal to N, then the
+            pair (N, R) is said to constitute a monophonic syncopation. If N is a note on a certain instrument that
+            precedes a note on a different instrument, Ndi, and Ndi has a metric weight greater than or equal to N,
+            then the pair (N, Ndi) is said to constitute a polyphonic syncopation.
+
+        This definition is used to find the syncopations. Then, the syncopation strengths are computed with this
+        formula:
+
+            S = Ndi - N + I
+
+        where S is the degree of syncopation, Ndi is the metrical weight of the note succeeding the syncopated note, N
+        is the metrical weight of the syncopated note and I is the instrumentation weight. The instrumentation weight
+        depends on the relation of the instruments involved in the syncopation. This relation depends on two factors:
+
+            - the number of instruments involved in the syncopation
+            - the type of instruments involved in the syncopation
+
+        As there is no formula given by Witek for how to compute this value, the computation of this value is up to the
+        owner of this feature extractor. The function to compute the weight can be set through the
+        set_instrumentation_weight_function method and should be a callable receiving two arguments:
+
+            - the names of the tracks (instruments) that play a syncopated note
+            - the names of the tracks (instruments) that the note is syncopated against (empty if syncopated against a
+              rest)
+
+        The syncopations are returned (position, syncopation strength) tuples.
+
+        NOTE: the formula in the Witek's work is different: S = N - Ndi + I. I suspect that it is a typo, as examples
+        in the same work show that the formula, S = Ndi - N + I, is used.
+
+        :param rhythm: the polyphonic rhythm of which to compute the polyphonic syncopation vector
+        :return: syncopations as (position, syncopation strength) tuples
+        """
+
+        Rhythm.Precondition.check_time_signature(rhythm)
+        binary_onset_vectors = pre_processor_results[0]
+
+        if not binary_onset_vectors:
+            yield None
+            raise StopIteration
+
+        timesig = rhythm.get_time_signature()
+        metrical_weights = timesig.get_salience_profile(self.unit, equal_upbeats=self.equal_upbeat_salience_profile)
+        get_instrumentation_weight = self._f_get_instrumentation_weight or self.default_instrumentation_weight_function
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+        curr_step_onsets, next_step_onsets = set(), set()
+
+        for curr_step, next_step in ((i, (i + 1) % n_steps) for i in range(n_steps)):
+            curr_weight = metrical_weights[curr_step]
+            next_weight = metrical_weights[next_step]
+
+            # if syncopation not possible on this step
+            if curr_weight > next_weight:
+                continue
+
+            curr_step_onsets.clear()
+            next_step_onsets.clear()
+
+            for t_name, binary_vector in binary_onset_vectors.items():
+                if binary_vector[curr_step]:
+                    curr_step_onsets.add(t_name)
+                if binary_vector[next_step]:
+                    next_step_onsets.add(t_name)
+
+            # iterate only over notes (not over rests)
+            if len(curr_step_onsets) == 0:
+                continue
+
+            instrumentation_weight = get_instrumentation_weight(curr_step_onsets, next_step_onsets)
+            syncopation_degree = next_weight - curr_weight + instrumentation_weight
+
+            yield curr_step, syncopation_degree
 
 
 __all__ = [
@@ -723,5 +847,5 @@ __all__ = [
     'MeanSyncopationStrength', 'OnsetDensity',
 
     # Polyphonic rhythm feature extractor implementations
-    'MultiChannelMonophonicRhythmFeatureVector'
+    'MultiChannelMonophonicRhythmFeatureVector', 'PolyphonicSyncopationVector'
 ]
