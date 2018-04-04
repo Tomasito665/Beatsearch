@@ -3,6 +3,7 @@ import itertools
 import numpy as np
 import typing as tp
 from fractions import Fraction
+from collections import OrderedDict
 from abc import ABCMeta, abstractmethod
 from beatsearch.utils import Quantizable
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
@@ -58,7 +59,7 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
 
         raise NotImplementedError
 
-    def process(self, rhythm: Rhythm) -> object:
+    def process(self, rhythm: Rhythm) -> tp.Any:
         """Computes and returns a rhythm feature
 
         :param rhythm: rhythm of which to compute the feature
@@ -182,8 +183,7 @@ class PolyphonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABC
     def __process__(
             self,
             rhythm: PolyphonicRhythm,
-            unit: tp.Union[int, str],
-            *pre_processor_results: tp.List[tp.Any]
+            pre_processor_results: tp.List[tp.Any]
     ):
         """Computes and returns a polyphonic rhythm feature
         Computes a feature of the given polyphonic rhythm and returns it.
@@ -666,6 +666,52 @@ class OnsetDensity(MonophonicRhythmFeatureExtractor):
         return float(n_onsets) / len(binary_vector)
 
 
+#######################################################
+# Polyphonic rhythm feature extractor implementations #
+#######################################################
+
+
+class MultiChannelMonophonicRhythmFeatureVector(PolyphonicRhythmFeatureExtractor):
+    class MonophonicFeatureExtractorNotSet(Exception):
+        pass
+
+    def __init__(
+            self, unit: tp.Optional[UnitType] = None,
+            mono_extractor_cls: tp.Optional[tp.Type[MonophonicRhythmFeatureExtractor]] = None,
+            *mono_extractor_args,
+            **mono_extractor_kwargs
+    ):
+        self._mono_extractor = None  # type: tp.Union[MonophonicRhythmFeatureExtractor, None]
+        super().__init__(unit)
+
+        if mono_extractor_cls:
+            mono_extractor = mono_extractor_cls(unit, *mono_extractor_args, **mono_extractor_kwargs)
+            self.monophonic_extractor = mono_extractor
+
+    @property
+    def monophonic_extractor(self):
+        return self._mono_extractor
+
+    @monophonic_extractor.setter
+    def monophonic_extractor(self, monophonic_feature_extractor: MonophonicRhythmFeatureExtractor):
+        monophonic_feature_extractor.set_unit(self.unit)
+        self._mono_extractor = monophonic_feature_extractor
+
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        super().set_unit(unit)
+        if self._mono_extractor:
+            self._mono_extractor.set_unit(unit)
+
+    def __process__(self, rhythm: PolyphonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        if not self._mono_extractor:
+            raise self.MonophonicFeatureExtractorNotSet("Please set the mono_extractor property")
+        return OrderedDict(self.__compute_features_per_track(rhythm))
+
+    def __compute_features_per_track(self, rhythm: PolyphonicRhythm) -> tp.Generator[tp.Tuple[str, tp.Any], None, None]:
+        for name, track in rhythm.get_track_iterator():
+            yield name, self._mono_extractor.process(track)
+
+
 __all__ = [
     # Feature extractor abstract base classes (or interfaces)
     'FeatureExtractor', 'RhythmFeatureExtractor',
@@ -674,5 +720,8 @@ __all__ = [
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
-    'MeanSyncopationStrength', 'OnsetDensity'
+    'MeanSyncopationStrength', 'OnsetDensity',
+
+    # Polyphonic rhythm feature extractor implementations
+    'MultiChannelMonophonicRhythmFeatureVector'
 ]

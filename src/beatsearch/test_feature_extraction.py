@@ -1,14 +1,15 @@
 import typing as tp
 from fractions import Fraction
 from unittest import TestCase, main
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
+from collections import OrderedDict
 from abc import ABCMeta, abstractmethod
 
 # feature extractor base classes
-from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtractorBase, \
+from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtractor, \
     MonophonicRhythmFeatureExtractor, PolyphonicRhythmFeatureExtractor
 
-# feature extractor implementations
+# monophonic feature extractor implementations
 from beatsearch.feature_extraction import (
     BinaryOnsetVector,
     BinarySchillingerChain,
@@ -23,12 +24,29 @@ from beatsearch.feature_extraction import (
     IOIHistogram
 )
 
+from beatsearch.feature_extraction import (
+    MultiChannelMonophonicRhythmFeatureVector
+)
+
 # misc
-from beatsearch.rhythm import Rhythm, MonophonicRhythm, Unit
+from beatsearch.rhythm import Rhythm, Track, MonophonicRhythm, PolyphonicRhythm, Unit
 from beatsearch.test_rhythm import mock_onset
 
 
-def get_rhythm_mock_with_23_rumba_clave_onsets(resolution):
+def set_rhythm_mock_properties(rhythm_mock, resolution, time_signature, duration_in_ticks):
+    # resolution
+    rhythm_mock.get_resolution.return_value = resolution
+    rhythm_mock.resolution = resolution
+    # time signature
+    rhythm_mock.get_time_signature.return_value = time_signature
+    rhythm_mock.time_signature = time_signature
+    # duration (in ticks)
+    rhythm_mock.get_duration_in_ticks.return_value = duration_in_ticks
+    rhythm_mock.duration_in_ticks = duration_in_ticks
+    rhythm_mock.get_duration.return_value = duration_in_ticks
+
+
+def get_mono_rhythm_mock_with_23_rumba_clave_onsets(resolution):
     rhythm_mock = MagicMock(MonophonicRhythm)
     assert resolution >= 4, "the 2/3 claves pattern is is not representable with a resolution smaller than 4"
 
@@ -41,15 +59,60 @@ def get_rhythm_mock_with_23_rumba_clave_onsets(resolution):
     )
 
     mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
-
-    rhythm_mock.get_resolution.return_value = resolution
-    rhythm_mock.resolution = rhythm_mock.get_resolution.return_value
     rhythm_mock.get_onsets.return_value = mocked_onsets
     rhythm_mock.onsets = rhythm_mock.get_onsets.return_value
-    rhythm_mock.get_duration_in_ticks.return_value = int(resolution * 4)
-    rhythm_mock.duration_in_ticks = rhythm_mock.get_duration_in_ticks.return_value
-    rhythm_mock.get_duration.return_value = int(resolution * 4)
 
+    set_rhythm_mock_properties(rhythm_mock, resolution, (4, 4), int(resolution) * 4)
+    return rhythm_mock
+
+
+def get_mocked_track(name, onset_positions, resolution, time_signature, duration_in_ticks):
+    track_mock = MagicMock(Track)
+    mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
+
+    track_mock.get_name.return_value = name
+    track_mock.name = name
+    track_mock.get_onsets.return_value = mocked_onsets
+    track_mock.onsets = mocked_onsets
+
+    set_rhythm_mock_properties(track_mock, resolution, time_signature, duration_in_ticks)
+    return track_mock
+
+
+def get_poly_rhythm_mock_with_songo_onsets(resolution):
+    rhythm_mock = MagicMock(PolyphonicRhythm)
+    assert resolution >= 4, "the songo rhythm is not representable with a resolution smaller than 4"
+    ts = (4, 4)
+    duration_in_ticks = 4 * resolution  # one measure 4/4
+
+    kick_track_mock = get_mocked_track("kick", [
+        int(resolution / 4.0 * 3),
+        int(resolution / 4.0 * 6),
+        int(resolution / 4.0 * 11),
+        int(resolution / 4.0 * 14)
+    ], resolution, ts, duration_in_ticks)
+
+    snare_track_mock = get_mocked_track("snare", [
+        int(resolution / 4.0 * 2),
+        int(resolution / 4.0 * 5),
+        int(resolution / 4.0 * 7),
+        int(resolution / 4.0 * 9),
+        int(resolution / 4.0 * 10),
+        int(resolution / 4.0 * 13),
+        int(resolution / 4.0 * 15)
+    ], resolution, ts, duration_in_ticks)
+
+    hihat_track_mock = get_mocked_track("hihat", [
+        int(resolution / 4.0 * 0),
+        int(resolution / 4.0 * 4),
+        int(resolution / 4.0 * 8),
+        int(resolution / 4.0 * 12)
+    ], resolution, ts, duration_in_ticks)
+
+    mocked_tracks = OrderedDict((t.get_name(), t) for t in [kick_track_mock, snare_track_mock, hihat_track_mock])
+    rhythm_mock.get_track_iterator.return_value = iter(mocked_tracks.items())
+
+    set_rhythm_mock_properties(rhythm_mock, resolution, ts, duration_in_ticks)
     return rhythm_mock
 
 
@@ -60,7 +123,7 @@ class TestFeatureExtractor(TestCase):
 
 class TestRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):
-        self.assertRaises(Exception, RhythmFeatureExtractorBase)
+        self.assertRaises(Exception, RhythmFeatureExtractor)
 
 
 class TestMonophonicRhythmFeatureExtractor(TestCase):
@@ -68,27 +131,10 @@ class TestMonophonicRhythmFeatureExtractor(TestCase):
         self.assertRaises(Exception, MonophonicRhythmFeatureExtractor)
 
 
-#######################################################
-# Monophonic rhythm feature extractor implementations #
-#######################################################
-
-
-class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=ABCMeta):
+class TestRhythmFeatureExtractorImplementationMixin(object, metaclass=ABCMeta):
     def test_instantiable(self):
         cls = self.get_impl_class()
         cls()  # shouldn't cause any problems
-
-    def __init__(self, *args, **kw):
-        # noinspection PyArgumentList
-        super().__init__(*args, **kw)
-        self.rhythm = get_rhythm_mock_with_23_rumba_clave_onsets(4)  # type: MonophonicRhythm
-        self.feature_extractor = None  # type: tp.Union[MonophonicRhythmFeatureExtractor, None]
-
-    # noinspection PyPep8Naming
-    def setUp(self):
-        cls = self.get_impl_class()
-        self.feature_extractor = cls()
-        self.feature_extractor.unit = 1/16
 
     # noinspection PyUnresolvedReferences
     def test_unit_set_with_first_positional_constructor_argument(self):
@@ -133,6 +179,31 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(object, metaclass=
             for pre_processor in obj.pre_processors:
                 with self.subTest("%s.%s" % (unit, pre_processor.__class__.__name__)):
                     self.assertEqual(pre_processor.unit, unit)
+
+    @staticmethod
+    @abstractmethod
+    def get_impl_class() -> tp.Type[RhythmFeatureExtractor]:
+        raise NotImplementedError
+
+
+#######################################################
+# Monophonic rhythm feature extractor implementations #
+#######################################################
+
+
+class TestMonophonicRhythmFeatureExtractorImplementationMixin(TestRhythmFeatureExtractorImplementationMixin,
+                                                              metaclass=ABCMeta):
+    def __init__(self, *args, **kw):
+        # noinspection PyArgumentList
+        super().__init__(*args, **kw)
+        self.rhythm = get_mono_rhythm_mock_with_23_rumba_clave_onsets(4)  # type: MonophonicRhythm
+        self.feature_extractor = None  # type: tp.Union[MonophonicRhythmFeatureExtractor, None]
+
+    # noinspection PyPep8Naming
+    def setUp(self):
+        cls = self.get_impl_class()
+        self.feature_extractor = cls()
+        self.feature_extractor.unit = 1/16
 
     @staticmethod
     def get_legal_units():
@@ -343,6 +414,58 @@ class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, 
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):
         self.assertRaises(Exception, PolyphonicRhythmFeatureExtractor)
+
+
+#######################################################
+# Polyphonic rhythm feature extractor implementations #
+#######################################################
+
+class TestPolyphonicRhythmFeatureExtractorImplementationMixin(TestRhythmFeatureExtractorImplementationMixin,
+                                                              metaclass=ABCMeta):
+    def __init__(self, *args, **kw):
+        # noinspection PyArgumentList
+        super().__init__(*args, **kw)
+        self.rhythm = get_poly_rhythm_mock_with_songo_onsets(4)  # type: PolyphonicRhythm
+        self.feature_extractor = None  # type: tp.Union[PolyphonicRhythmFeatureExtractor, None]
+
+    # noinspection PyPep8Naming
+    def setUp(self):
+        cls = self.get_impl_class()
+        self.feature_extractor = cls()
+        self.feature_extractor.unit = 1/16
+
+    @staticmethod
+    def get_legal_units():
+        # noinspection PyTypeChecker
+        return [None] + list(Unit)
+
+    @staticmethod
+    @abstractmethod
+    def get_impl_class() -> tp.Type[PolyphonicRhythmFeatureExtractor]:
+        raise NotImplementedError
+
+
+class TestMultiChannelMonophonicRhythmFeatureVector(TestPolyphonicRhythmFeatureExtractorImplementationMixin,
+                                                    TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[PolyphonicRhythmFeatureExtractor]:
+        return MultiChannelMonophonicRhythmFeatureVector
+
+    def test_process(self):
+        poly_extractor = self.feature_extractor  # type: MultiChannelMonophonicRhythmFeatureVector
+
+        mono_extractor_mock = MagicMock(MonophonicRhythmFeatureExtractor)
+        mono_extractor_mock.process.side_effect = ["fake_feature_a", "fake_feature_b", "fake_feature_c"]
+
+        expected_result_items = (
+            ("kick", "fake_feature_a"),
+            ("snare", "fake_feature_b"),
+            ("hihat", "fake_feature_c")
+        )
+
+        poly_extractor.monophonic_extractor = mono_extractor_mock
+        actual_result_items = tuple(poly_extractor.process(self.rhythm).items())
+        self.assertEqual(actual_result_items, expected_result_items)
 
 
 if __name__ == "__main__":

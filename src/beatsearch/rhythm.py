@@ -1355,7 +1355,8 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
     def get_track_iterator(self) -> tp.Iterator[Track]:
         """
         Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a
-        PolyphonicRhythmImpl.Track object.
+        PolyphonicRhythmImpl.Track object. The order in which the tracks of this rhythm are yielded is
+        always the same for each iterator returned by this method.
 
         :return: iterator over this rhythm's tracks yielding PolyphonicRhythmImpl.Track objects
         """
@@ -1594,7 +1595,9 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
 
     def get_track_iterator(self) -> tp.Iterator[Track]:
         """
-        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a Track object.
+        Returns an iterator over the tracks of this polyphonic rhythm. Each iteration yields a
+        PolyphonicRhythmImpl.Track object. The order in which the tracks of this rhythm are yielded is
+        always the same for each iterator returned by this method.
 
         :return: iterator over this rhythm's tracks yielding PolyphonicRhythmImpl.Track objects
         """
