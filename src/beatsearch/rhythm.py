@@ -331,7 +331,12 @@ class TimeSignature(object):
                 raise Exception("No context-sensitive meters allowed. Branch of %i units "
                                 "not equally divisible into binary or ternary sub-units" % curr_branch)
 
-        divisions.extend(itertools.repeat(2, n_units_per_beat - 1))
+        n_beat_divisions = math.log2(n_units_per_beat)
+        assert math.isclose(n_beat_divisions, int(n_beat_divisions)), \
+            "expected number of steps in a beat to be an exact base-2 logarithm of %i" % n_units_per_beat
+        n_beat_divisions = int(n_beat_divisions)
+
+        divisions.extend(itertools.repeat(2, n_beat_divisions))
         return tuple(divisions)
 
     @parse_unit_argument
