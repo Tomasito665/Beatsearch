@@ -932,16 +932,16 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
 
     def set_duration_in_ticks(self, requested_duration: int) -> int:
         """
-        Tries to set the duration of this rhythm to the requested duration and returns the actual new duration. The
-        duration of the rhythm can't be less than the position of the last note in this rhythm. If a duration is
-        requested that is less than the last note's position, the duration will be set to that last note's position.
+        Tries to set the duration of this rhythm to the requested duration and returns the actual new duration. If the
+        position of this rhythm's last note is X, the duration of the rhythm can't be less than X + 1. If the requested
+        duration is less than X + 1, the duration will be set to X + 1.
 
         :param requested_duration: new duration in ticks
         :return: the new duration
         """
 
         last_onset_position = self.get_last_onset_tick()
-        self._duration_in_ticks = max(last_onset_position, int(requested_duration))
+        self._duration_in_ticks = max(last_onset_position + 1, int(requested_duration))
         return self._duration_in_ticks
 
 

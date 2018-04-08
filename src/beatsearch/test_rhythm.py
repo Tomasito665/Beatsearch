@@ -851,10 +851,10 @@ class TestPolyphonicRhythmImpl(TestRhythmBase):
         rhythm.set_resolution.assert_called_once_with(128)
 
     @inject_rhythm.no_mock()
-    def test_set_tracks_updates_duration_to_last_onset_tick(self, rhythm):
+    def test_set_tracks_updates_duration_to_last_onset_tick_plus_one(self, rhythm):
         rhythm.get_last_onset_tick = MagicMock(return_value=123)
         rhythm.set_tracks([], 0)
-        self.assertEqual(rhythm.get_duration_in_ticks(), 123)
+        self.assertEqual(rhythm.get_duration_in_ticks(), 124)
 
     #########################
     # track name validation #
