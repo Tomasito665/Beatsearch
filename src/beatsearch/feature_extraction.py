@@ -569,8 +569,8 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
             if not curr_step_is_onset or next_step_is_onset:
                 continue
 
-            note_weight = metrical_weights[step]
-            rest_weight = metrical_weights[next_step]
+            note_weight = metrical_weights[step % len(metrical_weights)]
+            rest_weight = metrical_weights[next_step % len(metrical_weights)]
 
             if rest_weight >= note_weight:
                 syncopation_strength = rest_weight - note_weight
@@ -810,8 +810,8 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractor):
         curr_step_onsets, next_step_onsets = set(), set()
 
         for curr_step, next_step in ((i, (i + 1) % n_steps) for i in range(n_steps)):
-            curr_weight = metrical_weights[curr_step]
-            next_weight = metrical_weights[next_step]
+            curr_weight = metrical_weights[curr_step % len(metrical_weights)]
+            next_weight = metrical_weights[next_step % len(metrical_weights)]
 
             # if syncopation not possible on this step
             if curr_weight > next_weight:
