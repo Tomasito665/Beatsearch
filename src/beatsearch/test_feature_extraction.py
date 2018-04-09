@@ -12,6 +12,7 @@ from beatsearch.feature_extraction import FeatureExtractor, RhythmFeatureExtract
 # monophonic feature extractor implementations
 from beatsearch.feature_extraction import (
     BinaryOnsetVector,
+    NoteVector,
     BinarySchillingerChain,
     ChronotonicChain,
     OnsetDensity,
@@ -29,7 +30,7 @@ from beatsearch.feature_extraction import (
 )
 
 # misc
-from beatsearch.rhythm import Rhythm, Track, MonophonicRhythm, PolyphonicRhythm, Unit
+from beatsearch.rhythm import Rhythm, Track, MonophonicRhythm, PolyphonicRhythm, Unit, TimeSignature
 from beatsearch.test_rhythm import mock_onset
 
 
@@ -223,6 +224,26 @@ class TestBinaryOnsetVector(TestMonophonicRhythmFeatureExtractorImplementationMi
         expected_binary_ticks = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
         actual_binary_ticks = self.feature_extractor.process(self.rhythm)
         self.assertEqual(actual_binary_ticks, expected_binary_ticks)
+
+
+class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return NoteVector
+
+    def test_process(self):
+        expected_note_vector_string = "N2 R1 N1 R2 R1 N1 R2 N2 N4"
+        to_event = lambda c: [NoteVector.NOTE, NoteVector.REST]["NR".index(c)]
+
+        # TODO mock time signature and its methods
+        rhythm = self.rhythm
+        rhythm.time_signature = TimeSignature(4, 4)
+        rhythm.get_time_signature.return_value = rhythm.time_signature
+
+        expected_note_vector = tuple((to_event(s[0]), int(s[1])) for s in expected_note_vector_string.split())
+        actual_note_vector = self.feature_extractor.process(rhythm)
+        self.assertSequenceEqual(actual_note_vector, expected_note_vector)
 
 
 class TestIOIVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):

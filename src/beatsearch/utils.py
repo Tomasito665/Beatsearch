@@ -299,6 +299,31 @@ def sequence_product(iterable):
         return 0
 
 
+def minimize_term_count(value: int, terms: tp.Sequence[int], assume_sorted: bool = False):
+    """This function minimizes the number of terms necessary to sum up a value, given a set of terms
+
+    This function returns terms that eventually sum up to the given value. It is only allowed to use terms given in the
+    "terms" parameter or 1. For example, if given value 17 and terms [3, 5, 7], this method will yield [7, 7, 5, 1].
+
+    :param value: the value that the terms should sum up to as an integer
+    :param terms: sequence containing the terms to choose from
+    :param assume_sorted: set this to true if the given terms are sorted (in ascending order) for better performance
+    :return: a generator yielding maximized terms that sum up to the given value
+    """
+
+    if not assume_sorted:
+        terms = sorted(terms)
+    i = 0
+    while i < value:
+        remaining = value - i
+        u = next((u for u in reversed(terms) if u <= remaining), 1)
+        n = remaining // u
+        for j in range(n):
+            yield u
+        i += n * u
+
+
+
 class Quantizable(object, metaclass=ABCMeta):
     @property
     def quantize_enabled(self) -> bool:
@@ -322,5 +347,5 @@ __all__ = [
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'get_beatsearch_dir',
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
-    'sequence_product', 'Quantizable'
+    'sequence_product', 'minimize_term_count', 'Quantizable'
 ]

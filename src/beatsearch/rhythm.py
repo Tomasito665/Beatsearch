@@ -331,7 +331,12 @@ class TimeSignature(object):
                 raise Exception("No context-sensitive meters allowed. Branch of %i units "
                                 "not equally divisible into binary or ternary sub-units" % curr_branch)
 
-        divisions.extend(itertools.repeat(2, n_units_per_beat - 1))
+        n_beat_divisions = math.log2(n_units_per_beat)
+        assert math.isclose(n_beat_divisions, int(n_beat_divisions)), \
+            "expected number of steps in a beat to be an exact base-2 logarithm of %i" % n_units_per_beat
+        n_beat_divisions = int(n_beat_divisions)
+
+        divisions.extend(itertools.repeat(2, n_beat_divisions))
         return tuple(divisions)
 
     @parse_unit_argument
@@ -367,25 +372,58 @@ class TimeSignature(object):
 
         return f(unit, root_weight)
 
-    def __get_salience_profile_full_hierarchical(self, unit: Unit, root_weight: int):
+    @parse_unit_argument
+    def get_natural_duration_map(self, unit: UnitType, trim_to_pulse: bool = True):
+        """Returns the maximum note durations on each metrical position as multiples of the given unit
+
+        Returns a list containing the maximum note duration initiated at each metrical position. The returned durations
+        are expressed as multiples as the given unit.
+
+        :param unit: step size as a musical unit
+        :param trim_to_pulse: when true, the durations won't exceed the duration of one pulse
+        :return: the maximum note durations on each metrical position as a list
+        """
+
+        if trim_to_pulse:
+            pulse_duration = self.get_beat_unit().convert(1, unit, True)
+            get_value = lambda ix, subdivision, n_branches, n_steps: min(n_steps // n_branches, pulse_duration)
+        else:
+            get_value = lambda ix, subdivision, n_branches, n_steps: n_steps // n_branches
+
+        return self.__construct_meter_map(unit, get_value)
+
+    def __construct_meter_map(self, unit: Unit, get_value: tp.Callable[[int, int, int, int], tp.Any]):
+        # given get_value function receives: branch_ix, subdivision, n_branches, n_steps
+        assert unit <= self.get_beat_unit(), "can't represent this time signature in %s" % str(unit)
+
+        n_steps = self.get_beat_unit().convert(self.numerator, unit, True)
         subdivisions = self.get_meter_tree(unit)
 
         if not subdivisions:
             assert self.get_beat_unit().convert(self.numerator, unit, True) == 1
-            return [root_weight]
+            return [get_value(0, 1, 1, 1)]
 
-        metrical_weights = [None] * sequence_product(subdivisions)
+        assert sequence_product(subdivisions) == n_steps, \
+            "if the product of %s is not %i, something is broken :(" % (str(subdivisions), n_steps)
+
+        meter_map = [None] * n_steps
         n_branches = 1
 
         for n, curr_subdivision in enumerate(itertools.chain([1], subdivisions)):
-            curr_subdivision_weight = root_weight - n
             n_branches *= curr_subdivision
+            value = get_value(n, curr_subdivision, n_branches, n_steps)
 
-            for ix in np.linspace(0, len(metrical_weights), n_branches, endpoint=False, dtype=int):
-                if metrical_weights[ix] is None:
-                    metrical_weights[ix] = curr_subdivision_weight
+            for ix in np.linspace(0, n_steps, n_branches, endpoint=False, dtype=int):
+                if meter_map[ix] is None:
+                    meter_map[ix] = value
 
-        return metrical_weights
+        return meter_map
+
+    def __get_salience_profile_full_hierarchical(self, unit: Unit, root_weight: int):
+        return self.__construct_meter_map(
+            unit,
+            lambda ix, subdivision, n_branches, n_steps: root_weight - ix
+        )
 
     def __get_salience_profile_with_equal_upbeats(self, unit: Unit, root_weight: int):
         # get the fully hierarchical salience profile of one beat
@@ -748,7 +786,7 @@ class RhythmFactory(object, metaclass=ABCMeta):
             onset_string: str,
             time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
             velocity: int = 100,
-            resolution: int = 4,
+            unit: UnitType = Unit.SIXTEENTH,
             onset_character: str = "x",
             **kwargs) -> Rhythm:
         """Creates and returns a rhythm, given a string representation of its onsets"""
@@ -762,7 +800,7 @@ class RhythmFactory(object, metaclass=ABCMeta):
             binary_vector: tp.Iterable[tp.Any],
             time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
             velocity: int = 100,
-            resolution: int = 4,
+            unit: UnitType = Unit.SIXTEENTH,
             **kwargs) -> Rhythm:
         """Creates and returns a rhythm, given a sequence representation of its onsets"""
 
@@ -775,6 +813,14 @@ class RhythmFactory(object, metaclass=ABCMeta):
     @staticmethod
     def __binary_vector_to_onsets__(binary_vector: tp.Sequence[bool], velocity: int) -> tp.Tuple[tp.Tuple[int, int]]:
         return tuple(filter(None, ((ix, velocity) if atom else None for ix, atom in enumerate(binary_vector))))
+
+    @staticmethod
+    @parse_unit_argument
+    def __check_and_return_resolution__(unit: UnitType):
+        resolution = Unit.QUARTER.convert(1, unit, True)
+        if resolution <= 0:
+            raise ValueError("Unit must be equal or smaller than %s" % str(Unit.QUARTER))
+        return resolution
 
 
 class RhythmBase(Rhythm, metaclass=ABCMeta):
@@ -932,16 +978,16 @@ class RhythmBase(Rhythm, metaclass=ABCMeta):
 
     def set_duration_in_ticks(self, requested_duration: int) -> int:
         """
-        Tries to set the duration of this rhythm to the requested duration and returns the actual new duration. The
-        duration of the rhythm can't be less than the position of the last note in this rhythm. If a duration is
-        requested that is less than the last note's position, the duration will be set to that last note's position.
+        Tries to set the duration of this rhythm to the requested duration and returns the actual new duration. If the
+        position of this rhythm's last note is X, the duration of the rhythm can't be less than X + 1. If the requested
+        duration is less than X + 1, the duration will be set to X + 1.
 
         :param requested_duration: new duration in ticks
         :return: the new duration
         """
 
         last_onset_position = self.get_last_onset_tick()
-        self._duration_in_ticks = max(last_onset_position, int(requested_duration))
+        self._duration_in_ticks = max(last_onset_position + 1, int(requested_duration))
         return self._duration_in_ticks
 
 
@@ -1024,7 +1070,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
                 onset_string: str,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                resolution: int = 4,
+                unit: UnitType = Unit.SIXTEENTH,
                 onset_character="x",
                 **kwargs):  # type: () -> MonophonicRhythmImpl
             """
@@ -1035,8 +1081,8 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
             :param onset_string:   onset string where each onset character will result in an onset
             :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
             :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
-            :param resolution:     resolution in pulses per quarter note (e.g., if resolution is set to 4, four
-                                   characters in the onset string will represent one quarter note)
+            :param unit:           step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or "eighth")
+                                   one character will represent one eighth note)
             :param onset_character: onset character (see onset_string)
             :param kwargs:         unused
 
@@ -1047,7 +1093,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
                 binary_vector=cls.__string_to_binary_onset_vector__(onset_string, onset_character),
                 time_signature=time_signature,
                 velocity=velocity,
-                resolution=resolution
+                unit=unit
             )
 
         @classmethod
@@ -1056,7 +1102,7 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
                 binary_vector: tp.Sequence[tp.Any],
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                resolution: int = 4,
+                unit: UnitType = Unit.SIXTEENTH,
                 **kwargs):  # type: () -> MonophonicRhythmImpl
             """
             Creates a new monophonic rhythm, given a binary chain (iterable). Each element in the iterable represents
@@ -1065,13 +1111,14 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
             :param binary_vector:  sequence where each true-evaluated element will result in an onset
             :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
             :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
-            :param resolution:     resolution in pulses per quarter note (e.g., if resolution is set to 4, four
-                                   elements in the binary vector will represent one quarter note)
+            :param unit:           step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or "eighth")
+                                   one element in the binary vector will represent one eighth note)
             :param kwargs:         unused
 
             :return: monophonic rhythm object
             """
 
+            resolution = cls.__check_and_return_resolution__(unit)
             return MonophonicRhythmImpl(
                 onsets=cls.__binary_vector_to_onsets__(binary_vector, velocity),
                 duration_in_ticks=len(binary_vector), resolution=resolution,
@@ -1403,7 +1450,7 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
                 input_string: str,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                resolution: int = 4,
+                unit: UnitType = Unit.SIXTEENTH,
                 onset_character: str = "x",
                 *_,
                 track_separator_char: str = "\n",
@@ -1432,8 +1479,8 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
             :param time_signature:       time signature of the rhythm as a (numerator, denominator) tuple or a
                                          TimeSignature object
             :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
-            :param resolution:           resolution in pulses per quarter note (e.g., if resolution is set to 4, four
-                                         characters in the binary onset onset string will represent one quarter note)
+            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
+                                         "eighth") one element in the binary vector will represent one eighth note)
             :param onset_character:      onset character (see onset_string)
             :param track_separator_char: see input_string
             :param name_separator_char:  see input_string
@@ -1454,7 +1501,7 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
                 binary_vector_tracks=track_onset_vectors,
                 time_signature=time_signature,
                 velocity=velocity,
-                resolution=resolution,
+                unit=unit,
                 track_names=track_names
             )
 
@@ -1464,7 +1511,7 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
                 binary_vector_tracks: tp.Sequence[tp.Sequence[tp.Any]],
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                resolution: int = 4,
+                unit: UnitType = Unit.SIXTEENTH,
                 *_, track_names: tp.Sequence[str] = None,
                 **kwargs):  # type: () -> PolyphonicRhythmImpl
             """
@@ -1474,13 +1521,14 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
             :param binary_vector_tracks: sequence holding one binary onset vector per track
             :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
             :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
-            :param resolution:           resolution in pulses per quarter note (e.g., if resolution is set to 4, four
-                                         characters in the onset string will represent one quarter note)
+            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
+                                         "eighth") one character will represent one eighth note)
             :param track_names:          names of the tracks
             :param kwargs:               unused
             :return: polyphonic rhythm object
             """
 
+            resolution = cls.__check_and_return_resolution__(unit)
             n_tracks = len(binary_vector_tracks)
             track_names = track_names or cls.__track_name_generator(n_tracks)
 

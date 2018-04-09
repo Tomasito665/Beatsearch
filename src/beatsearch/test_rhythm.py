@@ -851,10 +851,10 @@ class TestPolyphonicRhythmImpl(TestRhythmBase):
         rhythm.set_resolution.assert_called_once_with(128)
 
     @inject_rhythm.no_mock()
-    def test_set_tracks_updates_duration_to_last_onset_tick(self, rhythm):
+    def test_set_tracks_updates_duration_to_last_onset_tick_plus_one(self, rhythm):
         rhythm.get_last_onset_tick = MagicMock(return_value=123)
         rhythm.set_tracks([], 0)
-        self.assertEqual(rhythm.get_duration_in_ticks(), 123)
+        self.assertEqual(rhythm.get_duration_in_ticks(), 124)
 
     #########################
     # track name validation #
@@ -1227,7 +1227,8 @@ class TestMonophonicRhythmFactory(TestCase):
     @patch("beatsearch.rhythm.MonophonicRhythmImpl")
     def test_from_binary_vector(self, mock_monophonic_rhythm_impl_constructor):
         binary_onset_vector = [True, False, False, True, False, False, True, False]
-        MonophonicRhythm.create.from_binary_vector(binary_onset_vector, time_signature=(1, 2), velocity=87, resolution=2)
+        MonophonicRhythm.create.from_binary_vector(
+            binary_onset_vector, time_signature=(1, 2), velocity=87, unit="eighth")
         mock_monophonic_rhythm_impl_constructor.assert_called_once_with(
             onsets=((0, 87), (3, 87), (6, 87)),
             time_signature=(1, 2),
@@ -1237,12 +1238,12 @@ class TestMonophonicRhythmFactory(TestCase):
 
     @patch.object(MonophonicRhythm.create, "from_binary_vector")
     def test_from_string(self, mock_from_binary_chain):
-        MonophonicRhythm.create.from_string("O..O..OO", (7, 8), onset_character="O", velocity=20, resolution=2)
+        MonophonicRhythm.create.from_string("O..O..OO", (7, 8), onset_character="O", velocity=20, unit="eighth")
         mock_from_binary_chain.assert_called_once_with(
             binary_vector=(True, False, False, True, False, False, True, True),
             time_signature=(7, 8),
             velocity=20,
-            resolution=2
+            unit="eighth"
         )
 
 
@@ -1285,13 +1286,19 @@ class TestPolyphonicRhythmFactory(TestCase):
         mock_track_constructor.return_value = "fake-track"
         n_tracks = 2
 
-        rhythm_kwargs = {
-            'time_signature': (7, 8),
-            'resolution': 123
+        time_signature = (7, 8)
+        unit = "eighth"
+
+        expected_kwargs = {
+            'time_signature': time_signature,
+            'resolution': 2
         }
 
         PolyphonicRhythm.create.from_binary_vector(
-            "fake-onset-vectors", velocity=87, track_names=["fake-name"] * n_tracks, **rhythm_kwargs)
+            "fake-onset-vectors", velocity=87,
+            track_names=["fake-name"] * n_tracks,
+            time_signature=time_signature, unit=unit
+        )
 
         mock_polyphonic_rhythm_impl_constructor.assert_called_once()
         constructor_call_args, constructor_call_kwargs = mock_polyphonic_rhythm_impl_constructor.call_args_list[0]
@@ -1300,14 +1307,14 @@ class TestPolyphonicRhythmFactory(TestCase):
             self.assertSequenceEqual(
                 tuple(constructor_call_args[0]), [mock_track_constructor.return_value] * n_tracks)
 
-        for arg_name, arg_value in sorted(rhythm_kwargs.items()):
+        for arg_name, arg_value in sorted(expected_kwargs.items()):
             with self.subTest(arg_name):
                 self.assertIn(arg_name, constructor_call_kwargs)
                 self.assertEqual(arg_value, constructor_call_kwargs.get(arg_name))
 
     @patch.object(PolyphonicRhythm.create, "from_binary_vector")
     def test_from_string(self, mock_from_binary_chain):
-        kwargs = dict(time_signature=(4, 4), velocity=123, resolution=2,
+        kwargs = dict(time_signature=(4, 4), velocity=123, unit="eighth",
                       onset_character="O", track_separator_char="\n", name_separator_char="=")
 
         PolyphonicRhythm.create.from_string(textwrap.dedent("""
@@ -1326,7 +1333,7 @@ class TestPolyphonicRhythmFactory(TestCase):
 
         mock_from_binary_chain.assert_called_once_with(
             binary_vector_tracks=binary_vectors, track_names=track_names,
-            time_signature=(4, 4), velocity=123, resolution=2)
+            time_signature=(4, 4), velocity=123, unit="eighth")
 
 
 class TestOnset(TestCase):
