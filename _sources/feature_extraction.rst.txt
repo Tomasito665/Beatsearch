@@ -65,5 +65,6 @@ Polyphonic rhythm features are based on polyphonic rhythm properties and are imp
 ``PolyphonicRhythmFeatureExtractor`` subclasses.
 
 **Implementations**
+
 * :class:`beatsearch.feature_extraction.MultiChannelMonophonicRhythmFeatureVector`
 * :class:`beatsearch.feature_extraction.PolyphonicSyncopationVector`
