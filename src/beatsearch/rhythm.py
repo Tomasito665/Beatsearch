@@ -372,25 +372,58 @@ class TimeSignature(object):
 
         return f(unit, root_weight)
 
-    def __get_salience_profile_full_hierarchical(self, unit: Unit, root_weight: int):
+    @parse_unit_argument
+    def get_natural_duration_map(self, unit: UnitType, trim_to_pulse: bool = True):
+        """Returns the maximum note durations on each metrical position as multiples of the given unit
+
+        Returns a list containing the maximum note duration initiated at each metrical position. The returned durations
+        are expressed as multiples as the given unit.
+
+        :param unit: step size as a musical unit
+        :param trim_to_pulse: when true, the durations won't exceed the duration of one pulse
+        :return: the maximum note durations on each metrical position as a list
+        """
+
+        if trim_to_pulse:
+            pulse_duration = self.get_beat_unit().convert(1, unit, True)
+            get_value = lambda ix, subdivision, n_branches, n_steps: min(n_steps // n_branches, pulse_duration)
+        else:
+            get_value = lambda ix, subdivision, n_branches, n_steps: n_steps // n_branches
+
+        return self.__construct_meter_map(unit, get_value)
+
+    def __construct_meter_map(self, unit: Unit, get_value: tp.Callable[[int, int, int, int], tp.Any]):
+        # given get_value function receives: branch_ix, subdivision, n_branches, n_steps
+        assert unit <= self.get_beat_unit(), "can't represent this time signature in %s" % str(unit)
+
+        n_steps = self.get_beat_unit().convert(self.numerator, unit, True)
         subdivisions = self.get_meter_tree(unit)
 
         if not subdivisions:
             assert self.get_beat_unit().convert(self.numerator, unit, True) == 1
-            return [root_weight]
+            return [get_value(0, 1, 1, 1)]
 
-        metrical_weights = [None] * sequence_product(subdivisions)
+        assert sequence_product(subdivisions) == n_steps, \
+            "if the product of %s is not %i, something is broken :(" % (str(subdivisions), n_steps)
+
+        meter_map = [None] * n_steps
         n_branches = 1
 
         for n, curr_subdivision in enumerate(itertools.chain([1], subdivisions)):
-            curr_subdivision_weight = root_weight - n
             n_branches *= curr_subdivision
+            value = get_value(n, curr_subdivision, n_branches, n_steps)
 
-            for ix in np.linspace(0, len(metrical_weights), n_branches, endpoint=False, dtype=int):
-                if metrical_weights[ix] is None:
-                    metrical_weights[ix] = curr_subdivision_weight
+            for ix in np.linspace(0, n_steps, n_branches, endpoint=False, dtype=int):
+                if meter_map[ix] is None:
+                    meter_map[ix] = value
 
-        return metrical_weights
+        return meter_map
+
+    def __get_salience_profile_full_hierarchical(self, unit: Unit, root_weight: int):
+        return self.__construct_meter_map(
+            unit,
+            lambda ix, subdivision, n_branches, n_steps: root_weight - ix
+        )
 
     def __get_salience_profile_with_equal_upbeats(self, unit: Unit, root_weight: int):
         # get the fully hierarchical salience profile of one beat
