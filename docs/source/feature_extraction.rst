@@ -46,6 +46,7 @@ Monophonic rhythm features are based on monophonic rhythm properties and are imp
 **Implementations**
 
 * :class:`beatsearch.feature_extraction.BinaryOnsetVector`
+* :class:`beatsearch.feature_extraction.NoteVector`
 * :class:`beatsearch.feature_extraction.IOIVector`
 * :class:`beatsearch.feature_extraction.IOIHistogram`
 * :class:`beatsearch.feature_extraction.BinarySchillingerChain`
