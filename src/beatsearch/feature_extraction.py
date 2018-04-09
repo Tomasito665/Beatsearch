@@ -6,7 +6,7 @@ import typing as tp
 from fractions import Fraction
 from collections import OrderedDict
 from abc import ABCMeta, abstractmethod
-from beatsearch.utils import Quantizable
+from beatsearch.utils import Quantizable, minimize_term_count
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
     Unit, UnitType, parse_unit_argument, convert_tick
 
@@ -243,12 +243,54 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
         return binary_string
 
 
+class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
+    REST = 0
+    NOTE = 1
+
+    @staticmethod
+    def init_pre_processors():
+        yield BinaryOnsetVector()
+
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        # TODO Add documentation
+
+        Rhythm.Precondition.check_time_signature(rhythm)
+        time_sig = rhythm.get_time_signature()
+
+        natural_duration_map = time_sig.get_natural_duration_map(self.unit)
+        duration_pool = sorted(set(natural_duration_map))  # NOTE The rest of this method depends on this being sorted
+        binary_vector = pre_processor_results[0]
+
+        i, n = 0, len(binary_vector)
+
+        while i < n:
+            metrical_position = i % len(natural_duration_map)
+            natural_duration = natural_duration_map[metrical_position]
+            is_onset = binary_vector[i]
+
+            # compute the duration till the next note trimmed at the natural duration
+            max_duration = next((j for j in range(1, natural_duration) if binary_vector[i + j]), natural_duration)
+
+            if is_onset:
+                # get the maximum available duration that fits the max duration
+                note_duration = next(d for d in reversed(duration_pool) if d <= max_duration)
+                yield self.NOTE, note_duration
+
+                i += note_duration
+                continue
+
+            rests = tuple(minimize_term_count(max_duration, duration_pool, assume_sorted=True))
+
+            for rest_duration in rests:
+                yield self.REST, rest_duration
+                i += rest_duration
+
+
 class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
     class Mode(enum.Enum):
         PRE_NOTE = enum.auto()
         POST_NOTE = enum.auto()
 
-    # noinspection PyShadowingBuiltins
     def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, mode: Mode = Mode.POST_NOTE, quantize_enabled=True):
         MonophonicRhythmFeatureExtractor.__init__(self, unit)
         QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
@@ -842,7 +884,7 @@ __all__ = [
     'MonophonicRhythmFeatureExtractor', 'PolyphonicRhythmFeatureExtractor',
 
     # Monophonic rhythm feature extractor implementations
-    'BinaryOnsetVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
+    'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
     'MeanSyncopationStrength', 'OnsetDensity',
 
