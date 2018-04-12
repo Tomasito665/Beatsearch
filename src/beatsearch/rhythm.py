@@ -386,13 +386,33 @@ class TimeSignature(object):
 
         if trim_to_pulse:
             pulse_duration = self.get_beat_unit().convert(1, unit, True)
-            get_value = lambda ix, subdivision, n_branches, n_steps: min(n_steps // n_branches, pulse_duration)
+            get_value = lambda depth, n_siblings, n_nodes, length, n_levels: min(length // n_nodes, pulse_duration)
         else:
-            get_value = lambda ix, subdivision, n_branches, n_steps: n_steps // n_branches
+            get_value = lambda depth, n_siblings, n_nodes, length, n_levels: length // n_nodes
 
-        return self.__construct_meter_map(unit, get_value)
+        return self.construct_flat_meter_tree(unit, get_value)
 
-    def __construct_meter_map(self, unit: Unit, get_value: tp.Callable[[int, int, int, int], tp.Any]):
+    @parse_unit_argument
+    def construct_flat_meter_tree(self, unit: UnitType, get_value: tp.Callable[[int, int, int, int, int], tp.Any]):
+        """Utility function to create a one dimensional representation of a meter tree structure
+
+        Creates a hierarchical meter tree structure of this time signature with the given step size and returns a one
+        dimensional vector representation of it. The values of the returned vector are obtained with the given get_value
+        callable. This callable will receive the following positional parameters:
+
+                - depth: the number of levels away from the root node
+                - n_siblings: the sibling count per node (including that node) on this depth
+                - n_nodes: number of nodes on this depth
+                - length: the length of the one dimensional vector ("width" of the tree) (constant)
+                - n_levels: the number of levels in the tree ("height" of the tree) (constant)
+
+        :param unit: step size as a musical unit
+        :param get_value: this callable will be used to populate the returned vector, receiving these positional
+                          parameters: (depth, n_siblings, n_nodes, length, n_levels)
+
+        :return: one dimensional vector representation of a the hierarchical meter of this time signature as a list
+        """
+
         # given get_value function receives: branch_ix, subdivision, n_branches, n_steps
         assert unit <= self.get_beat_unit(), "can't represent this time signature in %s" % str(unit)
 
@@ -401,17 +421,18 @@ class TimeSignature(object):
 
         if not subdivisions:
             assert self.get_beat_unit().convert(self.numerator, unit, True) == 1
-            return [get_value(0, 1, 1, 1)]
+            return [get_value(0, 1, 1, 1, 0)]
 
         assert sequence_product(subdivisions) == n_steps, \
             "if the product of %s is not %i, something is broken :(" % (str(subdivisions), n_steps)
 
+        n_levels = len(subdivisions)
         meter_map = [None] * n_steps
         n_branches = 1
 
         for n, curr_subdivision in enumerate(itertools.chain([1], subdivisions)):
             n_branches *= curr_subdivision
-            value = get_value(n, curr_subdivision, n_branches, n_steps)
+            value = get_value(n, curr_subdivision, n_branches, n_steps, n_levels)
 
             for ix in np.linspace(0, n_steps, n_branches, endpoint=False, dtype=int):
                 if meter_map[ix] is None:
@@ -420,9 +441,9 @@ class TimeSignature(object):
         return meter_map
 
     def __get_salience_profile_full_hierarchical(self, unit: Unit, root_weight: int):
-        return self.__construct_meter_map(
+        return self.construct_flat_meter_tree(
             unit,
-            lambda ix, subdivision, n_branches, n_steps: root_weight - ix
+            lambda depth, *_: root_weight - depth
         )
 
     def __get_salience_profile_with_equal_upbeats(self, unit: Unit, root_weight: int):
