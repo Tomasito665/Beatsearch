@@ -634,6 +634,33 @@ def get_rhythm_loop_plotter_classes():
     return RhythmLoopPlotter.__subclasses__()
 
 
+def plot_salience_profile(
+        salience_profile: tp.Sequence[int],
+        bottom: tp.Optional[int] = None,
+        axes: tp.Optional[plt.Axes] = None
+):
+    """Utility function to plot a metrical salience profile
+
+    This function plots the given salience profile and returns the matplotlib axes object on which the salience profile
+    was drawn.
+
+    :param salience_profile: salience profile returned by :meth:`beatsearch.rhythm.TimeSignature.get_salience_profile`
+    :param bottom: the metrical salience value from which to draw the lines (defaults to min(salience_profile) - 1)
+    :param axes: matplotlib axes object, when given, the salience profile will be drawn on these axes
+    :return: the matplotlib axes object on which the salience profile was drawn
+    """
+
+    if not axes:
+        figure = plt.figure("Salience Profile")
+        axes = figure.add_subplot(111)
+
+    if bottom is None:
+        bottom = min(salience_profile) - 1
+
+    axes.stem(salience_profile, bottom=bottom)
+    return axes
+
+
 __all__ = [
     # Rhythm plotters
     'RhythmLoopPlotter',
@@ -646,5 +673,5 @@ __all__ = [
     'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
 
     # Misc
-    'SnapsToGridPolicy', 'plot_rhythm_grid'
+    'SnapsToGridPolicy', 'plot_rhythm_grid', 'plot_salience_profile'
 ]

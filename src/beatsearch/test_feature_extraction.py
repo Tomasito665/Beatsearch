@@ -232,6 +232,12 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         return NoteVector
 
+    @staticmethod
+    def get_legal_units():
+        # noinspection PyTypeChecker
+        # Syncopation vector does not support tick-based computation
+        return list(Unit)
+
     def test_process(self):
         expected_note_vector_string = "N2 R1 N1 R2 R1 N1 R2 N2 N4"
         to_event = lambda c: [NoteVector.NOTE, NoteVector.REST]["NR".index(c)]
