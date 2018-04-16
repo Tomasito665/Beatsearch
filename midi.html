@@ -1,0 +1,358 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Midi &mdash; Beatsearch 0.0.1.dev5 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  
+  
+    <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  
+
+  
+
+  
+        <link rel="index" title="Index"
+              href="genindex.html"/>
+        <link rel="search" title="Search" href="search.html"/>
+    <link rel="top" title="Beatsearch 0.0.1.dev5 documentation" href="index.html"/>
+        <link rel="next" title="Reference" href="reference.html"/>
+        <link rel="prev" title="Feature extraction" href="feature_extraction.html"/> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Beatsearch
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                0.0.1.dev5
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rhythm_model.html">Rhythm model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distance_metrics.html">Distance metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="feature_extraction.html">Feature extraction</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Midi</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#midi-drum-mappings">MIDI drum mappings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#instrumentation-reduction">Instrumentation reduction</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#frequencybandmididrummappingreducer">FrequencyBandMidiDrumMappingReducer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#decaytimemididrummappingreducer">DecayTimeMidiDrumMappingReducer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#uniquepropertycombomididrummappingreducer">UniquePropertyComboMidiDrumMappingReducer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#rhythm-corpus">Rhythm corpus</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="reference.html">Reference</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" role="navigation" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Beatsearch</a>
+        
+      </nav>
+
+
+      
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Midi</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/midi.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="midi">
+<h1>Midi<a class="headerlink" href="#midi" title="Permalink to this headline">¶</a></h1>
+<p>Beatsearch provides functionality to import polyphonic rhythm patterns from MIDI files. The MIDI files should comply to
+the <a class="reference external" href="https://www.midi.org/specifications/item/gm-level-1-sound-set">General MIDI Level 1 Percussion Key Map</a>. Custom
+MIDI drum mappings are also allowed, but require a bit more work. The MIDI import/export functionality is found in the
+<a class="reference internal" href="reference.html#beatsearch.rhythm.MidiRhythm" title="beatsearch.rhythm.MidiRhythm"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.rhythm.MidiRhythm</span></code></a> class. For example, to import a MIDI file called <cite>rumba.mid</cite>:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">MidiRhythm</span>
+
+<span class="n">rhythm</span> <span class="o">=</span> <span class="n">MidiRhythm</span><span class="p">(</span><span class="s2">&quot;rumba.mid&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="section" id="midi-drum-mappings">
+<h2>MIDI drum mappings<a class="headerlink" href="#midi-drum-mappings" title="Permalink to this headline">¶</a></h2>
+<p>A drum mapping is represented as a <a class="reference internal" href="reference.html#beatsearch.rhythm.MidiDrumMapping" title="beatsearch.rhythm.MidiDrumMapping"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.rhythm.MidiDrumMapping</span></code></a> object, which is essentially a collection
+of <a class="reference internal" href="reference.html#beatsearch.rhythm.MidiDrumKey" title="beatsearch.rhythm.MidiDrumKey"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.rhythm.MidiDrumKey</span></code></a> objects. <a class="reference internal" href="reference.html#beatsearch.rhythm.MidiDrumKey" title="beatsearch.rhythm.MidiDrumKey"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.rhythm.MidiDrumKey</span></code></a> is a struct-like class which
+holds information about a single key within a MIDI drum mapping. Each drum key holds information about its
+frequency-band, the decay-time and the MIDI pitch. To load a MIDI drum loop with a custom mapping, you could do:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">MidiRhythm</span><span class="p">,</span> <span class="n">MidiDrumKey</span><span class="p">,</span> <span class="n">FrequencyBand</span><span class="p">,</span> <span class="n">DecayTime</span><span class="p">,</span> <span class="n">create_drum_mapping</span>
+
+<span class="n">CustomMapping</span> <span class="o">=</span> <span class="n">create_drum_mapping</span><span class="p">(</span><span class="s2">&quot;CustomMapping&quot;</span><span class="p">,</span> <span class="p">[</span>
+   <span class="n">MidiDrumKey</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span> <span class="n">FrequencyBand</span><span class="o">.</span><span class="n">LOW</span><span class="p">,</span> <span class="n">DecayTime</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="s2">&quot;Kick&quot;</span><span class="p">,</span> <span class="n">key_id</span><span class="o">=</span><span class="s2">&quot;kck&quot;</span><span class="p">),</span>
+   <span class="n">MidiDrumKey</span><span class="p">(</span><span class="mi">62</span><span class="p">,</span> <span class="n">FrequencyBand</span><span class="o">.</span><span class="n">MID</span><span class="p">,</span> <span class="n">DecayTime</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="s2">&quot;Snare&quot;</span><span class="p">,</span> <span class="n">key_id</span><span class="o">=</span><span class="s2">&quot;snr&quot;</span><span class="p">),</span>
+   <span class="n">MidiDrumKey</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="n">FrequencyBand</span><span class="o">.</span><span class="n">MID</span><span class="p">,</span> <span class="n">DecayTime</span><span class="o">.</span><span class="n">NORMAL</span><span class="p">,</span> <span class="s2">&quot;Tom&quot;</span><span class="p">,</span> <span class="n">key_id</span><span class="o">=</span><span class="s2">&quot;tom&quot;</span><span class="p">),</span>
+   <span class="n">MidiDrumKey</span><span class="p">(</span><span class="mi">66</span><span class="p">,</span> <span class="n">FrequencyBand</span><span class="o">.</span><span class="n">HIGH</span><span class="p">,</span> <span class="n">DecayTime</span><span class="o">.</span><span class="n">SHORT</span><span class="p">,</span> <span class="s2">&quot;Hi-hat&quot;</span><span class="p">,</span> <span class="n">key_id</span><span class="o">=</span><span class="s2">&quot;hht&quot;</span><span class="p">),</span>
+   <span class="n">MidiDrumKey</span><span class="p">(</span><span class="mi">70</span><span class="p">,</span> <span class="n">FrequencyBand</span><span class="o">.</span><span class="n">HIGH</span><span class="p">,</span> <span class="n">DecayTime</span><span class="o">.</span><span class="n">LONG</span><span class="p">,</span> <span class="s2">&quot;Crash&quot;</span><span class="p">,</span> <span class="n">key_id</span><span class="o">=</span><span class="s2">&quot;crs&quot;</span><span class="p">)</span>
+<span class="p">])</span>
+
+<span class="n">rhythm</span> <span class="o">=</span> <span class="n">MidiRhythm</span><span class="p">(</span><span class="s2">&quot;loop.mid&quot;</span><span class="p">,</span> <span class="n">midi_mapping</span><span class="o">=</span><span class="n">CustomMapping</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="instrumentation-reduction">
+<h2>Instrumentation reduction<a class="headerlink" href="#instrumentation-reduction" title="Permalink to this headline">¶</a></h2>
+<p>For analytical purposes it&#8217;s sometimes useful to reduce the instrument count of the drum patterns. This can be
+done setting the <code class="docutils literal"><span class="pre">MidiRhythm</span></code> constructor&#8217;s  <cite>midi_mapping_reducer_cls</cite> parameter. The MIDI mapping reducer must
+be a subclass of <code class="docutils literal"><span class="pre">MidiDrumMappingReducer</span></code> or <code class="docutils literal"><span class="pre">None</span></code> for no instrumentation reduction. Beatsearch provides the
+following instrumentation reducers:</p>
+<div class="section" id="frequencybandmididrummappingreducer">
+<h3>FrequencyBandMidiDrumMappingReducer<a class="headerlink" href="#frequencybandmididrummappingreducer" title="Permalink to this headline">¶</a></h3>
+<p>When this reducer is applied, the instrumentation will be reduced down to three streams, based on the frequency-band
+of the MIDI drum keys.</p>
+<ul class="simple">
+<li>LOW</li>
+<li>MID</li>
+<li>HIGH</li>
+</ul>
+</div>
+<div class="section" id="decaytimemididrummappingreducer">
+<h3>DecayTimeMidiDrumMappingReducer<a class="headerlink" href="#decaytimemididrummappingreducer" title="Permalink to this headline">¶</a></h3>
+<p>When this reducer is applied, the instrumentation will be reduced down to three streams, based on the decay-time of the
+MIDI drum keys.</p>
+<ul class="simple">
+<li>SHORT</li>
+<li>NORMAL</li>
+<li>LONG</li>
+</ul>
+</div>
+<div class="section" id="uniquepropertycombomididrummappingreducer">
+<h3>UniquePropertyComboMidiDrumMappingReducer<a class="headerlink" href="#uniquepropertycombomididrummappingreducer" title="Permalink to this headline">¶</a></h3>
+<p>When this reducer is applied, the instrumentation will be reduced down to nine streams. One stream per unique
+[frequency-band, decay-time] combination.</p>
+<ul class="simple">
+<li>LOW.SHORT</li>
+<li>LOW.NORMAL</li>
+<li>LOW.LONG</li>
+<li>MID.SHORT</li>
+<li>MID.NORMAL</li>
+<li>MID.LONG</li>
+<li>LONG.SHORT</li>
+<li>LONG.NORMAL</li>
+<li>LONG.LONG</li>
+</ul>
+</div>
+<div class="section" id="example">
+<h3>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h3>
+<p>To load a MIDI rhythm and reduce it down to three instruments: <cite>LOW</cite>, <cite>MID</cite> and <cite>HIGH</cite>, you could do:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">MidiRhythm</span><span class="p">,</span> <span class="n">FrequencyBandMidiDrumMappingReducer</span>
+
+<span class="n">rhythm</span> <span class="o">=</span> <span class="n">MidiRhythm</span><span class="p">(</span>
+    <span class="s2">&quot;./rumba.mid&quot;</span><span class="p">,</span>
+    <span class="n">midi_mapping_reducer_cls</span><span class="o">=</span><span class="n">FrequencyBandMidiDrumMappingReducer</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="rhythm-corpus">
+<h2>Rhythm corpus<a class="headerlink" href="#rhythm-corpus" title="Permalink to this headline">¶</a></h2>
+<p>We can use the <a class="reference internal" href="reference.html#beatsearch.rhythm.MidiRhythmCorpus" title="beatsearch.rhythm.MidiRhythmCorpus"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.rhythm.MidiRhythmCorpus</span></code></a> class to load multiple MIDI files. For example, load all the
+MIDI files in a directory called <cite>LOOPS</cite>, you could do:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">MidiRhythmCorpus</span>
+
+<span class="n">rhythms</span> <span class="o">=</span> <span class="n">MidiRhythmCorpus</span><span class="p">(</span><span class="s2">&quot;./LOOPS&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><a class="reference internal" href="reference.html#beatsearch.rhythm.MidiRhythmCorpus" title="beatsearch.rhythm.MidiRhythmCorpus"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.rhythm.MidiRhythmCorpus</span></code></a> also provides functionality to export its rhythms as MIDI files to a given
+directory with the <a class="reference internal" href="reference.html#beatsearch.rhythm.MidiRhythmCorpus.export_as_midi_files" title="beatsearch.rhythm.MidiRhythmCorpus.export_as_midi_files"><code class="xref py py-meth docutils literal"><span class="pre">beatsearch.rhythm.MidiRhythmCorpus.export_as_midi_files()</span></code></a> method. This can be useful, for
+example, to reduce the instrumentation of all the MIDI files in a particular directory.</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">beatsearch.rhythm</span> <span class="kn">import</span> <span class="n">MidiRhythmCorpus</span><span class="p">,</span> <span class="n">FrequencyBandMidiDrumMappingReducer</span>
+
+<span class="n">loops</span> <span class="o">=</span> <span class="n">MidiRhythmCorpus</span><span class="p">(</span>
+    <span class="s2">&quot;./LOOPS&quot;</span><span class="p">,</span>
+    <span class="n">midi_mapping_reducer</span><span class="o">=</span><span class="n">FrequencyBandMidiDrumMappingReducer</span>
+<span class="p">)</span>
+
+<span class="n">loops</span><span class="o">.</span><span class="n">export_as_midi_files</span><span class="p">(</span><span class="s2">&quot;./LOOPS/reduced&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+           </div>
+           <div class="articleComments">
+            
+           </div>
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="reference.html" class="btn btn-neutral float-right" title="Reference" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="feature_extraction.html" class="btn btn-neutral" title="Feature extraction" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2017-2018, Jordi Ortolá Ankum.
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/snide/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    <script type="text/javascript">
+        var DOCUMENTATION_OPTIONS = {
+            URL_ROOT:'./',
+            VERSION:'0.0.1.dev5',
+            COLLAPSE_INDEX:false,
+            FILE_SUFFIX:'.html',
+            HAS_SOURCE:  true,
+            SOURCELINK_SUFFIX: '.txt'
+        };
+    </script>
+      <script type="text/javascript" src="_static/jquery.js"></script>
+      <script type="text/javascript" src="_static/underscore.js"></script>
+      <script type="text/javascript" src="_static/doctools.js"></script>
+
+  
+
+  
+  
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+  
+
+  
+  
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.StickyNav.enable();
+      });
+  </script>
+   
+
+</body>
+</html>
