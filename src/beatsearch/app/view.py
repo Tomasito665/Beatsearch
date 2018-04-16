@@ -1209,7 +1209,6 @@ class BSApp(tk.Tk, object):
 
     def close(self):
         self.quit()
-        self.destroy()
         self.is_closed = True
 
     def update_window_title(self):
