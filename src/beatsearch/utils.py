@@ -86,7 +86,7 @@ def err_print(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
-def make_dir_if_not_exist(directory):
+def make_dir_if_not_exist(directory: str) -> str:
     """
     Creates a directory if it doesn't exist yet.
 
@@ -323,6 +323,24 @@ def minimize_term_count(value: int, terms: tp.Sequence[int], assume_sorted: bool
         i += n * u
 
 
+FileInfo = collections.namedtuple("FileInfo", ["path", "modified_time"])
+
+
+def normalize_directory(directory):
+    """Normalizes a directory path
+
+    Normalizes the directory path, replaces the backslashes with forward slashes and removes the ending slash.
+
+    :param directory: directory path to normalize
+    :return: normalized directory path
+    """
+
+    directory = os.path.normpath(directory)
+    directory = directory.replace("\\", "/")
+    if directory.endswith("/"):
+        directory = directory[:-1]
+    return directory
+
 
 class Quantizable(object, metaclass=ABCMeta):
     @property
@@ -347,5 +365,5 @@ __all__ = [
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'get_beatsearch_dir',
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
-    'sequence_product', 'minimize_term_count', 'Quantizable'
+    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable'
 ]

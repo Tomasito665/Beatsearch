@@ -9,6 +9,7 @@ from sortedcollections import OrderedSet
 from beatsearch.rhythm import (
     RhythmLoop,
     MidiRhythm,
+    MidiRhythmCorpus,
     PolyphonicRhythm,
     create_rumba_rhythm,
     MidiDrumMappingReducer
@@ -18,9 +19,56 @@ from beatsearch.metrics import (
     HammingDistanceMeasure,
     SummedMonophonicRhythmDistance
 )
-from beatsearch.rhythmcorpus import RhythmCorpus
-from beatsearch.config import BSConfig
+from beatsearch.app.config import BSConfig
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, Quantizable
+
+
+def get_rhythm_corpus(config: BSConfig) -> MidiRhythmCorpus:
+    """Utility function to load the MIDI rhythm corpus, given a BeatSearch config object
+
+    This function will try to load the MIDI rhythm corpus from cache. If the cache file is missing, out of date or
+    corrupt, it will re-load the corpus from the MIDI root directory.
+
+    :param config: config object
+    :return: midi rhythm corpus object
+    """
+
+    midi_dir = config.midi_root_directory.get()
+    cache_fpath = config.get_midi_root_directory_cache_fpath(midi_dir)
+    resolution = config.rhythm_resolution.get()
+    mapping_reducer = config.mapping_reducer.get()
+
+    # try to load from cache
+    if cache_fpath:
+        cached_corpus = MidiRhythmCorpus()
+
+        try:
+            cached_corpus.load_from_cache_file(cache_fpath)
+        except MidiRhythmCorpus.BadCacheFormatError:
+            pass
+
+        if cached_corpus.has_loaded() and \
+                cached_corpus.is_up_to_date(midi_dir) and \
+                cached_corpus.rhythm_resolution == resolution and \
+                cached_corpus.midi_mapping_reducer == mapping_reducer:
+
+            return cached_corpus
+
+        # forget cache file if it is out of date or corrupt
+        config.forget_midi_root_directory_cache_file(midi_dir, remove_cache_file=True)
+
+    # if loading from cache didn't succeed, load from midi directory
+    corpus = MidiRhythmCorpus(
+        path=midi_dir,
+        rhythm_resolution=resolution,
+        midi_mapping_reducer=mapping_reducer
+    )
+
+    # create new cache file
+    with config.add_midi_root_directory_cache_file(midi_dir) as cache_file:
+        corpus.save_to_cache_file(cache_file)
+
+    return corpus
 
 
 class BSRhythmPlayer(object):
@@ -235,7 +283,7 @@ class BSController(object):
             rhythm_player: tp.Union[BSRhythmPlayer, tp.Type[BSRhythmPlayer], None] = None
     ):
         self._config = BSConfig()
-        self._corpus = None  # type: RhythmCorpus
+        self._corpus = None  # type: MidiRhythmCorpus
         self._corpus_resolution = -1
         self._distances_to_target = np.empty(0)
         self._distances_to_target_rhythm_are_stale = False
@@ -274,11 +322,10 @@ class BSController(object):
         :return: None
         """
 
-        config = self._config
-        root_dir = config.midi_root_directory.get()
-        res = config.rhythm_resolution.get()
-        corpus = RhythmCorpus(root_dir, res)
-        corpus.load(config)
+
+
+
+        corpus = get_rhythm_corpus(self._config)
 
         with self._lock:
             self._corpus = corpus
@@ -312,7 +359,7 @@ class BSController(object):
         :return: root directory of current rhythm corpus or empty string
         """
 
-        return self._corpus.root_directory if self.is_corpus_loaded() else ""
+        return self._config.midi_root_directory.get()
 
     def get_corpus_rootdir_name(self):
         """Returns the name of the current rhythm corpus' root directory

@@ -1,19 +1,30 @@
 # coding=utf-8
 import os
+import sys
+import math
 import enum
+import uuid
+import pickle
 import inspect
 import textwrap
 import itertools
-from abc import abstractmethod, ABCMeta
-from io import IOBase
+import numpy as np
 import typing as tp
+from io import IOBase
 from fractions import Fraction
+from abc import abstractmethod, ABCMeta
 from functools import wraps, total_ordering
 from collections import OrderedDict, namedtuple, defaultdict
-from beatsearch.utils import TupleView, friendly_named_class, most_common_element, sequence_product
-import math
-import numpy as np
-import midi
+from beatsearch.utils import (
+    TupleView,
+    friendly_named_class,
+    most_common_element,
+    sequence_product,
+    FileInfo,
+    get_midi_files_in_directory,
+    make_dir_if_not_exist
+)
+import midi  # after beatsearch import
 
 
 class UnitError(Exception):
@@ -2477,6 +2488,309 @@ def create_rumba_rhythm(resolution=240, polyphonic=True):
     return rhythm
 
 
+class MidiRhythmCorpus(object):
+    DEFAULT_RHYTHM_RESOLUTION = 120
+    DEFAULT_MIDI_MAPPING_REDUCER = None
+
+    _RHYTHM_DATA_RHYTHM = 0
+    _RHYTHM_DATA_FILE_INFO = 1
+
+    _PICKLE_DATA_ID_KEY = "id"
+    _PICKLE_DATA_RESOLUTION_KEY = "res"
+    _PICKLE_DATA_RHYTHM_DATA_KEY = "rhythm_data"
+    _PICKLE_DATA_MAPPING_REDUCER_NAME_KEY = "mapping_reducer"
+
+    class MidiCorpusStateError(Exception):
+        pass
+
+    class BadCacheFormatError(Exception):
+        pass
+
+    def __init__(self, path: tp.Optional[tp.Union[IOBase, str]] = None, **kwargs):
+        """Creates and optionally loads a MIDI rhythm corpus
+
+        Calling this constructor with the path parameter set to ...
+            ... a directory is equivalent to calling :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_directory` on
+                an unload MidiRhythmCorpus.
+            ... a file path is equivalent to calling :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_cache_file` on
+                an unload MidiRhythmCorpus.
+
+        :param path: when given a directory path or a file path, this corpus will automatically load using either
+                     :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_directory` or
+                     :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_cache_file` respectively
+
+        :param kwargs:
+            rhythm_resolution: rhythm resolution in PPQN (immediately overwritten if loading from cache)
+            midi_mapping_reducer: MIDI drum mapping reducer class (immediately overwritten if loading from cache)
+        """
+
+        self._rhythm_resolution = None     # type: tp.Union[int, None]
+        self._midi_mapping_reducer = None  # type: tp.Union[tp.Type[MidiDrumMappingReducer], None]
+        self._rhythm_data = None           # type: tp.Union[tp.Tuple[tp.Tuple[MidiRhythm, FileInfo], ...], None]
+        self._id = None                    # type: tp.Union[uuid.UUID, None]
+
+        # calling setters
+        self.rhythm_resolution = kwargs.get("rhythm_resolution", self.DEFAULT_RHYTHM_RESOLUTION)
+        self.midi_mapping_reducer = kwargs.get("midi_mapping_reducer", self.DEFAULT_MIDI_MAPPING_REDUCER)
+
+        # load corpus
+        if isinstance(path, str) and os.path.isdir(path):
+            self.load_from_directory(path)
+        elif path:
+            for arg_name in ("rhythm_resolution", "midi_mapping_reducer"):
+                if arg_name in kwargs:
+                    print("Ignoring named parameter %s. Loading corpus from cache.", file=sys.stderr)
+            self.load_from_cache_file(path)
+
+    def load_from_directory(self, midi_root_dir: str):
+        """Loads this MIDI corpus from a MIDI root directory
+
+        Recursively scans the given directory for MIDI files and loads one rhythm per MIDI file.
+
+        :param midi_root_dir: MIDI root directory
+        :return: None
+        """
+
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already loaded")
+
+        if not os.path.isdir(midi_root_dir):
+            raise IOError("no such directory: %s" % midi_root_dir)
+
+        self._rhythm_data = tuple(self.__lazy_load_rhythm_data_from_directory(
+            midi_root_dir=midi_root_dir,
+            resolution=self.rhythm_resolution,
+            mapping_reducer=self.midi_mapping_reducer
+        ))
+
+        self._id = uuid.uuid4()
+
+    def unload(self):
+        """Unloads this rhythm corpus
+
+        This method won't have any effect if the corpus has not loaded.
+
+        :return: None
+        """
+
+        if not self.has_loaded():
+            return
+
+        self._rhythm_data = None
+        self._id = None
+
+    @staticmethod
+    def __lazy_load_rhythm_data_from_directory(
+            midi_root_dir: str,
+            resolution: int,
+            mapping_reducer: tp.Optional[tp.Type[MidiDrumMappingReducer]]
+    ) -> tp.Generator[tp.Tuple[MidiRhythm, FileInfo], None, None]:
+
+        for f_path in get_midi_files_in_directory(midi_root_dir):
+            f_path = f_path.replace("\\", "/")
+
+            try:
+                rhythm = MidiRhythm(f_path, midi_mapping_reducer_cls=mapping_reducer)
+                rhythm.set_resolution(resolution)
+                print("%s: OK" % f_path)
+            except (TypeError, ValueError) as e:
+                print("%s: ERROR, %s" % (f_path, str(e)))
+                continue
+
+            m_time = os.path.getmtime(f_path)
+            file_info = FileInfo(path=f_path, modified_time=m_time)
+            yield rhythm, file_info
+
+    def load_from_cache_file(self, cache_fpath: tp.Union[IOBase, str]):
+        """Loads this MIDI corpus from a serialized pickle file
+
+        Loads a MIDI corpus from a serialized pickle file created with previously created with
+        :meth:`beatsearch.rhythm.MidiRhythmCorpus.save_to_cache_file`.
+
+        :param cache_fpath: path to the serialized pickle file
+        :return: None
+        """
+
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already loaded")
+
+        if isinstance(cache_fpath, str):
+            with open(cache_fpath, "rb") as pickle_file:
+                unpickled_data = pickle.load(pickle_file)
+        else:
+            unpickled_data = pickle.load(cache_fpath)
+
+        try:
+            rhythm_resolution = unpickled_data[self._PICKLE_DATA_RESOLUTION_KEY]
+            mapping_reducer_name = unpickled_data[self._PICKLE_DATA_MAPPING_REDUCER_NAME_KEY]
+            rhythm_data = unpickled_data[self._PICKLE_DATA_RHYTHM_DATA_KEY]
+            rhythm_id = unpickled_data[self._PICKLE_DATA_ID_KEY]
+        except KeyError:
+            raise ValueError("Midi root directory cache file has bad format: %s" % cache_fpath)
+
+        if mapping_reducer_name:
+            mapping_reducer = get_drum_mapping_reducer_implementation(mapping_reducer_name)
+        else:
+            mapping_reducer = None
+
+        self.rhythm_resolution = rhythm_resolution
+        self.midi_mapping_reducer = mapping_reducer
+        self._rhythm_data = rhythm_data
+        self._id = rhythm_id
+
+    def save_to_cache_file(self, cache_file: tp.Union[IOBase, str], overwrite=False):
+        """Serializes this MIDI corpus to a pickle file
+
+        :param cache_file: either an opened file handle in binary-write mode or a file path
+        :param overwrite: when True, no exception will be raised if a file path is given which already exists
+        :return: None
+        """
+
+        if not self.has_loaded():
+            raise self.MidiCorpusStateError("can't save a corpus that hasn't loaded yet")
+
+        resolution = self.rhythm_resolution
+        mapping_reducer_name = self.midi_mapping_reducer.__name__ if self.midi_mapping_reducer else ""
+
+        pickle_data = {
+            self._PICKLE_DATA_RESOLUTION_KEY: resolution,
+            self._PICKLE_DATA_MAPPING_REDUCER_NAME_KEY: mapping_reducer_name,
+            self._PICKLE_DATA_RHYTHM_DATA_KEY: self._rhythm_data,
+            self._PICKLE_DATA_ID_KEY: self._id
+        }
+
+        if isinstance(cache_file, str):
+            if os.path.isfile(cache_file) and not overwrite:
+                raise RuntimeError("there's already a file with path: %s" % cache_file)
+            with open(cache_file, "wb") as cache_file:
+                pickle.dump(pickle_data, cache_file)
+        else:
+            pickle.dump(pickle_data, cache_file)
+
+    def has_loaded(self):
+        """Returns whether this corpus has already loaded
+
+        Returns whether this rhythm corpus has already been loaded. This will return true after a successful call to
+        load().
+
+        :return: True if this corpus has already loaded: False otherwise
+        """
+
+        return self._rhythm_data is not None
+
+    def is_up_to_date(self, midi_root_dir: str):
+        """Returns whether the rhythms in this corpus are fully up to date with the MIDI contents of the given directory
+
+        Recursively scans the given directory for MIDI files and checks whether the files are the identical (both
+        file names and file modification timestamps) to the files that were used to create this corpus.
+
+        :param midi_root_dir: midi root directory that was used to create this corpus
+        :return: True if up to date; False otherwise
+        """
+
+        if not os.path.isdir(midi_root_dir):
+            raise IOError("no such directory: %s" % midi_root_dir)
+
+        for file_info in (entry[self._RHYTHM_DATA_FILE_INFO] for entry in self._rhythm_data):
+            fpath = file_info.path
+
+            # rhythm data is not up to date if either the file doesn't exist anymore or the file has been modified
+            if not os.path.isfile(fpath) or os.path.getmtime(fpath) != file_info.modified_time:
+                return False
+
+        n_cached_midi_files = len(self._rhythm_data)  # "cached" referring to the rhythms in this MidiRhythmCorpus obj
+        n_actual_midi_files = sum(bool(fpath) for fpath in get_midi_files_in_directory(midi_root_dir))
+
+        # won't be equal if new MIDI files have been added
+        return n_cached_midi_files == n_actual_midi_files
+
+    def export_as_midi_files(self, directory: str, **kwargs):
+        """Converts all rhythms in this corpus to MIDI patterns and saves them to the given directory
+
+        :param directory: directory to save the MIDI files to
+        :param kwargs: named arguments given to :meth:`beatsearch.rhythm.MidiRhythm.as_midi_pattern`
+        :return: None
+        """
+
+        make_dir_if_not_exist(directory)
+
+        for entry in self._rhythm_data:
+            rhythm = entry[self._RHYTHM_DATA_RHYTHM]
+            file_info = entry[self._RHYTHM_DATA_FILE_INFO]
+            fname = os.path.basename(file_info.path)
+            fpath = os.path.join(directory, fname)
+            pattern = rhythm.as_midi_pattern(**kwargs)
+            midi.write_midifile(fpath, pattern)
+
+
+    @property
+    def rhythm_resolution(self):
+        """The resolution in PPQN
+
+        Tick resolution in PPQN (pulses-per-quarter-note) of the rhythms within this corpus. This property will become
+        a read-only property after the corpus has loaded.
+
+        :return: resolution in PPQN of the rhythms in this corpus
+        """
+
+        return self._rhythm_resolution
+
+    @rhythm_resolution.setter
+    def rhythm_resolution(self, resolution: tp.Union[int, None]):
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already been loaded, making rhythm_resolution read-only")
+
+        if resolution is None:
+            self._rhythm_resolution = None
+            return
+
+        resolution = int(resolution)
+        if resolution <= 0:
+            raise ValueError("resolution should be greater than zero")
+
+        self._rhythm_resolution = resolution
+
+    @property
+    def midi_mapping_reducer(self) -> tp.Union[tp.Type[MidiDrumMappingReducer], None]:
+        """The MIDI drum mapping reducer
+
+        The MIDI drum mapping reducer applied to the rhythms in this corpus. This property will become a read-only
+        property after the corpus has loaded.
+        """
+        return self._midi_mapping_reducer
+
+    @midi_mapping_reducer.setter
+    def midi_mapping_reducer(self, midi_mapping_reducer: tp.Union[tp.Type[MidiDrumMappingReducer], None]):
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already been loaded, making midi_mapping_reducer read-only")
+
+        if midi_mapping_reducer is not None and not issubclass(midi_mapping_reducer, MidiDrumMappingReducer):
+            raise TypeError("expected a MidiDrumMappingReducer subclass or None but got '%s'" % midi_mapping_reducer)
+
+        self._midi_mapping_reducer = midi_mapping_reducer
+
+    @property
+    def id(self):
+        """The id of this rhythm corpus
+
+        The UUID id of this rhythm corpus. This is a read-only property.
+        """
+
+        return self._id
+
+    def __getitem__(self, i):
+        """Returns the i-th rhythm"""
+        return self._rhythm_data[i][self._RHYTHM_DATA_RHYTHM]
+
+    def __len__(self):
+        """Returns the number of rhythms within this corpus"""
+        return len(self._rhythm_data)
+
+    def __iter__(self):
+        """Returns an iterator over the rhythms within this corpus"""
+        return iter(data_entry[self._RHYTHM_DATA_RHYTHM] for data_entry in self._rhythm_data)
+
+
 __all__ = [
     # Rhythm classes
     'Rhythm', 'MonophonicRhythm', 'PolyphonicRhythm',
@@ -2486,7 +2800,7 @@ __all__ = [
     'Unit', 'UnitType', 'UnitError', 'parse_unit_argument', 'rescale_tick', 'convert_tick',
 
     # Misc
-    'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm',
+    'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm', 'MidiRhythmCorpus',
 
     # MIDI drum mapping
     'MidiDrumMapping', 'GMDrumMapping', 'FrequencyBand', 'DecayTime',
