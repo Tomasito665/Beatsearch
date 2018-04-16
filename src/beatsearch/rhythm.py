@@ -2813,7 +2813,7 @@ __all__ = [
     'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm', 'MidiRhythmCorpus',
 
     # MIDI drum mapping
-    'MidiDrumMapping', 'GMDrumMapping', 'create_drum_mapping', 'FrequencyBand', 'DecayTime',
+    'MidiDrumMapping', 'GMDrumMapping', 'create_drum_mapping', 'MidiDrumKey', 'FrequencyBand', 'DecayTime',
     'MidiDrumMappingReducer', 'FrequencyBandMidiDrumMappingReducer',
     'DecayTimeMidiDrumMappingReducer', 'UniquePropertyComboMidiDrumMappingReducer',
     'get_drum_mapping_reducer_implementation_names',

@@ -16,7 +16,7 @@ from beatsearch.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
 from beatsearch.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
 
 # misc
-from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping
+from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping, MidiDrumKey
 import midi
 
 
@@ -1067,7 +1067,7 @@ class TestMidiRhythm(TestRhythmLoop):
 
     @staticmethod
     def _create_midi_drum_key_mock(midi_pitch, frequency_band, decay_time, description, key_id):
-        midi_drum_key = MagicMock(MidiDrumMapping.MidiDrumKey)
+        midi_drum_key = MagicMock(MidiDrumKey)
         midi_drum_key.midi_pitch = midi_pitch
         midi_drum_key.frequency_band = frequency_band
         midi_drum_key.decay_time = decay_time
