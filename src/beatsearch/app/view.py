@@ -36,7 +36,7 @@ from beatsearch.rhythm import (
     get_drum_mapping_reducer_implementation_friendly_names,
     get_drum_mapping_reducer_implementation,
 )
-from beatsearch.config import BSConfig
+from beatsearch.app.config import BSConfig
 
 
 UNITS_BY_UNIT_TITLES = OrderedDict((u.get_note_names()[0].capitalize(), u) for u in Unit)  # type: tp.Dict[str, Unit]
@@ -1209,7 +1209,6 @@ class BSApp(tk.Tk, object):
 
     def close(self):
         self.quit()
-        self.destroy()
         self.is_closed = True
 
     def update_window_title(self):

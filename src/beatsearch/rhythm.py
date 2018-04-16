@@ -1,19 +1,30 @@
 # coding=utf-8
 import os
+import sys
+import math
 import enum
+import uuid
+import pickle
 import inspect
 import textwrap
 import itertools
-from abc import abstractmethod, ABCMeta
-from io import IOBase
+import numpy as np
 import typing as tp
+from io import IOBase
 from fractions import Fraction
+from abc import abstractmethod, ABCMeta
 from functools import wraps, total_ordering
 from collections import OrderedDict, namedtuple, defaultdict
-from beatsearch.utils import TupleView, friendly_named_class, most_common_element, sequence_product
-import math
-import numpy as np
-import midi
+from beatsearch.utils import (
+    TupleView,
+    friendly_named_class,
+    most_common_element,
+    sequence_product,
+    FileInfo,
+    get_midi_files_in_directory,
+    make_dir_if_not_exist
+)
+import midi  # after beatsearch import
 
 
 class UnitError(Exception):
@@ -1738,16 +1749,85 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
 
 class FrequencyBand(enum.Enum):
     """Enumeration containing three drum sound frequency bands (low, mid and high)"""
-    LOW = enum.auto()
-    MID = enum.auto()
-    HIGH = enum.auto()
+    LOW = 0
+    MID = 1
+    HIGH = 2
 
 
 class DecayTime(enum.Enum):
     """Enumeration containing three drum sound decay times (short, normal and long)"""
-    SHORT = enum.auto()
-    NORMAL = enum.auto()
-    LONG = enum.auto()
+    SHORT = 0
+    NORMAL = 1
+    LONG = 2
+
+
+class MidiDrumKey(object):
+    """Struct-like class holding information about a single key within a MIDI drum mapping
+
+    Holds information about the frequency band and the decay time of the drum sound it represents. Also stores the
+    MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defaults to the MIDI pitch.
+    """
+
+    def __init__(self, midi_pitch: int, frequency_band: FrequencyBand,
+                 decay_time: DecayTime, description: str, key_id: str = None):
+        """Creates a new midi drum key
+
+        :param midi_pitch:     the MIDI pitch as an integer in the range [0, 127] (the MIDI pitch has to be unique
+                               within the mapping this drum key belongs to)
+        :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
+        :param decay_time:     DecayTime enum object (SHORT, NORMAL or LONG)
+        :param description:    a small description (a few words, max 50 characters) of the sound of this drum sound
+        :param key_id:         a unique (within the drum mapping) id for this key as a string (defaults to the midi
+                               pitch)
+
+        :raises ValueError: if midi pitch not in range or if description exceeds the max number of characters
+        :raises TypeError:  if given frequency band is not a FrequencyBand object or given decay time is not a
+                            DecayTime object
+        """
+
+        midi_pitch = int(midi_pitch)
+        description = str(description)
+        key_id = str(midi_pitch if key_id is None else key_id)
+
+        if not (0 <= midi_pitch <= 127):
+            raise ValueError("expected midi pitch in range [0, 127]")
+        if len(description) > 50:
+            raise ValueError("description length should not exceed 50 characters")
+        if not isinstance(frequency_band, FrequencyBand):
+            raise TypeError
+        if not isinstance(decay_time, DecayTime):
+            raise TypeError
+
+        self._data = (midi_pitch, frequency_band, decay_time, description, key_id)
+
+    @property
+    def midi_pitch(self) -> int:
+        """The midi pitch of this midi drum key (read-only)"""
+        return self._data[0]
+
+    @property
+    def frequency_band(self) -> FrequencyBand:
+        """The frequency band (FrequencyBand enum object) of this drum key (read-only)"""
+        return self._data[1]
+
+    @property
+    def decay_time(self) -> DecayTime:
+        """The decay time (DecayTime enum object) of this drum key (read-only)"""
+        return self._data[2]
+
+    @property
+    def description(self) -> str:
+        """The description of this drum key as a string (read-only)"""
+        return self._data[3]
+
+    @property
+    def id(self) -> str:
+        """The id of this drum key as a string (read-only)"""
+        return self._data[4]
+
+    def __repr__(self):
+        return "MidiDrumKey(%i, %s, %s, \"%s\", \"%s\")" % (
+            self.midi_pitch, self.frequency_band.name, self.decay_time.name, self.description, self.id)
 
 
 class MidiDrumMapping(object, metaclass=ABCMeta):
@@ -1756,74 +1836,6 @@ class MidiDrumMapping(object, metaclass=ABCMeta):
     Each MidiDrumMapping object represents a MIDI drum mapping and is a container for MidiDrumKey objects. It provides
     functionality for retrieval of these objects, based on either midi pitch, frequency band or key id.
     """
-
-    class MidiDrumKey(object):
-        """Struct-like class holding information about a single key within a MIDI drum mapping
-
-        Holds information about the frequency band and the decay time of the drum sound it represents. Also stores the
-        MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defaults to the MIDI pitch.
-        """
-
-        def __init__(self, midi_pitch: int, frequency_band: FrequencyBand,
-                     decay_time: DecayTime, description: str, key_id: str = None):
-            """Creates a new midi drum key
-
-            :param midi_pitch:     the MIDI pitch as an integer in the range [0, 127] (the MIDI pitch has to be unique
-                                   within the mapping this drum key belongs to)
-            :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
-            :param decay_time:     DecayTime enum object (SHORT, NORMAL or LONG)
-            :param description:    a small description (a few words, max 50 characters) of the sound of this drum sound
-            :param key_id:         a unique (within the drum mapping) id for this key as a string (defaults to the midi
-                                   pitch)
-
-            :raises ValueError: if midi pitch not in range or if description exceeds the max number of characters
-            :raises TypeError:  if given frequency band is not a FrequencyBand object or given decay time is not a
-                                DecayTime object
-            """
-
-            midi_pitch = int(midi_pitch)
-            description = str(description)
-            key_id = str(midi_pitch if key_id is None else key_id)
-
-            if not (0 <= midi_pitch <= 127):
-                raise ValueError("expected midi pitch in range [0, 127]")
-            if len(description) > 50:
-                raise ValueError("description length should not exceed 50 characters")
-            if not isinstance(frequency_band, FrequencyBand):
-                raise TypeError
-            if not isinstance(decay_time, DecayTime):
-                raise TypeError
-
-            self._data = (midi_pitch, frequency_band, decay_time, description, key_id)
-
-        @property
-        def midi_pitch(self) -> int:
-            """The midi pitch of this midi drum key (read-only)"""
-            return self._data[0]
-
-        @property
-        def frequency_band(self) -> FrequencyBand:
-            """The frequency band (FrequencyBand enum object) of this drum key (read-only)"""
-            return self._data[1]
-
-        @property
-        def decay_time(self) -> DecayTime:
-            """The decay time (DecayTime enum object) of this drum key (read-only)"""
-            return self._data[2]
-
-        @property
-        def description(self) -> str:
-            """The description of this drum key as a string (read-only)"""
-            return self._data[3]
-
-        @property
-        def id(self) -> str:
-            """The id of this drum key as a string (read-only)"""
-            return self._data[4]
-
-        def __repr__(self):
-            return "MidiDrumKey(%i, %s, %s, \"%s\", \"%s\")" % (
-                self.midi_pitch, self.frequency_band.name, self.decay_time.name, self.description, self.id)
 
     @abstractmethod
     def get_name(self):
@@ -1903,7 +1915,7 @@ class MidiDrumMappingImpl(MidiDrumMapping):
     execution time of O(1).
     """
 
-    def __init__(self, name: str, keys: tp.Sequence[MidiDrumMapping.MidiDrumKey]):
+    def __init__(self, name: str, keys: tp.Sequence[MidiDrumKey]):
         self._name = str(name)
         keys = tuple(keys)
 
@@ -1936,23 +1948,23 @@ class MidiDrumMappingImpl(MidiDrumMapping):
         return self._name
 
     # implements MidiDrumMapping.get_key_by_midi_pitch with an execution time of O(1)
-    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumMapping.MidiDrumKey, None]:
+    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumKey, None]:
         return self._keys_by_midi_key.get(midi_pitch, None)
 
     # implements MidiDrumMapping.get_key_by_id with an execution time of O(1)
-    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumMapping.MidiDrumKey, None]:
+    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumKey, None]:
         return self._keys_by_id.get(key_id, None)
 
     # implements MidiDrumMapping.get_keys_with_frequency_band with an execution time of O(1)
-    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumMapping.MidiDrumKey, ...]:
+    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumKey, ...]:
         return self._keys_by_frequency_band.get(frequency_band, tuple())
 
     # implements MidiDrumMapping.get_keys_with_decay_time with an execution time of O(1)
-    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumMapping.MidiDrumKey, ...]:
+    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumKey, ...]:
         return self._keys_by_decay_time.get(decay_time, tuple())
 
     # implements MidiDrumMapping.get_keys with an execution time of O(1)
-    def get_keys(self) -> tp.Sequence[MidiDrumMapping.MidiDrumKey]:
+    def get_keys(self) -> tp.Sequence[MidiDrumKey]:
         return self._keys
 
 
@@ -1972,7 +1984,7 @@ class MidiDrumMappingGroup(MidiDrumMapping):
     def get_name(self) -> str:
         return self._name
 
-    def get_keys(self) -> tp.Sequence[MidiDrumMapping.MidiDrumKey]:
+    def get_keys(self) -> tp.Sequence[MidiDrumKey]:
         return self._key_view
 
 
@@ -1989,7 +2001,7 @@ class MidiDrumMappingReducer(object, metaclass=ABCMeta):
 
     @staticmethod
     @abstractmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         """Returns the name of the group, given the midi key
 
         :param midi_key: midi drum key
@@ -2019,21 +2031,21 @@ class MidiDrumMappingReducer(object, metaclass=ABCMeta):
 @friendly_named_class("Frequency-band mapping reducer")
 class FrequencyBandMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         return midi_key.frequency_band.name
 
 
 @friendly_named_class("Decay-time mapping reducer")
 class DecayTimeMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         return midi_key.decay_time.name
 
 
 @friendly_named_class("Unique-property combination reducer")
 class UniquePropertyComboMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         return "%s.%s" % (midi_key.frequency_band.name, midi_key.decay_time.name)
 
 
@@ -2078,54 +2090,66 @@ def get_drum_mapping_reducer_implementation(reducer_name: str, **kwargs) -> tp.T
         raise ValueError("No MidiDrumMappingReducer found with class name or friendly name \"%s\"" % reducer_name)
 
 
-GMDrumMapping = MidiDrumMappingImpl("GMDrumMapping", [
-    MidiDrumMapping.MidiDrumKey(35, FrequencyBand.LOW, DecayTime.NORMAL, "Acoustic bass drum", key_id="abd"),
-    MidiDrumMapping.MidiDrumKey(36, FrequencyBand.LOW, DecayTime.NORMAL, "Bass drum", key_id="bd1"),
-    MidiDrumMapping.MidiDrumKey(37, FrequencyBand.MID, DecayTime.SHORT, "Side stick", key_id="sst"),
-    MidiDrumMapping.MidiDrumKey(38, FrequencyBand.MID, DecayTime.NORMAL, "Acoustic snare", key_id="asn"),
-    MidiDrumMapping.MidiDrumKey(39, FrequencyBand.MID, DecayTime.NORMAL, "Hand clap", key_id="hcl"),
-    MidiDrumMapping.MidiDrumKey(40, FrequencyBand.MID, DecayTime.NORMAL, "Electric snare", key_id="esn"),
-    MidiDrumMapping.MidiDrumKey(41, FrequencyBand.LOW, DecayTime.NORMAL, "Low floor tom", key_id="lft"),
-    MidiDrumMapping.MidiDrumKey(42, FrequencyBand.HIGH, DecayTime.SHORT, "Closed hi-hat", key_id="chh"),
-    MidiDrumMapping.MidiDrumKey(43, FrequencyBand.LOW, DecayTime.NORMAL, "High floor tom", key_id="hft"),
-    MidiDrumMapping.MidiDrumKey(44, FrequencyBand.HIGH, DecayTime.NORMAL, "Pedal hi-hat", key_id="phh"),
-    MidiDrumMapping.MidiDrumKey(45, FrequencyBand.MID, DecayTime.NORMAL, "Low tom", key_id="ltm"),
-    MidiDrumMapping.MidiDrumKey(46, FrequencyBand.HIGH, DecayTime.LONG, "Open hi-hat", key_id="ohh"),
-    MidiDrumMapping.MidiDrumKey(47, FrequencyBand.MID, DecayTime.NORMAL, "Low mid tom", key_id="lmt"),
-    MidiDrumMapping.MidiDrumKey(48, FrequencyBand.MID, DecayTime.NORMAL, "High mid tom", key_id="hmt"),
-    MidiDrumMapping.MidiDrumKey(49, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 1", key_id="cr1"),
-    MidiDrumMapping.MidiDrumKey(50, FrequencyBand.MID, DecayTime.NORMAL, "High tom", key_id="htm"),
-    MidiDrumMapping.MidiDrumKey(51, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 1", key_id="rc1"),
-    MidiDrumMapping.MidiDrumKey(52, FrequencyBand.HIGH, DecayTime.LONG, "Chinese cymbal", key_id="chc"),
-    MidiDrumMapping.MidiDrumKey(53, FrequencyBand.HIGH, DecayTime.LONG, "Ride bell", key_id="rbl"),
-    MidiDrumMapping.MidiDrumKey(54, FrequencyBand.MID, DecayTime.NORMAL, "Tambourine", key_id="tmb"),
-    MidiDrumMapping.MidiDrumKey(55, FrequencyBand.HIGH, DecayTime.LONG, "Splash cymbal", key_id="spl"),
-    MidiDrumMapping.MidiDrumKey(56, FrequencyBand.MID, DecayTime.SHORT, "Cowbell", key_id="cwb"),
-    MidiDrumMapping.MidiDrumKey(57, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 2", key_id="cr2"),
-    MidiDrumMapping.MidiDrumKey(58, FrequencyBand.HIGH, DecayTime.LONG, "Vibraslap", key_id="vbs"),
-    MidiDrumMapping.MidiDrumKey(59, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 2", key_id="rc2"),
-    MidiDrumMapping.MidiDrumKey(60, FrequencyBand.MID, DecayTime.NORMAL, "Hi bongo", key_id="hbg"),
-    MidiDrumMapping.MidiDrumKey(61, FrequencyBand.MID, DecayTime.NORMAL, "Low bongo", key_id="lbg"),
-    MidiDrumMapping.MidiDrumKey(62, FrequencyBand.MID, DecayTime.NORMAL, "Muted high conga", key_id="mhc"),
-    MidiDrumMapping.MidiDrumKey(63, FrequencyBand.MID, DecayTime.NORMAL, "Open high conga", key_id="ohc"),
-    MidiDrumMapping.MidiDrumKey(64, FrequencyBand.MID, DecayTime.NORMAL, "Low conga", key_id="lcn"),
-    MidiDrumMapping.MidiDrumKey(65, FrequencyBand.MID, DecayTime.NORMAL, "High timbale", key_id="htb"),
-    MidiDrumMapping.MidiDrumKey(66, FrequencyBand.MID, DecayTime.NORMAL, "Low timbale", key_id="ltb"),
-    MidiDrumMapping.MidiDrumKey(67, FrequencyBand.MID, DecayTime.NORMAL, "High agogo", key_id="hgo"),
-    MidiDrumMapping.MidiDrumKey(68, FrequencyBand.MID, DecayTime.NORMAL, "Low agogo", key_id="lgo"),
-    MidiDrumMapping.MidiDrumKey(69, FrequencyBand.HIGH, DecayTime.NORMAL, "Cabasa", key_id="cbs"),
-    MidiDrumMapping.MidiDrumKey(70, FrequencyBand.HIGH, DecayTime.NORMAL, "Maracas", key_id="mcs"),
-    MidiDrumMapping.MidiDrumKey(71, FrequencyBand.MID, DecayTime.NORMAL, "Short whistle", key_id="swh"),
-    MidiDrumMapping.MidiDrumKey(72, FrequencyBand.MID, DecayTime.NORMAL, "Long whistle", key_id="lwh"),
-    MidiDrumMapping.MidiDrumKey(73, FrequencyBand.MID, DecayTime.NORMAL, "Short guiro", key_id="sgr"),
-    MidiDrumMapping.MidiDrumKey(74, FrequencyBand.MID, DecayTime.NORMAL, "Long guiro", key_id="lgr"),
-    MidiDrumMapping.MidiDrumKey(75, FrequencyBand.MID, DecayTime.SHORT, "Claves", key_id="clv"),
-    MidiDrumMapping.MidiDrumKey(76, FrequencyBand.MID, DecayTime.SHORT, "Hi wood block", key_id="hwb"),
-    MidiDrumMapping.MidiDrumKey(77, FrequencyBand.MID, DecayTime.SHORT, "Low wood block", key_id="lwb"),
-    MidiDrumMapping.MidiDrumKey(78, FrequencyBand.MID, DecayTime.NORMAL, "Muted cuica", key_id="mcu"),
-    MidiDrumMapping.MidiDrumKey(79, FrequencyBand.MID, DecayTime.NORMAL, "Open cuica", key_id="ocu"),
-    MidiDrumMapping.MidiDrumKey(80, FrequencyBand.MID, DecayTime.SHORT, "Muted triangle", key_id="mtr"),
-    MidiDrumMapping.MidiDrumKey(81, FrequencyBand.MID, DecayTime.LONG, "Open triangle", key_id="otr")
+def create_drum_mapping(name: str, keys: tp.Sequence[MidiDrumKey]) -> MidiDrumMapping:
+    """
+    Utility function to create a new MIDI drum mapping.
+
+    :param name: name of the drum mapping
+    :param keys: drum mappings as a sequence of :class:`beatsearch.rhythm.MidiDrumMapping.MidiDrumKey` objects
+    :return: midi drum mapping
+    """
+
+    return MidiDrumMappingImpl(name, keys)
+
+
+GMDrumMapping = create_drum_mapping("GMDrumMapping", [
+    MidiDrumKey(35, FrequencyBand.LOW, DecayTime.NORMAL, "Acoustic bass drum", key_id="abd"),
+    MidiDrumKey(36, FrequencyBand.LOW, DecayTime.NORMAL, "Bass drum", key_id="bd1"),
+    MidiDrumKey(37, FrequencyBand.MID, DecayTime.SHORT, "Side stick", key_id="sst"),
+    MidiDrumKey(38, FrequencyBand.MID, DecayTime.NORMAL, "Acoustic snare", key_id="asn"),
+    MidiDrumKey(39, FrequencyBand.MID, DecayTime.NORMAL, "Hand clap", key_id="hcl"),
+    MidiDrumKey(40, FrequencyBand.MID, DecayTime.NORMAL, "Electric snare", key_id="esn"),
+    MidiDrumKey(41, FrequencyBand.LOW, DecayTime.NORMAL, "Low floor tom", key_id="lft"),
+    MidiDrumKey(42, FrequencyBand.HIGH, DecayTime.SHORT, "Closed hi-hat", key_id="chh"),
+    MidiDrumKey(43, FrequencyBand.LOW, DecayTime.NORMAL, "High floor tom", key_id="hft"),
+    MidiDrumKey(44, FrequencyBand.HIGH, DecayTime.NORMAL, "Pedal hi-hat", key_id="phh"),
+    MidiDrumKey(45, FrequencyBand.MID, DecayTime.NORMAL, "Low tom", key_id="ltm"),
+    MidiDrumKey(46, FrequencyBand.HIGH, DecayTime.LONG, "Open hi-hat", key_id="ohh"),
+    MidiDrumKey(47, FrequencyBand.MID, DecayTime.NORMAL, "Low mid tom", key_id="lmt"),
+    MidiDrumKey(48, FrequencyBand.MID, DecayTime.NORMAL, "High mid tom", key_id="hmt"),
+    MidiDrumKey(49, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 1", key_id="cr1"),
+    MidiDrumKey(50, FrequencyBand.MID, DecayTime.NORMAL, "High tom", key_id="htm"),
+    MidiDrumKey(51, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 1", key_id="rc1"),
+    MidiDrumKey(52, FrequencyBand.HIGH, DecayTime.LONG, "Chinese cymbal", key_id="chc"),
+    MidiDrumKey(53, FrequencyBand.HIGH, DecayTime.LONG, "Ride bell", key_id="rbl"),
+    MidiDrumKey(54, FrequencyBand.MID, DecayTime.NORMAL, "Tambourine", key_id="tmb"),
+    MidiDrumKey(55, FrequencyBand.HIGH, DecayTime.LONG, "Splash cymbal", key_id="spl"),
+    MidiDrumKey(56, FrequencyBand.MID, DecayTime.SHORT, "Cowbell", key_id="cwb"),
+    MidiDrumKey(57, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 2", key_id="cr2"),
+    MidiDrumKey(58, FrequencyBand.HIGH, DecayTime.LONG, "Vibraslap", key_id="vbs"),
+    MidiDrumKey(59, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 2", key_id="rc2"),
+    MidiDrumKey(60, FrequencyBand.MID, DecayTime.NORMAL, "Hi bongo", key_id="hbg"),
+    MidiDrumKey(61, FrequencyBand.MID, DecayTime.NORMAL, "Low bongo", key_id="lbg"),
+    MidiDrumKey(62, FrequencyBand.MID, DecayTime.NORMAL, "Muted high conga", key_id="mhc"),
+    MidiDrumKey(63, FrequencyBand.MID, DecayTime.NORMAL, "Open high conga", key_id="ohc"),
+    MidiDrumKey(64, FrequencyBand.MID, DecayTime.NORMAL, "Low conga", key_id="lcn"),
+    MidiDrumKey(65, FrequencyBand.MID, DecayTime.NORMAL, "High timbale", key_id="htb"),
+    MidiDrumKey(66, FrequencyBand.MID, DecayTime.NORMAL, "Low timbale", key_id="ltb"),
+    MidiDrumKey(67, FrequencyBand.MID, DecayTime.NORMAL, "High agogo", key_id="hgo"),
+    MidiDrumKey(68, FrequencyBand.MID, DecayTime.NORMAL, "Low agogo", key_id="lgo"),
+    MidiDrumKey(69, FrequencyBand.HIGH, DecayTime.NORMAL, "Cabasa", key_id="cbs"),
+    MidiDrumKey(70, FrequencyBand.HIGH, DecayTime.NORMAL, "Maracas", key_id="mcs"),
+    MidiDrumKey(71, FrequencyBand.MID, DecayTime.NORMAL, "Short whistle", key_id="swh"),
+    MidiDrumKey(72, FrequencyBand.MID, DecayTime.NORMAL, "Long whistle", key_id="lwh"),
+    MidiDrumKey(73, FrequencyBand.MID, DecayTime.NORMAL, "Short guiro", key_id="sgr"),
+    MidiDrumKey(74, FrequencyBand.MID, DecayTime.NORMAL, "Long guiro", key_id="lgr"),
+    MidiDrumKey(75, FrequencyBand.MID, DecayTime.SHORT, "Claves", key_id="clv"),
+    MidiDrumKey(76, FrequencyBand.MID, DecayTime.SHORT, "Hi wood block", key_id="hwb"),
+    MidiDrumKey(77, FrequencyBand.MID, DecayTime.SHORT, "Low wood block", key_id="lwb"),
+    MidiDrumKey(78, FrequencyBand.MID, DecayTime.NORMAL, "Muted cuica", key_id="mcu"),
+    MidiDrumKey(79, FrequencyBand.MID, DecayTime.NORMAL, "Open cuica", key_id="ocu"),
+    MidiDrumKey(80, FrequencyBand.MID, DecayTime.SHORT, "Muted triangle", key_id="mtr"),
+    MidiDrumKey(81, FrequencyBand.MID, DecayTime.LONG, "Open triangle", key_id="otr")
 ])  # type: MidiDrumMapping
 
 
@@ -2373,16 +2397,13 @@ class MidiRhythm(RhythmLoop):
         have a resolution property and can't have more than one track containing note events. The midi events map to
         rhythm properties like this:
 
-            midi.NoteOnEvent            ->  adds an onset to this rhythm
-            midi.TimeSignatureEvent *   ->  set the time signature of this rhythm
-            midi.SetTempoEvent          ->  sets the bpm of this rhythm
-            midi.EndOfTrackEvent **     ->  sets the duration of this rhythm (only if preserve_midi_duration is true)
+        * :class:`midi.NoteOnEvent`, adds an onset to this rhythm
+        * :class:`midi.TimeSignatureEvent`, set the time signature of this rhythm (required)
+        * :class:`midi.SetTempoEvent`, sets the bpm of this rhythm
+        * :class:`midi.EndOfTrackEvent`, sets the duration of this rhythm (only if preserve_midi_duration is true)
 
-                * required
-                ** required only if preserve_midi_duration is true
-
-        If preserve_midi_duration is false, the duration of this rhythm will be set to the first downbeat after the last
-        note position.
+        The `EndOfTrackEvent` is required if the `preserve_midi_duration` is set to `True`. If preserve_midi_duration is
+        `False`, the duration of this rhythm will be set to the first downbeat after the last note position.
 
         :param pattern: the midi pattern to load
         :param preserve_midi_duration: when true, the duration will be set to the position of the midi EndOfTrackEvent,
@@ -2477,6 +2498,309 @@ def create_rumba_rhythm(resolution=240, polyphonic=True):
     return rhythm
 
 
+class MidiRhythmCorpus(object):
+    DEFAULT_RHYTHM_RESOLUTION = 120
+    DEFAULT_MIDI_MAPPING_REDUCER = None
+
+    _RHYTHM_DATA_RHYTHM = 0
+    _RHYTHM_DATA_FILE_INFO = 1
+
+    _PICKLE_DATA_ID_KEY = "id"
+    _PICKLE_DATA_RESOLUTION_KEY = "res"
+    _PICKLE_DATA_RHYTHM_DATA_KEY = "rhythm_data"
+    _PICKLE_DATA_MAPPING_REDUCER_NAME_KEY = "mapping_reducer"
+
+    class MidiCorpusStateError(Exception):
+        pass
+
+    class BadCacheFormatError(Exception):
+        pass
+
+    def __init__(self, path: tp.Optional[tp.Union[IOBase, str]] = None, **kwargs):
+        """Creates and optionally loads a MIDI rhythm corpus
+
+        Calling this constructor with the path parameter set to ...
+            ... a directory is equivalent to calling :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_directory` on
+                an unload MidiRhythmCorpus.
+            ... a file path is equivalent to calling :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_cache_file` on
+                an unload MidiRhythmCorpus.
+
+        :param path: when given a directory path or a file path, this corpus will automatically load using either
+                     :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_directory` or
+                     :meth:`beatsearch.rhythm.MidiRhythmCorpus.load_from_cache_file` respectively
+
+        :param kwargs:
+            rhythm_resolution: rhythm resolution in PPQN (immediately overwritten if loading from cache)
+            midi_mapping_reducer: MIDI drum mapping reducer class (immediately overwritten if loading from cache)
+        """
+
+        self._rhythm_resolution = None     # type: tp.Union[int, None]
+        self._midi_mapping_reducer = None  # type: tp.Union[tp.Type[MidiDrumMappingReducer], None]
+        self._rhythm_data = None           # type: tp.Union[tp.Tuple[tp.Tuple[MidiRhythm, FileInfo], ...], None]
+        self._id = None                    # type: tp.Union[uuid.UUID, None]
+
+        # calling setters
+        self.rhythm_resolution = kwargs.get("rhythm_resolution", self.DEFAULT_RHYTHM_RESOLUTION)
+        self.midi_mapping_reducer = kwargs.get("midi_mapping_reducer", self.DEFAULT_MIDI_MAPPING_REDUCER)
+
+        # load corpus
+        if isinstance(path, str) and os.path.isdir(path):
+            self.load_from_directory(path)
+        elif path:
+            for arg_name in ("rhythm_resolution", "midi_mapping_reducer"):
+                if arg_name in kwargs:
+                    print("Ignoring named parameter %s. Loading corpus from cache.", file=sys.stderr)
+            self.load_from_cache_file(path)
+
+    def load_from_directory(self, midi_root_dir: str):
+        """Loads this MIDI corpus from a MIDI root directory
+
+        Recursively scans the given directory for MIDI files and loads one rhythm per MIDI file.
+
+        :param midi_root_dir: MIDI root directory
+        :return: None
+        """
+
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already loaded")
+
+        if not os.path.isdir(midi_root_dir):
+            raise IOError("no such directory: %s" % midi_root_dir)
+
+        self._rhythm_data = tuple(self.__lazy_load_rhythm_data_from_directory(
+            midi_root_dir=midi_root_dir,
+            resolution=self.rhythm_resolution,
+            mapping_reducer=self.midi_mapping_reducer
+        ))
+
+        self._id = uuid.uuid4()
+
+    def unload(self):
+        """Unloads this rhythm corpus
+
+        This method won't have any effect if the corpus has not loaded.
+
+        :return: None
+        """
+
+        if not self.has_loaded():
+            return
+
+        self._rhythm_data = None
+        self._id = None
+
+    @staticmethod
+    def __lazy_load_rhythm_data_from_directory(
+            midi_root_dir: str,
+            resolution: int,
+            mapping_reducer: tp.Optional[tp.Type[MidiDrumMappingReducer]]
+    ) -> tp.Generator[tp.Tuple[MidiRhythm, FileInfo], None, None]:
+
+        for f_path in get_midi_files_in_directory(midi_root_dir):
+            f_path = f_path.replace("\\", "/")
+
+            try:
+                rhythm = MidiRhythm(f_path, midi_mapping_reducer_cls=mapping_reducer)
+                rhythm.set_resolution(resolution)
+                print("%s: OK" % f_path)
+            except (TypeError, ValueError) as e:
+                print("%s: ERROR, %s" % (f_path, str(e)))
+                continue
+
+            m_time = os.path.getmtime(f_path)
+            file_info = FileInfo(path=f_path, modified_time=m_time)
+            yield rhythm, file_info
+
+    def load_from_cache_file(self, cache_fpath: tp.Union[IOBase, str]):
+        """Loads this MIDI corpus from a serialized pickle file
+
+        Loads a MIDI corpus from a serialized pickle file created with previously created with
+        :meth:`beatsearch.rhythm.MidiRhythmCorpus.save_to_cache_file`.
+
+        :param cache_fpath: path to the serialized pickle file
+        :return: None
+        """
+
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already loaded")
+
+        if isinstance(cache_fpath, str):
+            with open(cache_fpath, "rb") as pickle_file:
+                unpickled_data = pickle.load(pickle_file)
+        else:
+            unpickled_data = pickle.load(cache_fpath)
+
+        try:
+            rhythm_resolution = unpickled_data[self._PICKLE_DATA_RESOLUTION_KEY]
+            mapping_reducer_name = unpickled_data[self._PICKLE_DATA_MAPPING_REDUCER_NAME_KEY]
+            rhythm_data = unpickled_data[self._PICKLE_DATA_RHYTHM_DATA_KEY]
+            rhythm_id = unpickled_data[self._PICKLE_DATA_ID_KEY]
+        except KeyError:
+            raise ValueError("Midi root directory cache file has bad format: %s" % cache_fpath)
+
+        if mapping_reducer_name:
+            mapping_reducer = get_drum_mapping_reducer_implementation(mapping_reducer_name)
+        else:
+            mapping_reducer = None
+
+        self.rhythm_resolution = rhythm_resolution
+        self.midi_mapping_reducer = mapping_reducer
+        self._rhythm_data = rhythm_data
+        self._id = rhythm_id
+
+    def save_to_cache_file(self, cache_file: tp.Union[IOBase, str], overwrite=False):
+        """Serializes this MIDI corpus to a pickle file
+
+        :param cache_file: either an opened file handle in binary-write mode or a file path
+        :param overwrite: when True, no exception will be raised if a file path is given which already exists
+        :return: None
+        """
+
+        if not self.has_loaded():
+            raise self.MidiCorpusStateError("can't save a corpus that hasn't loaded yet")
+
+        resolution = self.rhythm_resolution
+        mapping_reducer_name = self.midi_mapping_reducer.__name__ if self.midi_mapping_reducer else ""
+
+        pickle_data = {
+            self._PICKLE_DATA_RESOLUTION_KEY: resolution,
+            self._PICKLE_DATA_MAPPING_REDUCER_NAME_KEY: mapping_reducer_name,
+            self._PICKLE_DATA_RHYTHM_DATA_KEY: self._rhythm_data,
+            self._PICKLE_DATA_ID_KEY: self._id
+        }
+
+        if isinstance(cache_file, str):
+            if os.path.isfile(cache_file) and not overwrite:
+                raise RuntimeError("there's already a file with path: %s" % cache_file)
+            with open(cache_file, "wb") as cache_file:
+                pickle.dump(pickle_data, cache_file)
+        else:
+            pickle.dump(pickle_data, cache_file)
+
+    def has_loaded(self):
+        """Returns whether this corpus has already loaded
+
+        Returns whether this rhythm corpus has already been loaded. This will return true after a successful call to
+        load().
+
+        :return: True if this corpus has already loaded: False otherwise
+        """
+
+        return self._rhythm_data is not None
+
+    def is_up_to_date(self, midi_root_dir: str):
+        """Returns whether the rhythms in this corpus are fully up to date with the MIDI contents of the given directory
+
+        Recursively scans the given directory for MIDI files and checks whether the files are the identical (both
+        file names and file modification timestamps) to the files that were used to create this corpus.
+
+        :param midi_root_dir: midi root directory that was used to create this corpus
+        :return: True if up to date; False otherwise
+        """
+
+        if not os.path.isdir(midi_root_dir):
+            raise IOError("no such directory: %s" % midi_root_dir)
+
+        for file_info in (entry[self._RHYTHM_DATA_FILE_INFO] for entry in self._rhythm_data):
+            fpath = file_info.path
+
+            # rhythm data is not up to date if either the file doesn't exist anymore or the file has been modified
+            if not os.path.isfile(fpath) or os.path.getmtime(fpath) != file_info.modified_time:
+                return False
+
+        n_cached_midi_files = len(self._rhythm_data)  # "cached" referring to the rhythms in this MidiRhythmCorpus obj
+        n_actual_midi_files = sum(bool(fpath) for fpath in get_midi_files_in_directory(midi_root_dir))
+
+        # won't be equal if new MIDI files have been added
+        return n_cached_midi_files == n_actual_midi_files
+
+    def export_as_midi_files(self, directory: str, **kwargs):
+        """Converts all rhythms in this corpus to MIDI patterns and saves them to the given directory
+
+        :param directory: directory to save the MIDI files to
+        :param kwargs: named arguments given to :meth:`beatsearch.rhythm.MidiRhythm.as_midi_pattern`
+        :return: None
+        """
+
+        make_dir_if_not_exist(directory)
+
+        for entry in self._rhythm_data:
+            rhythm = entry[self._RHYTHM_DATA_RHYTHM]
+            file_info = entry[self._RHYTHM_DATA_FILE_INFO]
+            fname = os.path.basename(file_info.path)
+            fpath = os.path.join(directory, fname)
+            pattern = rhythm.as_midi_pattern(**kwargs)
+            midi.write_midifile(fpath, pattern)
+
+
+    @property
+    def rhythm_resolution(self):
+        """The resolution in PPQN
+
+        Tick resolution in PPQN (pulses-per-quarter-note) of the rhythms within this corpus. This property will become
+        a read-only property after the corpus has loaded.
+
+        :return: resolution in PPQN of the rhythms in this corpus
+        """
+
+        return self._rhythm_resolution
+
+    @rhythm_resolution.setter
+    def rhythm_resolution(self, resolution: tp.Union[int, None]):
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already been loaded, making rhythm_resolution read-only")
+
+        if resolution is None:
+            self._rhythm_resolution = None
+            return
+
+        resolution = int(resolution)
+        if resolution <= 0:
+            raise ValueError("resolution should be greater than zero")
+
+        self._rhythm_resolution = resolution
+
+    @property
+    def midi_mapping_reducer(self) -> tp.Union[tp.Type[MidiDrumMappingReducer], None]:
+        """The MIDI drum mapping reducer
+
+        The MIDI drum mapping reducer applied to the rhythms in this corpus. This property will become a read-only
+        property after the corpus has loaded.
+        """
+        return self._midi_mapping_reducer
+
+    @midi_mapping_reducer.setter
+    def midi_mapping_reducer(self, midi_mapping_reducer: tp.Union[tp.Type[MidiDrumMappingReducer], None]):
+        if self.has_loaded():
+            raise self.MidiCorpusStateError("corpus has already been loaded, making midi_mapping_reducer read-only")
+
+        if midi_mapping_reducer is not None and not issubclass(midi_mapping_reducer, MidiDrumMappingReducer):
+            raise TypeError("expected a MidiDrumMappingReducer subclass or None but got '%s'" % midi_mapping_reducer)
+
+        self._midi_mapping_reducer = midi_mapping_reducer
+
+    @property
+    def id(self):
+        """The id of this rhythm corpus
+
+        The UUID id of this rhythm corpus. This is a read-only property.
+        """
+
+        return self._id
+
+    def __getitem__(self, i):
+        """Returns the i-th rhythm"""
+        return self._rhythm_data[i][self._RHYTHM_DATA_RHYTHM]
+
+    def __len__(self):
+        """Returns the number of rhythms within this corpus"""
+        return len(self._rhythm_data)
+
+    def __iter__(self):
+        """Returns an iterator over the rhythms within this corpus"""
+        return iter(data_entry[self._RHYTHM_DATA_RHYTHM] for data_entry in self._rhythm_data)
+
+
 __all__ = [
     # Rhythm classes
     'Rhythm', 'MonophonicRhythm', 'PolyphonicRhythm',
@@ -2486,10 +2810,10 @@ __all__ = [
     'Unit', 'UnitType', 'UnitError', 'parse_unit_argument', 'rescale_tick', 'convert_tick',
 
     # Misc
-    'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm',
+    'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm', 'MidiRhythmCorpus',
 
     # MIDI drum mapping
-    'MidiDrumMapping', 'GMDrumMapping', 'FrequencyBand', 'DecayTime',
+    'MidiDrumMapping', 'GMDrumMapping', 'create_drum_mapping', 'MidiDrumKey', 'FrequencyBand', 'DecayTime',
     'MidiDrumMappingReducer', 'FrequencyBandMidiDrumMappingReducer',
     'DecayTimeMidiDrumMappingReducer', 'UniquePropertyComboMidiDrumMappingReducer',
     'get_drum_mapping_reducer_implementation_names',

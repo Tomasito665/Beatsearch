@@ -8,7 +8,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>Feature extraction &mdash; Beatsearch 0.0.1.dev4 documentation</title>
+  <title>Feature extraction &mdash; Beatsearch 0.0.1.dev5 documentation</title>
   
 
   
@@ -35,7 +35,8 @@
         <link rel="index" title="Index"
               href="genindex.html"/>
         <link rel="search" title="Search" href="search.html"/>
-    <link rel="top" title="Beatsearch 0.0.1.dev4 documentation" href="index.html"/>
+    <link rel="top" title="Beatsearch 0.0.1.dev5 documentation" href="index.html"/>
+        <link rel="next" title="Midi" href="midi.html"/>
         <link rel="prev" title="Distance metrics" href="distance_metrics.html"/> 
 
   
@@ -65,7 +66,7 @@
             
             
               <div class="version">
-                0.0.1.dev4
+                0.0.1.dev5
               </div>
             
           
@@ -100,6 +101,8 @@
 <li class="toctree-l2"><a class="reference internal" href="#polyphonic-rhythm-features">Polyphonic rhythm features</a></li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="midi.html">Midi</a></li>
+<li class="toctree-l1"><a class="reference internal" href="reference.html">Reference</a></li>
 </ul>
 
             
@@ -182,7 +185,7 @@ extracted with implementations of the <code class="docutils literal"><span class
 <em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">FeatureExtractor</code><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor" title="Permalink to this definition">¶</a></dt>
 <dd><dl class="method">
 <dt id="beatsearch.feature_extraction.FeatureExtractor.process">
-<code class="descname">process</code><span class="sig-paren">(</span><em>obj</em><span class="sig-paren">)</span> &#x2192; typing.Any<a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.process" title="Permalink to this definition">¶</a></dt>
+<code class="descname">process</code><span class="sig-paren">(</span><em>obj</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.process" title="Permalink to this definition">¶</a></dt>
 <dd><p>Computes and returns a feature
 Computes a feature of the given object and returns it.</p>
 <table class="docutils field-list" frame="void" rules="none">
@@ -191,7 +194,9 @@ Computes a feature of the given object and returns it.</p>
 <tbody valign="top">
 <tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>obj</strong> &#8211; object of which to compute the feature</td>
 </tr>
-<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">the feature value</td>
+<tr class="field-even field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-data docutils literal"><span class="pre">Any</span></code></td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">the feature value</td>
 </tr>
 </tbody>
 </table>
@@ -254,6 +259,8 @@ Feature extractors for these type of features are implemented as <code class="do
   
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
       
+        <a href="midi.html" class="btn btn-neutral float-right" title="Midi" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
       
         <a href="distance_metrics.html" class="btn btn-neutral" title="Distance metrics" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
       
@@ -286,7 +293,7 @@ Feature extractors for these type of features are implemented as <code class="do
     <script type="text/javascript">
         var DOCUMENTATION_OPTIONS = {
             URL_ROOT:'./',
-            VERSION:'0.0.1.dev4',
+            VERSION:'0.0.1.dev5',
             COLLAPSE_INDEX:false,
             FILE_SUFFIX:'.html',
             HAS_SOURCE:  true,

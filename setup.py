@@ -13,7 +13,7 @@ if build_dependencies and not Python3Midi(get_third_party_dir()).has_build():
 
 setup(
     name='beatsearch',
-    version='0.0.1.dev4',
+    version='0.0.1.dev5',
     packages=['beatsearch', 'midi'],
     package_dir={
         '': "src",

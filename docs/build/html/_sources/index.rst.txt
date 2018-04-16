@@ -13,6 +13,8 @@ computation and visualization of symbolic rhythms.
    rhythm_model
    distance_metrics
    feature_extraction
+   midi
+   reference
 
 
 Indices and tables
