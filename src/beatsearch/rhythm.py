@@ -1749,16 +1749,85 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
 
 class FrequencyBand(enum.Enum):
     """Enumeration containing three drum sound frequency bands (low, mid and high)"""
-    LOW = enum.auto()
-    MID = enum.auto()
-    HIGH = enum.auto()
+    LOW = 0
+    MID = 1
+    HIGH = 2
 
 
 class DecayTime(enum.Enum):
     """Enumeration containing three drum sound decay times (short, normal and long)"""
-    SHORT = enum.auto()
-    NORMAL = enum.auto()
-    LONG = enum.auto()
+    SHORT = 0
+    NORMAL = 1
+    LONG = 2
+
+
+class MidiDrumKey(object):
+    """Struct-like class holding information about a single key within a MIDI drum mapping
+
+    Holds information about the frequency band and the decay time of the drum sound it represents. Also stores the
+    MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defaults to the MIDI pitch.
+    """
+
+    def __init__(self, midi_pitch: int, frequency_band: FrequencyBand,
+                 decay_time: DecayTime, description: str, key_id: str = None):
+        """Creates a new midi drum key
+
+        :param midi_pitch:     the MIDI pitch as an integer in the range [0, 127] (the MIDI pitch has to be unique
+                               within the mapping this drum key belongs to)
+        :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
+        :param decay_time:     DecayTime enum object (SHORT, NORMAL or LONG)
+        :param description:    a small description (a few words, max 50 characters) of the sound of this drum sound
+        :param key_id:         a unique (within the drum mapping) id for this key as a string (defaults to the midi
+                               pitch)
+
+        :raises ValueError: if midi pitch not in range or if description exceeds the max number of characters
+        :raises TypeError:  if given frequency band is not a FrequencyBand object or given decay time is not a
+                            DecayTime object
+        """
+
+        midi_pitch = int(midi_pitch)
+        description = str(description)
+        key_id = str(midi_pitch if key_id is None else key_id)
+
+        if not (0 <= midi_pitch <= 127):
+            raise ValueError("expected midi pitch in range [0, 127]")
+        if len(description) > 50:
+            raise ValueError("description length should not exceed 50 characters")
+        if not isinstance(frequency_band, FrequencyBand):
+            raise TypeError
+        if not isinstance(decay_time, DecayTime):
+            raise TypeError
+
+        self._data = (midi_pitch, frequency_band, decay_time, description, key_id)
+
+    @property
+    def midi_pitch(self) -> int:
+        """The midi pitch of this midi drum key (read-only)"""
+        return self._data[0]
+
+    @property
+    def frequency_band(self) -> FrequencyBand:
+        """The frequency band (FrequencyBand enum object) of this drum key (read-only)"""
+        return self._data[1]
+
+    @property
+    def decay_time(self) -> DecayTime:
+        """The decay time (DecayTime enum object) of this drum key (read-only)"""
+        return self._data[2]
+
+    @property
+    def description(self) -> str:
+        """The description of this drum key as a string (read-only)"""
+        return self._data[3]
+
+    @property
+    def id(self) -> str:
+        """The id of this drum key as a string (read-only)"""
+        return self._data[4]
+
+    def __repr__(self):
+        return "MidiDrumKey(%i, %s, %s, \"%s\", \"%s\")" % (
+            self.midi_pitch, self.frequency_band.name, self.decay_time.name, self.description, self.id)
 
 
 class MidiDrumMapping(object, metaclass=ABCMeta):
@@ -1767,74 +1836,6 @@ class MidiDrumMapping(object, metaclass=ABCMeta):
     Each MidiDrumMapping object represents a MIDI drum mapping and is a container for MidiDrumKey objects. It provides
     functionality for retrieval of these objects, based on either midi pitch, frequency band or key id.
     """
-
-    class MidiDrumKey(object):
-        """Struct-like class holding information about a single key within a MIDI drum mapping
-
-        Holds information about the frequency band and the decay time of the drum sound it represents. Also stores the
-        MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defaults to the MIDI pitch.
-        """
-
-        def __init__(self, midi_pitch: int, frequency_band: FrequencyBand,
-                     decay_time: DecayTime, description: str, key_id: str = None):
-            """Creates a new midi drum key
-
-            :param midi_pitch:     the MIDI pitch as an integer in the range [0, 127] (the MIDI pitch has to be unique
-                                   within the mapping this drum key belongs to)
-            :param frequency_band: FrequencyBand enum object (LOW, MID or HIGH)
-            :param decay_time:     DecayTime enum object (SHORT, NORMAL or LONG)
-            :param description:    a small description (a few words, max 50 characters) of the sound of this drum sound
-            :param key_id:         a unique (within the drum mapping) id for this key as a string (defaults to the midi
-                                   pitch)
-
-            :raises ValueError: if midi pitch not in range or if description exceeds the max number of characters
-            :raises TypeError:  if given frequency band is not a FrequencyBand object or given decay time is not a
-                                DecayTime object
-            """
-
-            midi_pitch = int(midi_pitch)
-            description = str(description)
-            key_id = str(midi_pitch if key_id is None else key_id)
-
-            if not (0 <= midi_pitch <= 127):
-                raise ValueError("expected midi pitch in range [0, 127]")
-            if len(description) > 50:
-                raise ValueError("description length should not exceed 50 characters")
-            if not isinstance(frequency_band, FrequencyBand):
-                raise TypeError
-            if not isinstance(decay_time, DecayTime):
-                raise TypeError
-
-            self._data = (midi_pitch, frequency_band, decay_time, description, key_id)
-
-        @property
-        def midi_pitch(self) -> int:
-            """The midi pitch of this midi drum key (read-only)"""
-            return self._data[0]
-
-        @property
-        def frequency_band(self) -> FrequencyBand:
-            """The frequency band (FrequencyBand enum object) of this drum key (read-only)"""
-            return self._data[1]
-
-        @property
-        def decay_time(self) -> DecayTime:
-            """The decay time (DecayTime enum object) of this drum key (read-only)"""
-            return self._data[2]
-
-        @property
-        def description(self) -> str:
-            """The description of this drum key as a string (read-only)"""
-            return self._data[3]
-
-        @property
-        def id(self) -> str:
-            """The id of this drum key as a string (read-only)"""
-            return self._data[4]
-
-        def __repr__(self):
-            return "MidiDrumKey(%i, %s, %s, \"%s\", \"%s\")" % (
-                self.midi_pitch, self.frequency_band.name, self.decay_time.name, self.description, self.id)
 
     @abstractmethod
     def get_name(self):
@@ -1914,7 +1915,7 @@ class MidiDrumMappingImpl(MidiDrumMapping):
     execution time of O(1).
     """
 
-    def __init__(self, name: str, keys: tp.Sequence[MidiDrumMapping.MidiDrumKey]):
+    def __init__(self, name: str, keys: tp.Sequence[MidiDrumKey]):
         self._name = str(name)
         keys = tuple(keys)
 
@@ -1947,23 +1948,23 @@ class MidiDrumMappingImpl(MidiDrumMapping):
         return self._name
 
     # implements MidiDrumMapping.get_key_by_midi_pitch with an execution time of O(1)
-    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumMapping.MidiDrumKey, None]:
+    def get_key_by_midi_pitch(self, midi_pitch: int) -> tp.Union[MidiDrumKey, None]:
         return self._keys_by_midi_key.get(midi_pitch, None)
 
     # implements MidiDrumMapping.get_key_by_id with an execution time of O(1)
-    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumMapping.MidiDrumKey, None]:
+    def get_key_by_id(self, key_id: str) -> tp.Union[MidiDrumKey, None]:
         return self._keys_by_id.get(key_id, None)
 
     # implements MidiDrumMapping.get_keys_with_frequency_band with an execution time of O(1)
-    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumMapping.MidiDrumKey, ...]:
+    def get_keys_with_frequency_band(self, frequency_band: FrequencyBand) -> tp.Tuple[MidiDrumKey, ...]:
         return self._keys_by_frequency_band.get(frequency_band, tuple())
 
     # implements MidiDrumMapping.get_keys_with_decay_time with an execution time of O(1)
-    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumMapping.MidiDrumKey, ...]:
+    def get_keys_with_decay_time(self, decay_time: DecayTime) -> tp.Tuple[MidiDrumKey, ...]:
         return self._keys_by_decay_time.get(decay_time, tuple())
 
     # implements MidiDrumMapping.get_keys with an execution time of O(1)
-    def get_keys(self) -> tp.Sequence[MidiDrumMapping.MidiDrumKey]:
+    def get_keys(self) -> tp.Sequence[MidiDrumKey]:
         return self._keys
 
 
@@ -1983,7 +1984,7 @@ class MidiDrumMappingGroup(MidiDrumMapping):
     def get_name(self) -> str:
         return self._name
 
-    def get_keys(self) -> tp.Sequence[MidiDrumMapping.MidiDrumKey]:
+    def get_keys(self) -> tp.Sequence[MidiDrumKey]:
         return self._key_view
 
 
@@ -2000,7 +2001,7 @@ class MidiDrumMappingReducer(object, metaclass=ABCMeta):
 
     @staticmethod
     @abstractmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         """Returns the name of the group, given the midi key
 
         :param midi_key: midi drum key
@@ -2030,21 +2031,21 @@ class MidiDrumMappingReducer(object, metaclass=ABCMeta):
 @friendly_named_class("Frequency-band mapping reducer")
 class FrequencyBandMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         return midi_key.frequency_band.name
 
 
 @friendly_named_class("Decay-time mapping reducer")
 class DecayTimeMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         return midi_key.decay_time.name
 
 
 @friendly_named_class("Unique-property combination reducer")
 class UniquePropertyComboMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
-    def get_group_name(midi_key: MidiDrumMapping.MidiDrumKey) -> str:
+    def get_group_name(midi_key: MidiDrumKey) -> str:
         return "%s.%s" % (midi_key.frequency_band.name, midi_key.decay_time.name)
 
 
@@ -2089,54 +2090,66 @@ def get_drum_mapping_reducer_implementation(reducer_name: str, **kwargs) -> tp.T
         raise ValueError("No MidiDrumMappingReducer found with class name or friendly name \"%s\"" % reducer_name)
 
 
-GMDrumMapping = MidiDrumMappingImpl("GMDrumMapping", [
-    MidiDrumMapping.MidiDrumKey(35, FrequencyBand.LOW, DecayTime.NORMAL, "Acoustic bass drum", key_id="abd"),
-    MidiDrumMapping.MidiDrumKey(36, FrequencyBand.LOW, DecayTime.NORMAL, "Bass drum", key_id="bd1"),
-    MidiDrumMapping.MidiDrumKey(37, FrequencyBand.MID, DecayTime.SHORT, "Side stick", key_id="sst"),
-    MidiDrumMapping.MidiDrumKey(38, FrequencyBand.MID, DecayTime.NORMAL, "Acoustic snare", key_id="asn"),
-    MidiDrumMapping.MidiDrumKey(39, FrequencyBand.MID, DecayTime.NORMAL, "Hand clap", key_id="hcl"),
-    MidiDrumMapping.MidiDrumKey(40, FrequencyBand.MID, DecayTime.NORMAL, "Electric snare", key_id="esn"),
-    MidiDrumMapping.MidiDrumKey(41, FrequencyBand.LOW, DecayTime.NORMAL, "Low floor tom", key_id="lft"),
-    MidiDrumMapping.MidiDrumKey(42, FrequencyBand.HIGH, DecayTime.SHORT, "Closed hi-hat", key_id="chh"),
-    MidiDrumMapping.MidiDrumKey(43, FrequencyBand.LOW, DecayTime.NORMAL, "High floor tom", key_id="hft"),
-    MidiDrumMapping.MidiDrumKey(44, FrequencyBand.HIGH, DecayTime.NORMAL, "Pedal hi-hat", key_id="phh"),
-    MidiDrumMapping.MidiDrumKey(45, FrequencyBand.MID, DecayTime.NORMAL, "Low tom", key_id="ltm"),
-    MidiDrumMapping.MidiDrumKey(46, FrequencyBand.HIGH, DecayTime.LONG, "Open hi-hat", key_id="ohh"),
-    MidiDrumMapping.MidiDrumKey(47, FrequencyBand.MID, DecayTime.NORMAL, "Low mid tom", key_id="lmt"),
-    MidiDrumMapping.MidiDrumKey(48, FrequencyBand.MID, DecayTime.NORMAL, "High mid tom", key_id="hmt"),
-    MidiDrumMapping.MidiDrumKey(49, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 1", key_id="cr1"),
-    MidiDrumMapping.MidiDrumKey(50, FrequencyBand.MID, DecayTime.NORMAL, "High tom", key_id="htm"),
-    MidiDrumMapping.MidiDrumKey(51, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 1", key_id="rc1"),
-    MidiDrumMapping.MidiDrumKey(52, FrequencyBand.HIGH, DecayTime.LONG, "Chinese cymbal", key_id="chc"),
-    MidiDrumMapping.MidiDrumKey(53, FrequencyBand.HIGH, DecayTime.LONG, "Ride bell", key_id="rbl"),
-    MidiDrumMapping.MidiDrumKey(54, FrequencyBand.MID, DecayTime.NORMAL, "Tambourine", key_id="tmb"),
-    MidiDrumMapping.MidiDrumKey(55, FrequencyBand.HIGH, DecayTime.LONG, "Splash cymbal", key_id="spl"),
-    MidiDrumMapping.MidiDrumKey(56, FrequencyBand.MID, DecayTime.SHORT, "Cowbell", key_id="cwb"),
-    MidiDrumMapping.MidiDrumKey(57, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 2", key_id="cr2"),
-    MidiDrumMapping.MidiDrumKey(58, FrequencyBand.HIGH, DecayTime.LONG, "Vibraslap", key_id="vbs"),
-    MidiDrumMapping.MidiDrumKey(59, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 2", key_id="rc2"),
-    MidiDrumMapping.MidiDrumKey(60, FrequencyBand.MID, DecayTime.NORMAL, "Hi bongo", key_id="hbg"),
-    MidiDrumMapping.MidiDrumKey(61, FrequencyBand.MID, DecayTime.NORMAL, "Low bongo", key_id="lbg"),
-    MidiDrumMapping.MidiDrumKey(62, FrequencyBand.MID, DecayTime.NORMAL, "Muted high conga", key_id="mhc"),
-    MidiDrumMapping.MidiDrumKey(63, FrequencyBand.MID, DecayTime.NORMAL, "Open high conga", key_id="ohc"),
-    MidiDrumMapping.MidiDrumKey(64, FrequencyBand.MID, DecayTime.NORMAL, "Low conga", key_id="lcn"),
-    MidiDrumMapping.MidiDrumKey(65, FrequencyBand.MID, DecayTime.NORMAL, "High timbale", key_id="htb"),
-    MidiDrumMapping.MidiDrumKey(66, FrequencyBand.MID, DecayTime.NORMAL, "Low timbale", key_id="ltb"),
-    MidiDrumMapping.MidiDrumKey(67, FrequencyBand.MID, DecayTime.NORMAL, "High agogo", key_id="hgo"),
-    MidiDrumMapping.MidiDrumKey(68, FrequencyBand.MID, DecayTime.NORMAL, "Low agogo", key_id="lgo"),
-    MidiDrumMapping.MidiDrumKey(69, FrequencyBand.HIGH, DecayTime.NORMAL, "Cabasa", key_id="cbs"),
-    MidiDrumMapping.MidiDrumKey(70, FrequencyBand.HIGH, DecayTime.NORMAL, "Maracas", key_id="mcs"),
-    MidiDrumMapping.MidiDrumKey(71, FrequencyBand.MID, DecayTime.NORMAL, "Short whistle", key_id="swh"),
-    MidiDrumMapping.MidiDrumKey(72, FrequencyBand.MID, DecayTime.NORMAL, "Long whistle", key_id="lwh"),
-    MidiDrumMapping.MidiDrumKey(73, FrequencyBand.MID, DecayTime.NORMAL, "Short guiro", key_id="sgr"),
-    MidiDrumMapping.MidiDrumKey(74, FrequencyBand.MID, DecayTime.NORMAL, "Long guiro", key_id="lgr"),
-    MidiDrumMapping.MidiDrumKey(75, FrequencyBand.MID, DecayTime.SHORT, "Claves", key_id="clv"),
-    MidiDrumMapping.MidiDrumKey(76, FrequencyBand.MID, DecayTime.SHORT, "Hi wood block", key_id="hwb"),
-    MidiDrumMapping.MidiDrumKey(77, FrequencyBand.MID, DecayTime.SHORT, "Low wood block", key_id="lwb"),
-    MidiDrumMapping.MidiDrumKey(78, FrequencyBand.MID, DecayTime.NORMAL, "Muted cuica", key_id="mcu"),
-    MidiDrumMapping.MidiDrumKey(79, FrequencyBand.MID, DecayTime.NORMAL, "Open cuica", key_id="ocu"),
-    MidiDrumMapping.MidiDrumKey(80, FrequencyBand.MID, DecayTime.SHORT, "Muted triangle", key_id="mtr"),
-    MidiDrumMapping.MidiDrumKey(81, FrequencyBand.MID, DecayTime.LONG, "Open triangle", key_id="otr")
+def create_drum_mapping(name: str, keys: tp.Sequence[MidiDrumKey]) -> MidiDrumMapping:
+    """
+    Utility function to create a new MIDI drum mapping.
+
+    :param name: name of the drum mapping
+    :param keys: drum mappings as a sequence of :class:`beatsearch.rhythm.MidiDrumMapping.MidiDrumKey` objects
+    :return: midi drum mapping
+    """
+
+    return MidiDrumMappingImpl(name, keys)
+
+
+GMDrumMapping = create_drum_mapping("GMDrumMapping", [
+    MidiDrumKey(35, FrequencyBand.LOW, DecayTime.NORMAL, "Acoustic bass drum", key_id="abd"),
+    MidiDrumKey(36, FrequencyBand.LOW, DecayTime.NORMAL, "Bass drum", key_id="bd1"),
+    MidiDrumKey(37, FrequencyBand.MID, DecayTime.SHORT, "Side stick", key_id="sst"),
+    MidiDrumKey(38, FrequencyBand.MID, DecayTime.NORMAL, "Acoustic snare", key_id="asn"),
+    MidiDrumKey(39, FrequencyBand.MID, DecayTime.NORMAL, "Hand clap", key_id="hcl"),
+    MidiDrumKey(40, FrequencyBand.MID, DecayTime.NORMAL, "Electric snare", key_id="esn"),
+    MidiDrumKey(41, FrequencyBand.LOW, DecayTime.NORMAL, "Low floor tom", key_id="lft"),
+    MidiDrumKey(42, FrequencyBand.HIGH, DecayTime.SHORT, "Closed hi-hat", key_id="chh"),
+    MidiDrumKey(43, FrequencyBand.LOW, DecayTime.NORMAL, "High floor tom", key_id="hft"),
+    MidiDrumKey(44, FrequencyBand.HIGH, DecayTime.NORMAL, "Pedal hi-hat", key_id="phh"),
+    MidiDrumKey(45, FrequencyBand.MID, DecayTime.NORMAL, "Low tom", key_id="ltm"),
+    MidiDrumKey(46, FrequencyBand.HIGH, DecayTime.LONG, "Open hi-hat", key_id="ohh"),
+    MidiDrumKey(47, FrequencyBand.MID, DecayTime.NORMAL, "Low mid tom", key_id="lmt"),
+    MidiDrumKey(48, FrequencyBand.MID, DecayTime.NORMAL, "High mid tom", key_id="hmt"),
+    MidiDrumKey(49, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 1", key_id="cr1"),
+    MidiDrumKey(50, FrequencyBand.MID, DecayTime.NORMAL, "High tom", key_id="htm"),
+    MidiDrumKey(51, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 1", key_id="rc1"),
+    MidiDrumKey(52, FrequencyBand.HIGH, DecayTime.LONG, "Chinese cymbal", key_id="chc"),
+    MidiDrumKey(53, FrequencyBand.HIGH, DecayTime.LONG, "Ride bell", key_id="rbl"),
+    MidiDrumKey(54, FrequencyBand.MID, DecayTime.NORMAL, "Tambourine", key_id="tmb"),
+    MidiDrumKey(55, FrequencyBand.HIGH, DecayTime.LONG, "Splash cymbal", key_id="spl"),
+    MidiDrumKey(56, FrequencyBand.MID, DecayTime.SHORT, "Cowbell", key_id="cwb"),
+    MidiDrumKey(57, FrequencyBand.HIGH, DecayTime.LONG, "Crash cymbal 2", key_id="cr2"),
+    MidiDrumKey(58, FrequencyBand.HIGH, DecayTime.LONG, "Vibraslap", key_id="vbs"),
+    MidiDrumKey(59, FrequencyBand.HIGH, DecayTime.LONG, "Ride cymbal 2", key_id="rc2"),
+    MidiDrumKey(60, FrequencyBand.MID, DecayTime.NORMAL, "Hi bongo", key_id="hbg"),
+    MidiDrumKey(61, FrequencyBand.MID, DecayTime.NORMAL, "Low bongo", key_id="lbg"),
+    MidiDrumKey(62, FrequencyBand.MID, DecayTime.NORMAL, "Muted high conga", key_id="mhc"),
+    MidiDrumKey(63, FrequencyBand.MID, DecayTime.NORMAL, "Open high conga", key_id="ohc"),
+    MidiDrumKey(64, FrequencyBand.MID, DecayTime.NORMAL, "Low conga", key_id="lcn"),
+    MidiDrumKey(65, FrequencyBand.MID, DecayTime.NORMAL, "High timbale", key_id="htb"),
+    MidiDrumKey(66, FrequencyBand.MID, DecayTime.NORMAL, "Low timbale", key_id="ltb"),
+    MidiDrumKey(67, FrequencyBand.MID, DecayTime.NORMAL, "High agogo", key_id="hgo"),
+    MidiDrumKey(68, FrequencyBand.MID, DecayTime.NORMAL, "Low agogo", key_id="lgo"),
+    MidiDrumKey(69, FrequencyBand.HIGH, DecayTime.NORMAL, "Cabasa", key_id="cbs"),
+    MidiDrumKey(70, FrequencyBand.HIGH, DecayTime.NORMAL, "Maracas", key_id="mcs"),
+    MidiDrumKey(71, FrequencyBand.MID, DecayTime.NORMAL, "Short whistle", key_id="swh"),
+    MidiDrumKey(72, FrequencyBand.MID, DecayTime.NORMAL, "Long whistle", key_id="lwh"),
+    MidiDrumKey(73, FrequencyBand.MID, DecayTime.NORMAL, "Short guiro", key_id="sgr"),
+    MidiDrumKey(74, FrequencyBand.MID, DecayTime.NORMAL, "Long guiro", key_id="lgr"),
+    MidiDrumKey(75, FrequencyBand.MID, DecayTime.SHORT, "Claves", key_id="clv"),
+    MidiDrumKey(76, FrequencyBand.MID, DecayTime.SHORT, "Hi wood block", key_id="hwb"),
+    MidiDrumKey(77, FrequencyBand.MID, DecayTime.SHORT, "Low wood block", key_id="lwb"),
+    MidiDrumKey(78, FrequencyBand.MID, DecayTime.NORMAL, "Muted cuica", key_id="mcu"),
+    MidiDrumKey(79, FrequencyBand.MID, DecayTime.NORMAL, "Open cuica", key_id="ocu"),
+    MidiDrumKey(80, FrequencyBand.MID, DecayTime.SHORT, "Muted triangle", key_id="mtr"),
+    MidiDrumKey(81, FrequencyBand.MID, DecayTime.LONG, "Open triangle", key_id="otr")
 ])  # type: MidiDrumMapping
 
 
@@ -2384,16 +2397,13 @@ class MidiRhythm(RhythmLoop):
         have a resolution property and can't have more than one track containing note events. The midi events map to
         rhythm properties like this:
 
-            midi.NoteOnEvent            ->  adds an onset to this rhythm
-            midi.TimeSignatureEvent *   ->  set the time signature of this rhythm
-            midi.SetTempoEvent          ->  sets the bpm of this rhythm
-            midi.EndOfTrackEvent **     ->  sets the duration of this rhythm (only if preserve_midi_duration is true)
+        * :class:`midi.NoteOnEvent`, adds an onset to this rhythm
+        * :class:`midi.TimeSignatureEvent`, set the time signature of this rhythm (required)
+        * :class:`midi.SetTempoEvent`, sets the bpm of this rhythm
+        * :class:`midi.EndOfTrackEvent`, sets the duration of this rhythm (only if preserve_midi_duration is true)
 
-                * required
-                ** required only if preserve_midi_duration is true
-
-        If preserve_midi_duration is false, the duration of this rhythm will be set to the first downbeat after the last
-        note position.
+        The `EndOfTrackEvent` is required if the `preserve_midi_duration` is set to `True`. If preserve_midi_duration is
+        `False`, the duration of this rhythm will be set to the first downbeat after the last note position.
 
         :param pattern: the midi pattern to load
         :param preserve_midi_duration: when true, the duration will be set to the position of the midi EndOfTrackEvent,
@@ -2803,7 +2813,7 @@ __all__ = [
     'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm', 'MidiRhythmCorpus',
 
     # MIDI drum mapping
-    'MidiDrumMapping', 'GMDrumMapping', 'FrequencyBand', 'DecayTime',
+    'MidiDrumMapping', 'GMDrumMapping', 'create_drum_mapping', 'FrequencyBand', 'DecayTime',
     'MidiDrumMappingReducer', 'FrequencyBandMidiDrumMappingReducer',
     'DecayTimeMidiDrumMappingReducer', 'UniquePropertyComboMidiDrumMappingReducer',
     'get_drum_mapping_reducer_implementation_names',
