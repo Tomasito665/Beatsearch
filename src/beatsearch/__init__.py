@@ -1,8 +1,10 @@
 import os
 import sys
 
+__version__ = "0.0.1.dev7"
 
-def find_beatsearch_project_dir(max_levels=5):
+
+def find_beatsearch_project_dir(max_levels: int = 5) -> str:
     cd = os.path.dirname(os.path.realpath(__file__))
 
     def check_directory(directory):
@@ -22,7 +24,6 @@ def find_beatsearch_project_dir(max_levels=5):
 
 
 BEATSEARCH_PROJECT_DIR = find_beatsearch_project_dir()
-
 if BEATSEARCH_PROJECT_DIR:
     sys.path.append(BEATSEARCH_PROJECT_DIR)
     from build_dependencies import Python3Midi, get_third_party_dir
