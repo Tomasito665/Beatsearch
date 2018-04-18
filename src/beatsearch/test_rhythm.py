@@ -1336,6 +1336,9 @@ class TestPolyphonicRhythmFactory(TestCase):
             time_signature=(4, 4), velocity=123, unit="eighth")
 
 
+# TODO Add test for rhythm loop factory
+
+
 class TestOnset(TestCase):
     def test_properties_equal_constructor_args(self):
         args = (123, 75)

@@ -811,6 +811,9 @@ class RhythmFactory(object, metaclass=ABCMeta):
     def __init__(self):
         raise Exception("Can't instantiate RhythmFactory. It is a utility class and only contains static methods.")
 
+    class BadFormat(Exception):
+        pass
+
     @classmethod
     @abstractmethod
     def from_string(
@@ -2160,6 +2163,148 @@ class RhythmLoop(PolyphonicRhythmImpl):
         super().__init__(**kwargs)
         self._name = ""
         self.set_name(name)
+
+    # noinspection PyPep8Naming
+    class create(PolyphonicRhythm.create):  # not intended like a class but like a namespace for factory methods
+        @staticmethod
+        def __track_name_generator(n: int) -> tp.Generator[str, None, None]:
+            for i in range(n):
+                yield "track %i" % n
+
+        @classmethod
+        def from_polyphonic_rhythm(cls, rhythm: PolyphonicRhythm, title: str = "untitled"):
+            """
+            Creates a rhythm loop from a polyphonic rhythm. Note that, as rhythm loops must have a duration of a
+            multiple of one measure, the duration of the loop might be different from the duration of the given rhythm,
+            to adjust to the nearest downbeat.
+
+            :param rhythm: polyphonic rhythm
+            :param title: rhythm loop title
+            :return: rhythm loop object
+            """
+
+            return RhythmLoop(
+                title,
+                tracks=rhythm.get_track_iterator(),
+                resolution=rhythm.get_resolution(),
+                bpm=rhythm.get_bpm(),
+                time_signature=rhythm.get_time_signature()
+            )
+
+        @classmethod
+        def from_string(
+                cls,
+                input_string: str,
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = (4, 4),
+                velocity: int = 100,
+                unit: UnitType = Unit.SIXTEENTH,
+                onset_character: str = "x",
+                *_,
+                title_underline_character: str = "=",
+                newline_character: str = "\n",
+                track_name_separator_character: str = ":",
+                **kwargs):  # type: () -> RhythmLoop
+            """
+            Creates a new rhythm loop from a multi-line string. The input string should contain the rhythm title and the
+            binary onset vectors (one per track). The rhythm title must appear on the first line and must be underlined.
+            For every track, a name and the binary onset vector must be given, separated by the track name separator
+            character.
+
+            Note that :class:`beatsearch.rhythm.RhythmLoop` must have a duration of an exact multiple of one measure.
+            This method will raise a ValueError if the duration of the binary onset vectors does not meet that
+            requirement (e.g., if given time signature 4/4 and a quaver step size, the length of the onset vector
+            strings must be 8=one measure, 16=two measures, 24=three measures, etc).
+
+            For example, given title underline character '=', onset character 'x' and track name separator
+            character ':', to create a simple rhythm loop titled "Cha cha cha", we could do:
+
+                PolyphonicRhythm.create.from_string(textwrap.dedent(\"""
+                           Cha cha cha
+                    ==========================
+                    cowbell:  x-x-x-x-x-x-x-x-
+                    stick:    --x--x----x--x--
+                    tom:      ------xx------xx
+                    kick:     ---x------------
+                \"""))
+
+            :param input_string:         The multi-line input string contains the loop title on the first line, the
+                                         title underline on the second line and track information on the remaining
+                                         lines. Each track is represented by a track string. Track strings are divided
+                                         into two parts: the track name and the binary onset vector whose length
+                                         determines the duration of the rhythm. Each onset character in the binary onset
+                                         will result in an onset. Drum loops must have a duration of a multiple of one
+                                         measure.
+            :param time_signature:       time signature of the rhythm as a (numerator, denominator) tuple or a
+                                         TimeSignature object, defaults to (4, 4)
+            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
+            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
+                                         "eighth") one element in the binary vector will represent one eighth note)
+            :param onset_character:      onset character (see onset_string)
+            :param title_underline_character: the title must be underlined with this character (defaults to '=')
+            :param newline_character:    newline character (defaults to '\n')
+            :param track_name_separator_character: the track string is split into the track name and binary onset vector
+                                                   on this character (defaults to ':')
+            :param kwargs:               unused
+
+            :return: drum loop object
+            """
+
+            input_string = input_string.strip()
+            input_string_lines = input_string.split(newline_character)
+
+            if len(input_string_lines) < 2:
+                raise cls.BadFormat()
+
+            title = input_string_lines[0].strip()
+            title_underline = input_string_lines[1].strip()
+
+            if not all(c == title_underline_character for c in title_underline):
+                raise cls.BadFormat()
+
+            polyphonic_rhythm = PolyphonicRhythm.create.from_string(
+                newline_character.join(input_string_lines[2:]),
+                time_signature=time_signature,
+                velocity=velocity,
+                unit=unit,
+                onset_character=onset_character,
+                **kwargs
+            )
+
+            return cls.from_polyphonic_rhythm(polyphonic_rhythm, title)
+
+        @classmethod
+        def from_binary_vector(
+                cls,
+                binary_vector_tracks: tp.Sequence[tp.Sequence[tp.Any]],
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+                velocity: int = 100,
+                unit: UnitType = Unit.SIXTEENTH,
+                *_, track_names: tp.Sequence[str] = None, title: str = "untitled",
+                **kwargs):  # type: () -> PolyphonicRhythmImpl
+            """
+            Creates a new polyphonic rhythm from a sequence containing one binary onset vector per track. Track names
+            are optional and are given to the track_names parameter.
+
+            :param binary_vector_tracks: sequence holding one binary onset vector per track
+            :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
+            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
+            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
+                                         "eighth") one character will represent one eighth note)
+            :param track_names:          names of the tracks
+            :param title:                rhythm loop title
+            :param kwargs:               unused
+            :return: polyphonic rhythm object
+            """
+
+            polyphonic_rhythm = PolyphonicRhythm.create.from_binary_vector(
+                binary_vector_tracks,
+                time_signature=time_signature,
+                velocity=velocity,
+                unit=unit,
+                track_names=track_names
+            )
+
+            return cls.from_polyphonic_rhythm(polyphonic_rhythm, title)
 
     def set_duration_in_ticks(self, requested_duration):
         """
