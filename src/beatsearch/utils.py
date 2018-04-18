@@ -2,6 +2,7 @@
 import os
 import sys
 import collections
+import numpy as np
 import typing as tp
 from time import time
 from abc import ABCMeta, abstractmethod
@@ -342,6 +343,105 @@ def normalize_directory(directory):
     return directory
 
 
+def generate_unique_abbreviation(
+        label: str,
+        max_len: int = 3,
+        taken_abbreviations: tp.Optional[tp.Iterable[str]] = None,
+        dictionary: tp.Union[tp.Tuple[str], str] = "cdfghjklmnpqrstvxz"
+):
+    """
+    Returns a unique abbreviation of the given label.
+
+    :param label: label to abbreviate
+    :param max_len: maximum length of the abbreviation
+    :param taken_abbreviations: abbreviations that are already taken
+    :param dictionary: dictionary of characteristic characters (defaults to consonants)
+    :return: abbreviation of given text
+    """
+
+    if not label:
+        raise ValueError
+
+    label = label.lower()
+    taken_abbreviations = taken_abbreviations or set()
+
+    if len(label) <= max_len and label not in taken_abbreviations:
+        return label
+
+    # filter out the characters which are not in the given dictionary (or keep the name if
+    # it doesn't contain any characters of the given dictionary)
+    essence = "".join(filter(lambda c: c in dictionary, label)) or label
+
+    if len(essence) < max_len and essence not in taken_abbreviations:
+        return essence
+
+    key_chars = list(essence[i] for i in sorted(set(np.linspace(
+        0, len(essence), max_len, endpoint=False, dtype=int))))
+
+    abbreviation = "".join(key_chars)
+
+    while abbreviation in taken_abbreviations:
+        # append a character if the max length allows it
+        if len(key_chars) < max_len:
+            key_chars.append("0")
+        else:
+            last_char = key_chars[-1]
+            key_chars[-1] = chr(ord(last_char) + 1)
+        abbreviation = "".join(key_chars)
+
+    return abbreviation
+
+
+def generate_abbreviations(
+        labels: tp.Iterable[str],
+        max_abbreviation_len: int = 3,
+        dictionary: tp.Union[tp.Tuple[str], str] = "cdfghjklmnpqrstvxz"):
+    """
+    Returns unique abbreviations for the given labels. Generates the abbreviations with
+    :func:`beatsearch.utils.generate_unique_abbreviation`.
+
+    :param labels: labels to abbreviate
+    :param max_abbreviation_len: maximum length of the abbreviations
+    :param dictionary: characteristic characters (defaults to consonants)
+    :return: abbreviations of the given labels
+    """
+
+    abbreviations = list()
+
+    for label in labels:
+        abbreviations.append(generate_unique_abbreviation(
+            label,
+            max_len=max_abbreviation_len,
+            taken_abbreviations=abbreviations,
+            dictionary=dictionary
+        ))
+
+    return abbreviations
+
+
+Point2D = collections.namedtuple("Point2D", ["x", "y"])
+
+Dimensions2D = collections.namedtuple("Dimensions2D", ["width", "height"])
+
+
+class Rectangle2D(collections.namedtuple("Rectangle2D", ["x", "y", "width", "height"])):
+    @property
+    def x_bounds(self):
+        return self.x, self.x + self.width
+
+    @property
+    def y_bounds(self):
+        return self.y, self.y + self.height
+
+    @property
+    def position(self) -> Point2D:
+        return Point2D(x=self.x, y=self.y)
+
+    @property
+    def dimensions(self) -> Dimensions2D:
+        return Dimensions2D(width=self.width, height=self.height)
+
+
 class Quantizable(object, metaclass=ABCMeta):
     @property
     def quantize_enabled(self) -> bool:
@@ -365,5 +465,7 @@ __all__ = [
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'get_beatsearch_dir',
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
-    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable'
+    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable',
+    'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
+    'Rectangle2D'
 ]

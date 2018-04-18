@@ -12,7 +12,7 @@ from itertools import cycle, repeat
 from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram
-from beatsearch.utils import Quantizable
+from beatsearch.utils import Quantizable, generate_abbreviations, Rectangle2D, Dimensions2D
 
 # make room for the labels
 from matplotlib import rcParams
@@ -52,6 +52,79 @@ def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis='x'):  # T
     axes.set_axisbelow(True)
     axes.grid(which='minor', alpha=0.2, axis=axis)
     axes.grid(which='major', alpha=0.5, axis=axis)
+
+
+@parse_unit_argument
+def plot_box_notation_grid(
+        axes: plt.Axes,
+        rhythm: RhythmLoop,
+        unit: UnitType,
+        textbox_width: int = 2,
+        line_width: int = 1,
+        line_color: str = "black"
+):
+    # hide axis
+    for axis in [axes.xaxis, axes.yaxis]:
+        axis.set_ticklabels([])
+        axis.set_visible(False)
+
+    grid_box = Rectangle2D(
+        width=rhythm.get_duration(unit, ceil=True),
+        height=rhythm.get_track_count(),
+        x=0, y=0
+    )
+
+    text_box = Rectangle2D(
+        width=textbox_width, height=grid_box.height,
+        x=grid_box.x - textbox_width, y=grid_box.y
+    )
+
+    container = Rectangle2D(
+        width=(text_box.width + grid_box.width),
+        height=grid_box.height,
+        x=text_box.x, y=text_box.y
+    )
+
+    # draw main box
+    axes.add_artist(plt.Rectangle(
+        container.position, container.width, container.height,
+        fill=False, edgecolor=line_color, linewidth=line_width
+    ))
+
+    # add horizontal lines
+    for track_ix in range(1, grid_box.height):
+        axes.add_artist(plt.Line2D(
+            container.x_bounds, [track_ix, track_ix],
+            color=line_color, linewidth=line_width
+        ))
+
+    # add vertical lines
+    for pulse in range(grid_box.width):
+        axes.add_artist(plt.Line2D(
+            [pulse, pulse], [grid_box.y_bounds],
+            color=line_color, linewidth=line_width
+        ))
+
+    track_names = tuple(t.name for t in rhythm.get_track_iterator())
+    track_ids = generate_abbreviations(track_names, max_abbreviation_len=3)
+    track_y_positions = dict()
+    text_x = text_box.x + (text_box.width / 2)
+
+    # draw track name ids
+    for track_ix, [track_name, track_id] in enumerate(zip(track_names, track_ids)):
+        axes.text(
+            text_x, track_ix + 0.5, track_id,
+            verticalalignment="center", horizontalalignment="center"
+        )
+
+        track_y_positions[track_name] = track_ix
+
+    return {
+        'grid_box': grid_box,
+        'text_box': text_box,
+        'container': container,
+        'track_y_data': track_y_positions
+    }
 
 
 class Orientation(enum.Enum):
@@ -219,6 +292,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             figure_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
             legend_kwargs: tp.Dict[str, tp.Any] = None,
             subplot_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
+            show: bool = False
     ) -> plt.Figure:
         """
         Plots the the given drum loop on a matplotlib figure and returns the figure object.
@@ -229,6 +303,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
                               figure has been provided
         :param subplot_kwargs: keyword arguments for the call to Figure.add_subplot
         :param legend_kwargs: keyword arguments for the call to Figure.legend
+        :param show: when set to True, matplotlib.pyplot.show() will be called automatically from this method
         :return: matplotlib figure object
         """
 
@@ -285,6 +360,10 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
         }
 
         figure.legend(subplots_handles, track_names, **legend_kwargs)
+
+        if show:
+            plt.show()
+
         return figure
 
     def get_feature_extractor(self, feature_extractor_name):
@@ -552,67 +631,41 @@ class BoxNotation(RhythmLoopPlotter):
 
         self.line_width = 1
         self.line_color = "black"
-        self.rel_padx = 0.25, 0.05
-        self.rel_pady = 0.15, 0.15
+        self.text_box_width = 2
+        self.rel_pad_x = 0.15
 
     @classmethod
     def get_plot_type_name(cls):
         return cls.PLOT_TYPE_NAME
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
-        # axes.axis("equal")  # avoid stretching the aspect ratio
+        box_notation_grid_info = plot_box_notation_grid(
+            axes, rhythm_loop, self.unit, self.text_box_width,
+            self.line_width, self.line_color)
 
-        for axis in [axes.xaxis, axes.yaxis]:
-            axis.set_ticklabels([])
-            axis.set_visible(False)
+        container = box_notation_grid_info['container']  # type: Rectangle2D
 
-        line_color = self.line_color
-        line_width = self.line_width
+        # get viewport dimensions
+        x_padding = self.rel_pad_x * box_notation_grid_info['container'].width
+        x_bounds = [container.x_bounds[0] - x_padding, container.x_bounds[1] + x_padding]
+        y_padding = abs(x_bounds[0] - x_bounds[1]) - container.height
+        y_bounds = [container.y_bounds[0] - y_padding, container.y_bounds[1] + y_padding]
 
-        main_width = kw['n_pulses'] + 1
-        main_height = kw['n_tracks']
-
-        padx = tuple(rel_pad * main_width for rel_pad in self.rel_padx)
-        pady = tuple(rel_pad * main_height for rel_pad in self.rel_pady)
-
-        # reversed Y axis so that 0, 0 is in the upper left corner
-        axes.set_ylim(main_height + pady[1], 0 - pady[0])
-        axes.set_xlim(0 - padx[0], main_width + padx[1])
-
-        # main rectangle (containing everything but the track names)
-        axes.add_artist(plt.Rectangle(
-            [0, 0], main_width, main_height, fill=False,
-            edgecolor=line_color, linewidth=line_width
-        ))
-
-        # add horizontal lines
-        for track_ix in range(1, kw['n_tracks']):
-            axes.add_artist(plt.Line2D(
-                [0, main_width], [track_ix, track_ix],
-                color=line_color, linewidth=line_width
-            ))
-
-        # add vertical lines
-        for pulse in range(kw['n_pulses'] + 1):
-            axes.add_artist(plt.Line2D(
-                [pulse, pulse], [0, main_height],
-                color=line_color, linewidth=line_width
-            ))
-
-        # add track names
-        for track_ix, track in enumerate(rhythm_loop.get_track_iterator()):
-            axes.text(
-                0, track_ix + 0.5, "%s " % track.get_name(),  # one ' ' character spacing
-                verticalalignment="center", horizontalalignment="right"
-            )
+        # setup viewport
+        axes.axis("equal")  # equal axis for perfectly "squared" squares.. :)
+        axes.set_xlim(*x_bounds)
+        axes.set_ylim(*reversed(y_bounds))  # reversed to have (0, 0) in upper-left position
 
     def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
         onset_positions = self.get_feature_extractor("onset_positions").process(rhythm_track)
+        n_steps = rhythm_track.get_duration(self.unit)
         track_ix = kw['track_ix']
 
-        for onset in onset_positions:
+        # filter out onsets whose position might have been pushed out of the grid (due to
+        # a low rhythm plotter unit)
+        for onset_pos in filter(lambda pos: pos < n_steps, onset_positions):
             axes.add_artist(plt.Rectangle(
-                [onset, track_ix],
+                [onset_pos, track_ix],
                 width=1, height=1, facecolor=kw['color'],
                 edgecolor="black", linewidth=0.75
             ))
