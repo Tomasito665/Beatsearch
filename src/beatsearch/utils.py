@@ -1,6 +1,7 @@
 # coding=utf-8
 import os
 import sys
+import logging
 import collections
 import numpy as np
 import typing as tp
@@ -460,6 +461,41 @@ class Quantizable(object, metaclass=ABCMeta):
         raise NotImplementedError
 
 
+def get_logging_level_by_name(level_name: str) -> int:
+    """
+    Returns the numerical level of the given logging level, which can then be passed to :func:`logging.basicConfig`. The
+    given level name must be one of:
+
+        * DEBUG
+        * INFO
+        * WARNING
+        * ERROR
+        * CRITICAL
+
+    :param level_name: one of ['INFO', 'DEBUG', 'WARNING', 'ERROR', 'CRITICAL']
+    :return: numeric value of given logging level
+    """
+
+    numeric_level = getattr(logging, level_name.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError("Invalid log level: %s, choose between: %s" % (level_name, [
+            "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+        ]))
+    return numeric_level
+
+
+def set_logging_level_by_name(level_name: str) -> None:
+    """
+    Sets the logging level of the :module:`logging` module by its logging name.
+
+    :param level_name: interpreted as for :func:`beatsearch.utils.get_logging_level_by_name`
+    :return: None
+    """
+
+    level = get_logging_level_by_name(level_name)
+    logging.basicConfig(level=level)
+
+
 __all__ = [
     'merge_dicts', 'format_timespan', 'print_progress_bar', 'friendly_named_class',
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'get_beatsearch_dir',
@@ -467,5 +503,5 @@ __all__ = [
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
     'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable',
     'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
-    'Rectangle2D'
+    'Rectangle2D', 'get_logging_level_by_name', 'set_logging_level_by_name'
 ]

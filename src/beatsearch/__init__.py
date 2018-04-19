@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 
 __version__ = "0.0.1.dev7"
 
@@ -31,7 +32,7 @@ if BEATSEARCH_PROJECT_DIR:
     python3_midi = Python3Midi(get_third_party_dir(BEATSEARCH_PROJECT_DIR))
 
     if not python3_midi.has_build():
-        print("Python3Midi hasn't built yet, please run build_dependencies.py")
+        logging.critical("Python3Midi hasn't built yet, please run build_dependencies.py")
         sys.exit(-1)
 
     try:

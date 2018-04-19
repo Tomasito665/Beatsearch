@@ -1,10 +1,15 @@
 import os
 import uuid
+import logging
+import argparse
 import configparser
 import typing as tp
 from contextlib import contextmanager
 from beatsearch.utils import get_beatsearch_dir
 from beatsearch.rhythm import get_drum_mapping_reducer_implementation
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BSConfigSettingHandle(object):
@@ -51,7 +56,7 @@ class BSConfigSettingHandle(object):
             try:
                 value = self._to_type(value)
             except Exception as e:
-                print("couldn't convert \"%s\" with \"%s\"" % (str(value), self._to_type))
+                LOGGER.error("couldn't convert \"%s\" with \"%s\"" % (str(value), self._to_type))
                 raise e
 
         if self._validate and not self._validate(value):
@@ -334,4 +339,11 @@ class BSConfig(object):
         return parser.get(BSConfigSection.SERIALIZED_RHYTHM_CORPORA, midi_directory, fallback=None)
 
 
-__all__ = ['BSConfigSettingHandle', 'BSConfigSection', 'BSConfig']
+def get_argv_parser(description: str = "Beatsearch app") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--log", type=str, default="WARNING",
+                        help="Logging level, one of: [DEBUG, INFO, WARNING (=default), ERROR, CRITICAL]")
+    return parser
+
+
+__all__ = ['BSConfigSettingHandle', 'BSConfigSection', 'BSConfig', 'get_argv_parser']

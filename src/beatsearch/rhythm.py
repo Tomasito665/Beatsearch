@@ -1,10 +1,10 @@
 # coding=utf-8
 import os
-import sys
 import math
 import enum
 import uuid
 import pickle
+import logging
 import inspect
 import textwrap
 import itertools
@@ -25,6 +25,9 @@ from beatsearch.utils import (
     make_dir_if_not_exist
 )
 import midi  # after beatsearch import
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class UnitError(Exception):
@@ -2582,7 +2585,7 @@ class MidiRhythm(RhythmLoop):
                 midi_pitch = msg.get_pitch()  # type: int
                 mapping_key = mapping.get_key_by_midi_pitch(midi_pitch)
                 if mapping_key is None:
-                    print("Unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.get_name()))
+                    LOGGER.warning("Skipping unknown midi key: %i (Mapping = %s)" % (midi_pitch, mapping.get_name()))
                     continue
                 track_name = get_track_name(mapping_key)
                 midi_note_events[track_name].append(msg)
@@ -2694,7 +2697,7 @@ class MidiRhythmCorpus(object):
         elif path:
             for arg_name in ("rhythm_resolution", "midi_mapping_reducer"):
                 if arg_name in kwargs:
-                    print("Ignoring named parameter %s. Loading corpus from cache.", file=sys.stderr)
+                    LOGGER.debug("Ignoring named parameter %s. Loading corpus from cache.")
             self.load_from_cache_file(path)
 
     def load_from_directory(self, midi_root_dir: str):
@@ -2747,9 +2750,9 @@ class MidiRhythmCorpus(object):
             try:
                 rhythm = MidiRhythm(f_path, midi_mapping_reducer_cls=mapping_reducer)
                 rhythm.set_resolution(resolution)
-                print("%s: OK" % f_path)
+                LOGGER.info("%s: OK" % f_path)
             except (TypeError, ValueError) as e:
-                print("%s: ERROR, %s" % (f_path, str(e)))
+                LOGGER.warning("%s: ERROR, %s" % (f_path, str(e)))
                 continue
 
             m_time = os.path.getmtime(f_path)

@@ -1,5 +1,6 @@
 import os
 import socket
+import logging
 import threading
 from collections import namedtuple
 
@@ -16,9 +17,10 @@ from tempfile import TemporaryFile
 from beatsearch_dirs import BS_ROOT, BS_LIB
 sys.path.append(BS_LIB)
 from beatsearch.app.control import BSController, BSRhythmPlayer, BSMidiRhythmLoader
-from beatsearch.rhythm import MidiRhythm, PolyphonicRhythmImpl, TimeSignature, Unit, MidiDrumMappingReducer
+from beatsearch.rhythm import MidiRhythm, PolyphonicRhythm, TimeSignature, Unit, MidiDrumMappingReducer
 from beatsearch.app.view import BSApp
-from beatsearch.utils import get_default_beatsearch_rhythms_fpath
+from beatsearch.app.config import get_argv_parser
+from beatsearch.utils import set_logging_level_by_name
 # noinspection PyUnresolvedReferences
 import midi
 # noinspection PyUnresolvedReferences
@@ -26,13 +28,16 @@ ReaperApi = Reaper
 
 
 def main(input_track_name, output_track_name):
+    args = get_argv_parser("Beatsearch Reaper Plugin").parse_args()
+    set_logging_level_by_name(args.log)
+
     player = ReaperRhythmPlayer()
     rhythm_loader = ReaperMidiRhythmLoader()
 
     def find_reaper_thread_target():
         try:
             with ReaperApi as api:
-                print("Connected to Reaper")
+                logging.debug("Connected to Reaper")
 
                 try:
                     bs_input_track = ReaperUtils.find_track_by_name(api, input_track_name)
@@ -51,14 +56,14 @@ def main(input_track_name, output_track_name):
             if not app.is_closed:
                 app.destroy()
 
-    print("Trying to connect to Reaper...")
+    logging.debug("Trying to connect to Reaper...")
     threading.Thread(target=find_reaper_thread_target).start()
 
-    print("Initializing controller...")
+    logging.debug("Initializing controller...")
     controller = BSController(rhythm_player=player)
     controller.register_rhythm_loader(rhythm_loader)
 
-    print("Initializing view...")
+    logging.debug("Initializing view...")
     app = BSApp(controller, baseName="beatsearch-reaper-plugin")
     app.mainloop()
 
@@ -73,7 +78,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         self._end_pos = -1                   # type: float
         self._end_pos_first_rhythm = -1      # type: float
         self._output_track = output_track    # type: str
-        self._current_rhythms = []           # type: tp.List[PolyphonicRhythmImpl]
+        self._current_rhythms = []           # type: tp.List[PolyphonicRhythm]
         self._is_playing = False             # type: bool
 
         if output_track is not None:
@@ -128,7 +133,7 @@ class ReaperRhythmPlayer(BSRhythmPlayer):
         return self._is_playing
 
     def set_repeat(self, enabled: bool) -> None:
-        print("ReaperRhythmPlayer.set_repeat() not available. Repeat is always enabled.", file=sys.stderr)
+        logging.error("ReaperRhythmPlayer.set_repeat() not available. Repeat is always enabled.")
 
     def get_repeat(self) -> bool:
         return True
@@ -279,7 +284,7 @@ class ReaperUtils:
         """
 
         n_media_items, i = reaper_api.GetTrackNumMediaItems(track_id), 0
-        print("Iterating over track %s, which has %i media items" % (track_id, n_media_items))
+        logging.debug("Iterating over track %s, which has %i media items" % (track_id, n_media_items))
         while i < n_media_items:
             yield reaper_api.GetTrackMediaItem(track_id, i)
             i += 1

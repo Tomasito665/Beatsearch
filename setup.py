@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 from setuptools import setup
 
 sys.path.insert(0, os.path.join(".", "src"))
@@ -12,11 +13,11 @@ except ModuleNotFoundError:
     build_dependencies = False
 
 if build_dependencies and not Python3Midi(get_third_party_dir()).has_build():
-    print("Python3Midi hasn't built yet, please run build_dependencies.py")
+    logging.critical("Python3Midi hasn't built yet, please run build_dependencies.py")
     sys.exit(-1)
 
 with open("README.rst") as f:
-    print("Reading README.rst")
+    logging.debug("Reading README.rst")
     long_desc = f.read()
 
 setup(
