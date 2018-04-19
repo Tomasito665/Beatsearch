@@ -7,7 +7,7 @@ import numpy as np
 import typing as tp
 from time import time
 from abc import ABCMeta, abstractmethod
-from inspect import isclass
+from inspect import isclass, isabstract
 from functools import wraps, reduce
 from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
 
@@ -496,6 +496,28 @@ def set_logging_level_by_name(level_name: str) -> None:
     logging.basicConfig(level=level)
 
 
+def find_all_subclasses(cls: tp.Type) -> tp.List[tp.Type]:
+    """
+    Recursively finds all subclasses of the given class and returns them as a list.
+
+    :param cls: class to find the subclasses of
+    :return: list of subclasses of the given class
+    """
+
+    return cls.__subclasses__() + [g for s in cls.__subclasses__() for g in find_all_subclasses(s)]
+
+
+def find_all_concrete_subclasses(cls: tp.Type) -> tp.List[tp.Type]:
+    """
+    Recursively finds all non-abstract subclasses of the given class and returns them as a list.
+
+    :param cls: class to find the concrete subclasses of
+    :return: list of non-abstract subclasses of the given class
+    """
+
+    return list(filter(lambda _cls: not isabstract(_cls), find_all_subclasses(cls)))
+
+
 __all__ = [
     'merge_dicts', 'format_timespan', 'print_progress_bar', 'friendly_named_class',
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'get_beatsearch_dir',
@@ -503,5 +525,6 @@ __all__ = [
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
     'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable',
     'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
-    'Rectangle2D', 'get_logging_level_by_name', 'set_logging_level_by_name'
+    'Rectangle2D', 'get_logging_level_by_name', 'set_logging_level_by_name', 'find_all_subclasses',
+    'find_all_concrete_subclasses'
 ]

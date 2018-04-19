@@ -387,7 +387,7 @@ class TimeSignature(object):
         return f(unit, root_weight)
 
     @parse_unit_argument
-    def get_natural_duration_map(self, unit: UnitType, trim_to_pulse: bool = True):
+    def get_natural_duration_map(self, unit: UnitType, trim_to_pulse: bool = True) -> tp.List[int]:
         """Returns the maximum note durations on each metrical position as multiples of the given unit
 
         Returns a list containing the maximum note duration initiated at each metrical position. The returned durations
