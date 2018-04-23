@@ -242,7 +242,19 @@ class BSConfig(object):
             lambda reducer: "None" if reducer is None else reducer.__name__
         )
 
-        for setting in (self.midi_root_directory, self.rhythm_resolution, self.mapping_reducer):
+        self.midi_batch_export_directory = BSConfigSettingHandle(
+            BSConfigSection.DEFAULT, "midi_batch_export_directory", "", str,
+            validate=lambda val: not val or os.path.isdir(val)
+        )
+
+        self.midi_batch_export_rhythms_to_export = BSConfigSettingHandle(
+            BSConfigSection.DEFAULT, "midi_batch_export_rhythms", "all", str,
+            validate=lambda val: val in ["all", "selection"]
+        )
+
+        for setting in (self.midi_root_directory, self.rhythm_resolution,
+                        self.mapping_reducer, self.midi_batch_export_directory,
+                        self.midi_batch_export_rhythms_to_export):
             setting.config_parser = self._config_parser
 
         # If there already exists an ini file, load that in

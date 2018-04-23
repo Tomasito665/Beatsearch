@@ -5,6 +5,7 @@ from functools import wraps
 import typing as tp
 import numpy as np
 import threading
+import logging
 from sortedcollections import OrderedSet
 from beatsearch.rhythm import (
     RhythmLoop,
@@ -21,6 +22,10 @@ from beatsearch.metrics import (
 )
 from beatsearch.app.config import BSConfig
 from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, Quantizable
+import midi
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_rhythm_corpus(config: BSConfig) -> MidiRhythmCorpus:
@@ -724,6 +729,37 @@ class BSController(object):
             raise ValueError("No rhythm loader registered of type \"%s\"" % loader_type)
 
         return loader
+
+    def export_rhythms_as_midi(self, export_directory: str, rhythms: tp.Union[tp.Sequence[int], str]):
+        """
+        Exports rhythms as MIDI files to the given export directory. The rhythms can be given in two ways:
+
+        * as a sequence of rhythm indices
+        * as either "all" for all rhythms in the corpus or "selection" to export the currently selected rhythms
+
+        :param export_directory: the midi files will be saved in this directory
+        :param rhythms: either a sequence of rhythm indices or "all" or "selection"
+        :return: None
+        """
+
+        if isinstance(rhythms, str):
+            if rhythms == "all":
+                n_rhythms = self.get_rhythm_count()
+                rhythm_indices = range(n_rhythms)
+            elif rhythms == "selection":
+                rhythm_indices = self.get_rhythm_selection()
+            else:
+                raise ValueError("Unknown rhythms wildcard '%s', please choose between ['all', 'selection'] "
+                                 "or provide a sequence with rhythm indices" % rhythms)
+        else:
+            rhythm_indices = rhythms
+
+        for rhythm_ix in rhythm_indices:
+            rhythm = self.get_rhythm_by_index(rhythm_ix)
+            fpath = os.path.join(export_directory, "%s.mid" % rhythm.get_name())
+            midi_pattern = rhythm.as_midi_pattern()
+            LOGGER.info("Saving rhythm to: %s" % fpath)
+            midi.write_midifile(fpath, midi_pattern)
 
     def bind(self, action, callback):
         """

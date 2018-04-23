@@ -68,6 +68,7 @@ class BSAppWindow(tk.Toplevel, BSAppWidgetMixin):
     def __init__(self, app, cnf=None, **kwargs):
         tk.Toplevel.__init__(self, master=app, cnf=cnf or dict(), **kwargs)
         BSAppWidgetMixin.__init__(self, app)
+        self.bind("<Escape>", eat_args(self.destroy))
 
 
 class BSMidiFileRhythmLoader(BSMidiRhythmLoader):
@@ -689,6 +690,11 @@ class BSMainMenu(tk.Menu, object):
             command=lambda: self.on_request_show_settings_window(),
             accelerator="Ctrl+,"
         )
+        f_menu.add_command(
+            label="MIDI Batch Export",
+            command=lambda: self.on_request_show_midi_batch_export_window(),
+            accelerator="Ctrl+Shift+E"
+        )
         f_menu.add_separator()
         f_menu.add_command(
             label="Exit",
@@ -696,6 +702,7 @@ class BSMainMenu(tk.Menu, object):
         )
         self.add_cascade(label="File", menu=f_menu)
         self._on_show_settings_window_request = no_callback
+        self._on_show_midi_batch_export_window_request = no_callback
         self._on_request_exit = no_callback
 
     @property
@@ -717,6 +724,16 @@ class BSMainMenu(tk.Menu, object):
         if not callable(callback):
             raise TypeError("Expected callable but got \"%s\"" % str(callback))
         self._on_show_settings_window_request = callback
+
+    @property
+    def on_request_show_midi_batch_export_window(self) -> tp.Callable:
+        return self._on_show_midi_batch_export_window_request
+
+    @on_request_show_midi_batch_export_window.setter
+    def on_request_show_midi_batch_export_window(self, callback: tp.Callable):
+        if not callable(callback):
+            raise TypeError("Expected callable but got \"%s\"" % str(callback))
+        self._on_show_midi_batch_export_window_request = callback
 
 
 class BSSettingsWindow(BSAppWindow):
@@ -817,10 +834,11 @@ class BSSettingsWindow(BSAppWindow):
     class RhythmsRootDirInput(Input):
         NAME = "Rhythms root directory"
 
-        def __init__(self, *args, **kw):
+        def __init__(self, *args, dir_dialog_title: str = "Choose rhythm directory", **kw):
             super().__init__(*args, **kw)
             self._var_root_dir = tk.StringVar()
             self._container = tk.Frame(self.master)
+            self._dir_dialog_title = dir_dialog_title
             tk.Entry(self._container, textvariable=self._var_root_dir).pack(side=tk.LEFT, fill=tk.X, expand=True)
             tk.Button(self._container, text="Browse", command=self._on_btn_browse, width=12)\
                 .pack(side=tk.RIGHT, padx=(3, 0))
@@ -851,7 +869,7 @@ class BSSettingsWindow(BSAppWindow):
 
             # NOTE: askdirectory returns the path with forward slashes, even on Windows!
             directory = tkinter.filedialog.askdirectory(
-                title="Choose rhythm directory",
+                title=self._dir_dialog_title,
                 parent=self.master,
                 initialdir=current_root_dir
             )
@@ -966,7 +984,6 @@ class BSSettingsWindow(BSAppWindow):
         btn_ok = tk.Button(bottom_btn_bar, text="OK", command=self._handle_ok)
         btn_cancel = tk.Button(bottom_btn_bar, text="Cancel", command=self.destroy)
         btn_apply = tk.Button(bottom_btn_bar, text="Apply", command=self._handle_apply, state=tk.DISABLED)
-        self.bind("<Escape>", eat_args(self.destroy))
 
         buttons = (btn_ok, btn_cancel, btn_apply)
         largest_btn_text = max(len(btn.cget("text")) for btn in buttons)
@@ -1032,6 +1049,142 @@ class BSSettingsWindow(BSAppWindow):
 
     def _update_btn_apply_state(self, _=None):
         self._btn_apply.config(state=tk.NORMAL if self._settings_changed() else tk.DISABLED)
+
+
+class BSMidiBatchExportWindow(BSAppWindow):
+    TITLE = "MIDI Batch Export"
+
+    class MidiExportDirectory(BSSettingsWindow.RhythmsRootDirInput):
+        NAME = "MIDI Export Directory"
+
+        def __init__(self, *args, **kw):
+            super().__init__(*args, dir_dialog_title="MIDI Export Directory", **kw)
+
+        @classmethod
+        def get_name(cls) -> str:
+            return cls.NAME
+
+        def reset(self, config: BSConfig):
+            export_dir = config.midi_batch_export_directory.get()
+            self.get_variable().set(export_dir)
+
+    class RhythmsToExport(BSSettingsWindow.Input):
+        NAME = "Rhythms to export"
+
+        OPTIONS = OrderedDict([
+            ("All rhythms", "all"),
+            ("Only selected rhythms", "selection")
+        ])
+
+        def __init__(self, master: tk.Widget):
+            super().__init__(master)
+            self._var_rhythms = tk.StringVar()
+            self._combobox = ttk.Combobox(master, values=tuple(self.OPTIONS.keys()),
+                                          state="readonly", textvariable=self._var_rhythms)
+            self._combobox.current(0)
+
+        @classmethod
+        def get_name(cls) -> str:
+            return cls.NAME
+
+        def get_widget(self) -> tk.Widget:
+            return self._combobox
+
+        def get_variable(self) -> tkinter.Variable:
+            return self._var_rhythms
+
+        def get_value(self):
+            label = self._var_rhythms.get()
+            return self.OPTIONS[label]
+
+        def check_input(self) -> None:
+            value = self.get_value()
+            if value not in self.OPTIONS.values():
+                raise self.InvalidInput("Unknown option: %s. Choose between: %s" % (value, self.OPTIONS.values()))
+
+        def reset(self, config: BSConfig):
+            value = config.midi_batch_export_rhythms_to_export.get()
+            label = next(l for l, v in self.OPTIONS.items() if v == value)
+            self._var_rhythms.set(label)
+
+    def __init__(self, app, min_width=360, min_height=60, **kwargs):
+        super().__init__(app, **kwargs)
+
+        self.wm_title(self.TITLE)
+        self.minsize(min_width, min_height)
+        self.resizable(False, False)
+
+        config = app.controller.get_config()
+        main_container = tk.Frame(self)
+        main_container.pack(fill=tk.BOTH, padx=6, pady=6)
+
+        self._inputs = {
+            self.RhythmsToExport: None,
+            self.MidiExportDirectory: None
+        }  # type: tp.Dict[tp.Type[BSSettingsWindow.Input], BSSettingsWindow.Input]
+
+        self._initial_values = {}
+
+        for input_field_cls in self._inputs.keys():
+            input_container = tk.Frame(main_container)
+            input_field_obj = input_field_cls(input_container)
+            input_field_obj.reset(config)
+            self._initial_values[input_field_cls] = input_field_obj.get_value()
+            tk.Label(input_container, text=input_field_obj.get_name(), anchor=tk.W).pack(fill=tk.X)
+            input_field_obj.get_widget().pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+            input_container.pack(fill=tk.X)
+            self._inputs[input_field_cls] = input_field_obj
+
+        bottom_btn_bar = tk.Frame(self)
+        btn_export = tk.Button(bottom_btn_bar, text="Export", command=self._handle_ok, width=15)
+        btn_cancel = tk.Button(bottom_btn_bar, text="Cancel", command=self.destroy)
+        btn_width = max(len(btn.cget("text")) for btn in (btn_export, btn_cancel))
+
+        for btn in reversed([btn_export, btn_cancel]):
+            btn.configure(width=btn_width)
+            btn.pack(side=tk.RIGHT, padx=(0, 3))
+
+        bottom_btn_bar.pack(side=tk.BOTTOM, expand=True, fill=tk.X, padx=4, pady=4)
+        self._on_batch_export_request = no_callback
+
+    def _handle_ok(self):
+        controller = self.controller
+        config = controller.get_config()
+        inputs = self._inputs
+
+        for inp in inputs.values():
+            try:
+                inp.check_input()
+            except BSSettingsWindow.Input.InvalidInput as e:
+                messagebox.showerror(
+                    parent=self,
+                    title=inp.get_name(),
+                    message=str(e)
+                )
+                return False
+
+        export_dir = inputs[self.MidiExportDirectory].get_value()
+        rhythms_to_export = inputs[self.RhythmsToExport].get_value()
+
+        # export the rhythms
+        controller.export_rhythms_as_midi(export_dir, rhythms_to_export)
+
+        # update the "default" midi batch export directory every time
+        # that a midi batch export is performed
+        config.midi_batch_export_directory.set(export_dir)
+        config.save()
+
+        self.destroy()
+
+    @property
+    def on_request_batch_export(self):
+        return self._on_batch_export_request
+
+    @on_request_batch_export.setter
+    def on_request_batch_export(self, callback: tp.Callable[[str, str], tp.Any]):
+        if not callable(callback):
+            raise TypeError("Expected callable but got \"%s\"" % str(callback))
+        self._on_batch_export_request = callback
 
 
 class BSApp(tk.Tk, object):
@@ -1149,6 +1302,7 @@ class BSApp(tk.Tk, object):
 
         # keyboard shortcuts
         self.bind_all("<Control-,>", eat_args(self.show_settings_window))
+        self.bind_all("<Control-Shift-E>", eat_args(self.show_midi_batch_export_window))
 
         self.redraw_frames()
 
@@ -1220,6 +1374,10 @@ class BSApp(tk.Tk, object):
         settings_window = BSSettingsWindow(self)
         settings_window.focus()
 
+    def show_midi_batch_export_window(self):
+        midi_export_window = BSMidiBatchExportWindow(self)
+        midi_export_window.focus()
+
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
         rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
@@ -1245,6 +1403,7 @@ class BSApp(tk.Tk, object):
         if menubar is None:
             return
         menubar.on_request_show_settings_window = self.show_settings_window
+        menubar.on_request_show_midi_batch_export_window = self.show_midi_batch_export_window
         menubar.on_request_exit = self.close
         self.config(menu=menubar)
 
