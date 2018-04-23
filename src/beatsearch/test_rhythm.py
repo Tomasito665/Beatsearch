@@ -827,13 +827,31 @@ class TestPolyphonicRhythmImpl(TestRhythmBase):
         self.assertIs(actual_tom, tom)
 
     @inject_rhythm.mocked_setters()
-    def test_set_tracks_adds_all_tracks_same_order_as_iterator_returns(self, rhythm):
+    def test_get_track_by_name_returns_tracks_with_given_name(self, rhythm):
         kick, snare, tom = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
         rhythm.__get_track_naming_error__ = MagicMock(return_value="")
         rhythm.set_tracks((kick, snare, tom), 16)
         self.assertIs(rhythm.get_track_by_name("kick"), kick)
         self.assertIs(rhythm.get_track_by_name("snare"), snare)
         self.assertIs(rhythm.get_track_by_name("tom"), tom)
+
+    @inject_rhythm.mocked_setters()
+    def test_get_track_names_return_track_names_in_same_order_as_set_tracks(self, rhythm):
+        kick, snare, tom = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks((kick, snare, tom), 16)
+        expected_track_names = ["kick", "snare", "tom"]
+        actual_track_names = rhythm.get_track_names()
+        self.assertSequenceEqual(actual_track_names, expected_track_names)
+
+    @inject_rhythm.mocked_setters()
+    def test_get_item_returns_track_by_name(self, rhythm):
+        kick, snare, tom = tuple(self.create_fake_named_track(name) for name in ["kick", "snare", "tom"])
+        rhythm.__get_track_naming_error__ = MagicMock(return_value="")
+        rhythm.set_tracks((kick, snare, tom), 16)
+        self.assertIs(rhythm["kick"], kick)
+        self.assertIs(rhythm["snare"], snare)
+        self.assertIs(rhythm["tom"], tom)
 
     @inject_rhythm.mocked_setters()
     def test_set_tracks_parents_tracks_to_rhythm(self, rhythm):

@@ -467,6 +467,7 @@ class TimeSignature(object):
 
         # repeat the one-beat salience profile to fill one measure and assign the root weight to the downbeat
         salience_profile = one_beat_weights * self.numerator
+        # noinspection PyTypeChecker
         salience_profile[0] = root_weight
 
         return salience_profile
@@ -1448,6 +1449,19 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
 
         raise NotImplementedError
 
+    def __getitem__(self, track_name: str):
+        """
+        Returns the track with the given name. Raises a ValueError if no track with given name.
+
+        :param track_name: name of the track
+        :return: track with given name
+        """
+
+        track = self.get_track_by_name(track_name)
+        if track is None:
+            raise ValueError
+        return track
+
     @abstractmethod
     def get_track_by_name(self, track_name: str):
         """
@@ -1455,6 +1469,18 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
 
         :param track_name: track name
         :return: Track object or None
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_track_names(self) -> tp.Tuple[str, ...]:
+        """
+        Returns a tuple containing the names of the tracks in this rhythm. The order in which the names are returned is
+        the same as the order in which the tracks are yielded by the track iterator returned by
+        :meth:`beatsearch.rhythm.PolyphonicRhythm.get_track_iterator`.
+
+        :return: tuple containing the track names
         """
 
         raise NotImplementedError
@@ -1709,6 +1735,17 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
         """
 
         return self._tracks.get(str(track_name), None)
+
+    def get_track_names(self) -> tp.Tuple[str, ...]:
+        """
+        Returns a tuple containing the names of the tracks in this rhythm. The order in which the names are returned is
+        the same as the order in which the tracks are yielded by the track iterator returned by
+        :meth:`beatsearch.rhythm.PolyphonicRhythm.get_track_iterator`.
+
+        :return: tuple containing the track names
+        """
+
+        return tuple(self._tracks.keys())
 
     def get_track_count(self) -> int:
         """
