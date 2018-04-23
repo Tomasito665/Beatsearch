@@ -1469,6 +1469,16 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
 
         raise NotImplementedError
 
+    @abstractmethod
+    def clear_tracks(self):
+        """
+        Clears all tracks.
+
+        :return: None
+        """
+
+        raise NotImplementedError
+
     @classmethod
     def create_tracks(cls, **onsets_by_track_name: tp.Iterable[tp.Tuple[int, int]]) -> tp.Generator[Track, None, None]:
         # TODO add docstring
@@ -1708,6 +1718,15 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
         """
 
         return len(self._tracks)
+
+    def clear_tracks(self) -> None:
+        """
+        Clears all tracks.
+
+        :return: None
+        """
+
+        self._tracks.clear()
 
     # implements Rhythm.__rescale_onset_ticks__
     def __rescale_onset_ticks__(self, old_resolution: int, new_resolution: int):
@@ -2419,16 +2438,16 @@ class MidiRhythm(RhythmLoop):
                 midi_file.close()
             name = name or os.path.splitext(os.path.basename(midi_file.name))[0]
 
-        if midi_mapping_reducer_cls:
-            mapping_reducer = midi_mapping_reducer_cls(midi_mapping)
-        else:
-            mapping_reducer = None
-
         self.set_name(name)
-        self._midi_mapping = midi_mapping             # type: MidiDrumMapping
-        self._midi_mapping_reducer = mapping_reducer  # type: tp.Union[MidiDrumMappingReducer, None]
-        self._midi_metronome = -1                     # type: int
-        self._prototype_midi_pitches = dict()         # type: tp.Dict[str, int]
+        self._midi_pattern = None              # type: tp.Union[midi.Pattern, None]
+        self._midi_mapping = midi_mapping      # type: MidiDrumMapping
+        self._midi_mapping_reducer = None      # type: tp.Union[MidiDrumMappingReducer, None]
+        self._midi_metronome = -1              # type: int
+        self._prototype_midi_pitches = dict()  # type: tp.Dict[str, int]
+
+        # Note: we set the mapping (and reducer) before loading the midi pattern to avoid loading twice
+        self.set_midi_drum_mapping(midi_mapping)
+        self.set_midi_drum_mapping_reducer(midi_mapping_reducer_cls)
 
         # loads the tracks and sets the bpm, time signature, midi metronome and resolution
         if midi_pattern:
@@ -2441,6 +2460,76 @@ class MidiRhythm(RhythmLoop):
         The MIDI mapping is used when parsing the MIDI data to create the track names. This is a read-only property.
         """
         return self._midi_mapping
+
+    def set_midi_drum_mapping(self, drum_mapping: MidiDrumMapping) -> None:
+        """Sets the MIDI drum mapping and resets the tracks accordingly.
+
+        :param drum_mapping: midi drum mapping
+        :return: None
+        """
+
+        if not isinstance(drum_mapping, MidiDrumMapping):
+            raise TypeError("expected MidiDrumMapping but got %s" % str(drum_mapping))
+
+        self._midi_mapping = drum_mapping
+        mapping_reducer = self.get_midi_drum_mapping_reducer()
+
+        # updates midi drum mapping reducer and reloads the tracks
+        self.set_midi_drum_mapping_reducer(mapping_reducer)
+
+    def get_midi_drum_mapping(self) -> MidiDrumMapping:
+        """Returns the current MIDI drum mapping
+
+        :return: MIDI drum mapping object
+        """
+
+        return self._midi_mapping
+
+    def get_midi_drum_mapping_reducer(self) -> tp.Union[tp.Type[MidiDrumMapping], None]:
+        """
+        Returns the current MIDI drum mapping reducer class or None if no mapping reducer has been set.
+
+        :return: MIDI mapping reducer or None if no reducer set
+        """
+
+        mapping_reducer = self._midi_mapping_reducer
+        return mapping_reducer.__class__ if mapping_reducer else None
+
+    def set_midi_drum_mapping_reducer(self, mapping_reducer_cls: tp.Union[tp.Type[MidiDrumMappingReducer], None]):
+        """
+        Sets the MIDI drum mapping reducer and reloads the tracks. If no
+         The rhythm duration will remain unchanged.
+
+        :param mapping_reducer_cls: MIDI drum mapping reducer class or None to remove the mapping reducer
+        :return: None
+        """
+
+        mapping = self._midi_mapping
+
+        if mapping_reducer_cls:
+            mapping_reducer = mapping_reducer_cls(mapping)
+        else:
+            mapping_reducer = None
+
+        prev_resolution = self.get_resolution()
+        prev_tick_duration = self.get_duration_in_ticks()
+
+        self._midi_mapping_reducer = mapping_reducer
+        self.__reload_midi_pattern(False)
+
+        self.set_resolution(prev_resolution)
+        self.set_duration_in_ticks(prev_tick_duration)
+
+    @property
+    def midi_drum_mapping_reducer(self) -> tp.Union[tp.Type[MidiDrumMappingReducer], None]:
+        """The MIDI drum mapping reducer class. Setting this property will reset the tracks of this rhythm. Set this
+        property to None for no MIDI drum mapping reducer."""
+
+        return self.get_midi_drum_mapping_reducer()
+
+    @midi_drum_mapping_reducer.setter
+    def midi_drum_mapping_reducer(self, mapping_reducer_cls: tp.Union[tp.Type[MidiDrumMappingReducer], None]) -> None:
+        self.set_midi_drum_mapping_reducer(mapping_reducer_cls)
 
     @property
     def midi_mapping_reducer(self):
@@ -2541,9 +2630,9 @@ class MidiRhythm(RhythmLoop):
 
     def load_midi_pattern(self, pattern: midi.Pattern, preserve_midi_duration: bool = False) -> None:
         """
-        Loads a midi pattern and sets this rhythm's tracks, time signature bpm and duration. The given midi pattern must
-        have a resolution property and can't have more than one track containing note events. The midi events map to
-        rhythm properties like this:
+        Loads a midi pattern and sets this rhythm's tracks, time signature, bpm and duration. The given midi pattern
+        must have a resolution property and can't have more than one track containing note events. The midi events map
+        to rhythm properties like this:
 
         * :class:`midi.NoteOnEvent`, adds an onset to this rhythm
         * :class:`midi.TimeSignatureEvent`, set the time signature of this rhythm (required)
@@ -2558,6 +2647,21 @@ class MidiRhythm(RhythmLoop):
                                        otherwise it will be set to the first downbeat after the last note position
         :return: None
         """
+
+        if not isinstance(pattern, midi.Pattern):
+            raise TypeError("expected a midi.Pattern but got %s" % str(pattern))
+
+        self._midi_pattern = pattern
+        ret = self.__reload_midi_pattern(preserve_midi_duration)
+        assert ret
+
+    def __reload_midi_pattern(self, preserve_midi_duration: bool):
+        # resets the tracks of this rhythm according to the current midi pattern, midi mapping and mapping reducer,
+        # returns False if no midi pattern has been loaded yet
+        pattern = self._midi_pattern
+
+        if not pattern:
+            return False
 
         mapping = self._midi_mapping
         n_tracks_containing_note_events = sum(any(isinstance(e, midi.NoteEvent) for e in track) for track in pattern)
@@ -2621,6 +2725,8 @@ class MidiRhythm(RhythmLoop):
 
         if preserve_midi_duration:
             self.set_duration_in_ticks(eot_event.tick)
+
+        return True
 
 
 def create_rumba_rhythm(resolution=240, polyphonic=True):
@@ -2912,18 +3018,21 @@ class MidiRhythmCorpus(object):
     def midi_mapping_reducer(self) -> tp.Union[tp.Type[MidiDrumMappingReducer], None]:
         """The MIDI drum mapping reducer
 
-        The MIDI drum mapping reducer applied to the rhythms in this corpus. This property will become a read-only
-        property after the corpus has loaded.
+        The MIDI drum mapping reducer applied to the rhythms in this corpus. Note that setting this property is an
+        expensive operation, as it will iterate over every rhythm to reset its tracks according to the new mapping
+        reducer.
         """
+
         return self._midi_mapping_reducer
 
     @midi_mapping_reducer.setter
     def midi_mapping_reducer(self, midi_mapping_reducer: tp.Union[tp.Type[MidiDrumMappingReducer], None]):
-        if self.has_loaded():
-            raise self.MidiCorpusStateError("corpus has already been loaded, making midi_mapping_reducer read-only")
-
         if midi_mapping_reducer is not None and not issubclass(midi_mapping_reducer, MidiDrumMappingReducer):
             raise TypeError("expected a MidiDrumMappingReducer subclass or None but got '%s'" % midi_mapping_reducer)
+
+        if self.has_loaded():
+            for rhythm in self:
+                rhythm.set_midi_drum_mapping_reducer(midi_mapping_reducer)
 
         self._midi_mapping_reducer = midi_mapping_reducer
 

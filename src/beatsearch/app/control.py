@@ -49,9 +49,9 @@ def get_rhythm_corpus(config: BSConfig) -> MidiRhythmCorpus:
 
         if cached_corpus.has_loaded() and \
                 cached_corpus.is_up_to_date(midi_dir) and \
-                cached_corpus.rhythm_resolution == resolution and \
-                cached_corpus.midi_mapping_reducer == mapping_reducer:
+                cached_corpus.rhythm_resolution == resolution:
 
+            cached_corpus.midi_mapping_reducer = mapping_reducer
             return cached_corpus
 
         # forget cache file if it is out of date or corrupt
@@ -139,7 +139,7 @@ class BSMidiRhythmLoader(object, metaclass=ABCMeta):
 
     def __init__(self):
         self._on_loading_error = no_callback  # type: tp.Callable[[BSMidiRhythmLoader.LoadingError], tp.Any]
-        self.midi_mapping_reducer = None      # type: tp.Union[[tp.Type[MidiDrumMappingReducer], None]
+        self.midi_mapping_reducer = None      # type: tp.Union[tp.Type[MidiDrumMappingReducer]], None]
         self.rhythm_resolution = 0            # type: int
 
     class LoadingError(Exception):
@@ -217,6 +217,10 @@ class BSMidiRhythmLoader(object, metaclass=ABCMeta):
             raise TypeError("Expected callable but got \"%s\"" % callback)
         self._on_loading_error = callback
 
+    def bind_to_config(self, config: BSConfig) -> None:
+        config.mapping_reducer.add_binding(lambda reducer: setattr(self, "midi_mapping_reducer", reducer))
+        config.rhythm_resolution.add_binding(lambda res: setattr(self, "rhythm_resolution", res))
+
 
 class BSSelectedMidiRhythmLoader(BSMidiRhythmLoader):
     SOURCE_NAME = "selected rhythm"
@@ -289,7 +293,7 @@ class BSController(object):
         self._distances_to_target_rhythm_are_stale = False
         self._rhythm_measure = SummedMonophonicRhythmDistance()  # type: SummedMonophonicRhythmDistance
         self._rhythm_selection = OrderedSet()
-        self._target_rhythm = None
+        self._target_rhythm = None                               # type: tp.Union[MidiRhythm, None]
         self._target_rhythm_prev_update = None
         self._lock = threading.Lock()
         self._rhythm_player = None
@@ -308,6 +312,8 @@ class BSController(object):
         self.set_distance_measure(distance_measure)
         # automatically register a loader for the currently selected rhythm
         self.register_rhythm_loader(BSSelectedMidiRhythmLoader(self))
+        # setup config change handlers
+        self._setup_config()
         # if a midi root directory is set, load the corpus
         if self.get_config().midi_root_directory.get():
             self.load_corpus()
@@ -322,16 +328,18 @@ class BSController(object):
         :return: None
         """
 
-
-
-
+        prev_corpus = self._corpus
+        prev_corpus_id = prev_corpus.id if prev_corpus else None
         corpus = get_rhythm_corpus(self._config)
 
         with self._lock:
             self._corpus = corpus
-            self._reset_distances_to_target_rhythm()
+            if corpus.id != prev_corpus_id:
+                self._reset_distances_to_target_rhythm()
 
-        self.clear_rhythm_selection()
+        if corpus.id != prev_corpus_id:
+            self.clear_rhythm_selection()
+
         self._dispatch(self.CORPUS_LOADED)
 
     def is_corpus_loaded(self):
@@ -669,8 +677,7 @@ class BSController(object):
             raise ValueError("Already registered a rhythm loader for loader type: \"%s\"" % loader_class)
 
         config = self._config
-        config.mapping_reducer.add_binding(lambda reducer: setattr(loader, "midi_mapping_reducer", reducer))
-        config.rhythm_resolution.add_binding(lambda res: setattr(loader, "rhythm_resolution", res))
+        loader.bind_to_config(config)
 
         self._rhythm_loaders[loader.__class__] = loader
         self._dispatch(self.RHYTHM_LOADER_REGISTERED, loader)
@@ -787,3 +794,20 @@ class BSController(object):
     def _precondition_check_target_rhythm_set(self):
         if not self.is_target_rhythm_set():
             raise Exception("Target rhythm not set")
+
+    def _setup_config(self):
+        config = self._config
+        config.mapping_reducer.add_binding(self._on_mapping_reducer_changed)
+        config.rhythm_resolution.add_binding(self._on_rhythm_resolution_changed)
+
+    def _on_mapping_reducer_changed(self, reducer: tp.Type[MidiDrumMappingReducer]):
+        target_rhythm = self._target_rhythm
+        if not target_rhythm:
+            return
+        target_rhythm.set_midi_drum_mapping_reducer(reducer)
+
+    def _on_rhythm_resolution_changed(self, resolution: int):
+        target_rhythm = self._target_rhythm
+        if not target_rhythm:
+            return
+        target_rhythm.set_resolution(resolution)
