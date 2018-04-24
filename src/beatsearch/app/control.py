@@ -28,14 +28,14 @@ import midi
 LOGGER = logging.getLogger(__name__)
 
 
-def get_rhythm_corpus(config: BSConfig) -> MidiRhythmCorpus:
+def get_rhythm_corpus(config: BSConfig) -> tp.Union[MidiRhythmCorpus, None]:
     """Utility function to load the MIDI rhythm corpus, given a BeatSearch config object
 
     This function will try to load the MIDI rhythm corpus from cache. If the cache file is missing, out of date or
     corrupt, it will re-load the corpus from the MIDI root directory.
 
     :param config: config object
-    :return: midi rhythm corpus object
+    :return: midi rhythm corpus object or None if midi directory doesn't exist
     """
 
     midi_dir = config.midi_root_directory.get()
@@ -43,14 +43,22 @@ def get_rhythm_corpus(config: BSConfig) -> MidiRhythmCorpus:
     resolution = config.rhythm_resolution.get()
     mapping_reducer = config.mapping_reducer.get()
 
+    # we can't load a directory that doesn't exist anymore (even if we still have its cache, we discard it)
+    if not os.path.isdir(midi_dir):
+        config.forget_midi_root_directory_cache_file(midi_dir)
+        config.midi_root_directory.set("")
+        return None
+
     # try to load from cache
     if cache_fpath:
         cached_corpus = MidiRhythmCorpus()
+        cache_file_exists = os.path.isfile(cache_fpath)
 
-        try:
-            cached_corpus.load_from_cache_file(cache_fpath)
-        except MidiRhythmCorpus.BadCacheFormatError:
-            pass
+        if cache_file_exists:
+            try:
+                cached_corpus.load_from_cache_file(cache_fpath)
+            except MidiRhythmCorpus.BadCacheFormatError:
+                pass
 
         if cached_corpus.has_loaded() and \
                 cached_corpus.is_up_to_date(midi_dir) and \
@@ -59,8 +67,8 @@ def get_rhythm_corpus(config: BSConfig) -> MidiRhythmCorpus:
             cached_corpus.midi_mapping_reducer = mapping_reducer
             return cached_corpus
 
-        # forget cache file if it is out of date or corrupt
-        config.forget_midi_root_directory_cache_file(midi_dir, remove_cache_file=True)
+        # forget (and remove) cache file if it is out of date or corrupt
+        config.forget_midi_root_directory_cache_file(midi_dir)
 
     # if loading from cache didn't succeed, load from midi directory
     corpus = MidiRhythmCorpus(
@@ -330,12 +338,15 @@ class BSController(object):
         times throughout the lifespan of the app, e.g. after changing the rhythm resolution or the midi root directory
         in the BSConfig object.
 
-        :return: None
+        :return: True if load was successful; otherwise False
         """
 
         prev_corpus = self._corpus
         prev_corpus_id = prev_corpus.id if prev_corpus else None
         corpus = get_rhythm_corpus(self._config)
+
+        if not corpus:
+            return False
 
         with self._lock:
             self._corpus = corpus
@@ -346,6 +357,7 @@ class BSController(object):
             self.clear_rhythm_selection()
 
         self._dispatch(self.CORPUS_LOADED)
+        return True
 
     def is_corpus_loaded(self):
         """Returns whether the rhythm corpus has loaded
