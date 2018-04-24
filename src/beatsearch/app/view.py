@@ -1,5 +1,6 @@
 import os
 import signal
+import textwrap
 import tkinter.ttk
 from abc import ABCMeta, abstractmethod
 import tkinter as tk
@@ -17,7 +18,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from functools import wraps, partial
 import typing as tp
 from collections import OrderedDict
-from beatsearch.rhythm import Unit
+from beatsearch.rhythm import Unit, get_drum_mapping_reducer_implementation_names
 from beatsearch.metrics import MonophonicRhythmDistanceMeasure, TRACK_WILDCARDS
 from beatsearch.utils import (
     head_trail_iter,
@@ -25,7 +26,7 @@ from beatsearch.utils import (
     type_check_and_instantiate_if_necessary,
     eat_args,
     color_variant,
-)
+    normalize_directory)
 from beatsearch.app.control import BSController, BSMidiRhythmLoader
 from beatsearch.plot import RhythmLoopPlotter, SnapsToGridPolicy, get_rhythm_loop_plotter_classes
 from beatsearch.rhythm import (
@@ -736,254 +737,534 @@ class BSMainMenu(tk.Menu, object):
         self._on_show_midi_batch_export_window_request = callback
 
 
-class BSSettingsWindow(BSAppWindow):
+class InvalidInput(Exception):
+    def __init__(self, *args, show: bool = True, **kw):
+        super().__init__(*args, **kw)
+        self.show = bool(show)
+
+
+class BSConfigInput(object, metaclass=ABCMeta):
+    """Abstract base class for input widgets that need to sync with a :class:`beatsearch.app.config.BSConfig` entry"""
+
+    def __init__(self, master: tk.BaseWidget, config: BSConfig):
+        self.master = master             # type: tk.BaseWidget
+        self.config = config             # type: BSConfig
+        self._on_change_callback = None  # type: tp.Callable
+
+    @classmethod
+    @abstractmethod
+    def get_name(cls) -> str:
+        """Returns the name of this input used for this input's label
+
+        :return: name of this input as a string
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_widget(self) -> tk.BaseWidget:
+        """Returns the tkinter widget of this input. This may be a container widget.
+
+        :return: tkinter widget
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def reset(self) -> None:
+        """Resets the value of this input based on self
+
+        :return: None
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def check_input(self, raw_value: tp.Any):
+        """Checks the given raw input value
+
+        :param raw_value: result of calling :meth:`tkinter.Variable.get` on the variable returned
+                          by :meth:`beatsearch.BSConfigInput.__get_variable__`
+
+        :return:          None
+
+        :raises :class:`beatsearch.app.InvalidInput` if raw input is not valid
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def __get_variable__(self) -> tk.Variable:
+        """Returns the tkinter variable linked to the input
+
+        :return: tkinter variable controlled by this input
+        """
+
+        raise NotImplementedError
+
+    def get_value(self) -> tp.Any:
+        """Returns the current value of this input
+
+        Override this method in case that the input value should be mapped to something else. For example, labels of
+        dropdown menus might need to be mapped to an internal value.
+
+        :return: value of input
+        """
+
+        return self.__get_variable__().get()
+
+    def set_value(self, value: tp.Any) -> None:
+        """Sets the value of this input
+
+        Override this method in case that the input value should be mapped to something else. For example, labels of
+        dropdown menus might need to be mapped to an internal value.
+
+        :param value: value of input
+        :return: None
+        """
+
+        self.__get_variable__().set(value)
+
+    def on_change(self, callback: tp.Callable) -> None:
+        """Sets the on_change callback for this input. Only one callback is allowed.
+
+        :param callback: callable or None to remove the callback
+        :return: None
+        """
+
+        variable = self.__get_variable__()
+        old_callback = self._on_change_callback
+
+        if old_callback:
+            variable.trace_remove("w", old_callback)
+
+        if not callback:
+            self._on_change_callback = None
+            return
+
+        variable.trace_add("write", callback)
+
+
+class ComboboxInput(BSConfigInput):
+    """Input consisting of a combobox which will reflect the labels of the internal values"""
+
+    def __init__(self, master: tk.BaseWidget, config: BSConfig):
+        super().__init__(master, config)
+        self._var_str = tk.StringVar()
+        labels = tuple(self.get_labels_by_values().values())
+        self._combobox = ttk.Combobox(self.master, values=labels, textvariable=self._var_str, state="readonly")
+
+    @classmethod
+    @abstractmethod
+    def get_values_by_labels(cls) -> OrderedDict:
+        """Returns a dictionary containing the values by their combobox labels
+
+        :return: ordered dictionary containing values (dict values) by labels (dict keys)
+        """
+
+        raise NotImplementedError
+
+    @classmethod
+    def get_labels_by_values(cls) -> OrderedDict:
+        """Returns a dictionary containing the combobox labels by their underlying values
+
+        :return: ordered dictionary containing labels (dict values) by values (dict keys)
+        """
+
+        values_by_labels = cls.get_values_by_labels()
+        return OrderedDict((value, label) for (label, value) in values_by_labels.items())
+
+    def get_widget(self) -> tk.BaseWidget:
+        return self._combobox
+
+    def get_value(self) -> tp.Any:
+        # returns underlying value of current combobox label
+        label = super().get_value()
+        return self.get_values_by_labels()[label]
+
+    def set_value(self, value: tp.Any) -> None:
+        # sets underlying value and updates combobox by its corresponding label
+        label = self.get_labels_by_values()[value]
+        super().set_value(label)
+
+    def check_input(self, raw_value: tp.Any):
+        try:
+            self.get_value()
+        except KeyError:
+            labels = self.get_labels_by_values().values()
+            raise InvalidInput(textwrap.dedent("""
+                Unknown value: %s
+                Choose between: %s
+            """) % (raw_value, str(labels)))
+
+    def __get_variable__(self) -> tk.Variable:
+        return self._var_str
+
+
+class DirectoryInput(BSConfigInput, metaclass=ABCMeta):
+    """Input consisting of a text entry and a 'Browse' button, which will open a browse directory dialog"""
+
+    def __init__(
+            self,
+            master: tk.BaseWidget, config: BSConfig,
+            allow_empty_dir: bool,
+            ask_create_dir_if_not_exist: bool
+    ):
+        super().__init__(master, config)
+
+        self._var_directory = tk.StringVar()
+        self._container = tk.Frame(self.master)
+        self._ask_create_dir = ask_create_dir_if_not_exist
+        self._allow_empty_dir = allow_empty_dir
+
+        tk.Entry(self._container, textvariable=self._var_directory).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(self._container, text="Browse", command=self._on_btn_browse, width=12) \
+            .pack(side=tk.RIGHT, padx=(3, 0))
+
+    def get_widget(self) -> tk.BaseWidget:
+        return self._container
+
+    def __get_variable__(self) -> tk.Variable:
+        return self._var_directory
+
+    def get_value(self) -> tp.Any:
+        directory = super().get_value()
+        return normalize_directory(directory)
+
+    def set_value(self, directory: tp.Any) -> None:
+        directory = normalize_directory(directory)
+        super().set_value(directory)
+
+    def check_input(self, raw_value: tp.Any):
+        if not raw_value and not self._allow_empty_dir:
+            raise InvalidInput("No directory given")
+
+        directory = self.get_value()
+        parent_dir = os.path.dirname(directory)
+
+        if not os.path.isdir(directory):
+            if self._ask_create_dir:
+                if not os.path.isdir(parent_dir):
+                    raise InvalidInput(textwrap.dedent("""
+                        No such directory: %s
+                        
+                        If its parent directory had existed, I'd have asked you 
+                        to create a new one, but it doesn't.
+                    """) % raw_value)
+
+                create_new_dir = messagebox.askyesno("Browse directory", textwrap.dedent("""
+                    No such directory: %s
+                    
+                    Do you want to create it?
+                """ % raw_value))
+
+                if create_new_dir:
+                    os.mkdir(directory)
+                else:
+                    # just break the validation without showing another error message
+                    raise InvalidInput(silent=True)
+            else:
+                raise InvalidInput("No such directory: %s" % raw_value)
+
+    def _on_btn_browse(self):
+        current_root_dir = self._var_directory.get()
+
+        # NOTE: askdirectory returns the path with forward slashes, even on Windows!
+        directory = tkinter.filedialog.askdirectory(
+            title=self.get_name(),
+            parent=self.master,
+            initialdir=current_root_dir
+        )
+
+        if not os.path.isdir(directory):
+            return
+
+        self._var_directory.set(directory)
+
+
+class IntegerInput(BSConfigInput, metaclass=ABCMeta):
+    """Input consisting of a text entry with an integer value"""
+
+    def __init__(self, master: tk.BaseWidget, config: BSConfig):
+        super().__init__(master, config)
+        self._var_str = tk.StringVar()
+        self._entry = tk.Entry(self.master, textvariable=self._var_str)
+
+    def get_widget(self) -> tk.Widget:
+        return self._entry
+
+    def get_value(self) -> tp.Any:  # returns the value as an integer
+        str_value = super().get_value()
+        return int(str_value)
+
+    def set_value(self, value: tp.Any) -> None:  # sets the value as an integer
+        str_value = str(value)
+        super().set_value(str_value)
+
+    def check_input(self, raw_value: str):
+        if not raw_value:
+            raise InvalidInput("Man. I can't magically deduce an integer from nothing.")
+
+        try:
+            self.get_value()
+        except ValueError:
+            raise InvalidInput("How is '%s' a number..? ;-)" % raw_value)
+
+    def __get_variable__(self) -> tk.Variable:
+        return self._var_str
+
+
+class BSConfigFormMixin(object, metaclass=ABCMeta):
+    """This mixin adds functionality to pack and validate BSConfigInput widgets"""
+
+    def __init__(self):
+        config = self.get_config()
+        master = self.get_master_widget()
+
+        self.form_container = tk.Frame(master)
+        self._inputs = dict()
+
+        for input_cls in self.get_input_classes():
+            # frame containing the input and its label
+            input_container = tk.Frame(self.form_container)
+
+            # we instantiate the BSConfigInput and get its widget
+            input_obj = input_cls(input_container, config)  # type: BSConfigInput
+            input_widget = input_obj.get_widget()           # type: tk.Widget
+            label_widget = tk.Label(input_container, text=input_obj.get_name(), anchor=tk.W)  # input label widget
+
+            # set input to correct initial value
+            input_obj.reset()
+
+            # pack everything up
+            label_widget.pack(fill=tk.X)
+            input_widget.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+            input_container.pack(fill=tk.X)
+
+            # keep track of the input for validation
+            assert input_cls not in self._inputs, "duplicate BSConfigInput class: %s" % input_cls
+            self._inputs[input_cls] = input_obj
+
+    @classmethod
+    @abstractmethod
+    def get_input_classes(cls) -> tp.Iterable[tp.Type[BSConfigInput]]:
+        """Returns all input classes for the inputs in this form"""
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_config(self) -> BSConfig:
+        """Returns the configuration object"""
+
+        raise NotImplementedError
+
+    def get_master_widget(self) -> tk.BaseWidget:
+        """Returns the form master tkinter widget
+
+        Override this is mixin is not used on a tkinter base widget.
+        """
+
+        assert isinstance(self, tk.BaseWidget)
+        return self
+
+    def get_input_iterator(self) -> tp.Iterator[BSConfigInput]:
+        """Returns an iterator over the inputs in this form
+
+        :return: iterator yielding the inputs in this form
+        """
+
+        return iter(self._inputs.values())
+
+    def reset_all_inputs(self) -> None:
+        """Resets the inputs of this form
+
+        :return: None
+        """
+
+        for inp in self._inputs.values():
+            inp.reset()
+
+    def get_input(self, input_cls: tp.Type[BSConfigInput]) -> BSConfigInput:
+        """Returns the input object of the given input type
+
+        :param input_cls: input type as a :class:`beatsearch.app.view.BSConfigInput` subclass
+        :return: input of given input type
+        :raises: ValueError if this form contains no input of the given type
+        """
+
+        try:
+            return self._inputs[input_cls]
+        except KeyError:
+            raise ValueError("No input with class: %s (you might want to add it to get_input_classes)" % str(input_cls))
+
+    def validate_inputs(self) -> bool:
+        """Validates this form and shows an error message dialog in case of an invalid input
+
+        :return: True if all inputs are valid; False otherwise
+        """
+
+        master = self.get_master_widget()
+
+        for inp in self._inputs.values():
+            try:
+                raw_value = inp.__get_variable__().get()
+                inp.check_input(raw_value)
+            except InvalidInput as e:
+                if e.show:
+                    messagebox.showerror(
+                        parent=master,
+                        title=inp.get_name(),
+                        message=str(e)
+                    )
+                return False
+        return True
+
+
+class BSSettingsWindow(BSAppWindow, BSConfigFormMixin):
     TITLE = "Settings"
 
-    class Input(object, metaclass=ABCMeta):
-        class InvalidInput(Exception):
-            pass
-
-        def __init__(self, master: tk.Widget):
-            self.master = master
-            self._on_change_callback = None
-
-        @classmethod
-        @abstractmethod
-        def get_name(cls) -> str:
-            """Returns the name of this input
-
-            The name returned by this method will be used as a label.
-
-            :return: name of the input
-            """
-
-            raise NotImplementedError
-
-        @abstractmethod
-        def get_widget(self) -> tk.Widget:
-            """Returns the widget containing the input controls
-
-            :return: widget containing the input controls
-            """
-
-            raise NotImplementedError
-
-        def get_value(self) -> tp.Any:
-            """Returns the value of the variable of this input
-
-            :return: value of this input
-            """
-
-            return self.get_variable().get()
-
-        @abstractmethod
-        def get_variable(self) -> tkinter.Variable:
-            """Returns the tkinter variable of this input
-
-            :return: tkinter variable
-            """
-
-            raise NotImplementedError
-
-        @abstractmethod
-        def check_input(self) -> None:
-            """Checks the input variable and raises InvalidInput if not valid
-
-            This method should check the variable returned by get_variable and raise an InvalidInput exception if the
-            input variable is not valid. If it is valid, this method shouldn't do anything.
-
-            :return: None
-            :raises InvalidInput
-            """
-
-            raise NotImplementedError
-
-        @abstractmethod
-        def reset(self, config: BSConfig):
-            """Resets the value of this input
-
-            Resets the value of this input according to the given beatsearch config or to a default value if the
-            given config doesn't contain useful info.
-
-            :return: None
-            """
-
-            raise NotImplementedError
-
-        def on_change(self, callback: tp.Callable):
-            """Sets the on_change callback
-
-            Sets the on_change callback for this input. Only one callback is allowed.
-
-            :param callback: callable or None to remove the callback
-            :return: None
-            """
-
-            variable = self.get_variable()
-            old_callback = self._on_change_callback
-
-            if old_callback:
-                variable.trace_remove("w", old_callback)
-
-            if not callback:
-                self._on_change_callback = None
-                return
-
-            variable.trace_add("write", callback)
-
-    class RhythmsRootDirInput(Input):
+    class RhythmsRootDirInput(DirectoryInput):
         NAME = "Rhythms root directory"
 
-        def __init__(self, *args, dir_dialog_title: str = "Choose rhythm directory", **kw):
-            super().__init__(*args, **kw)
-            self._var_root_dir = tk.StringVar()
-            self._container = tk.Frame(self.master)
-            self._dir_dialog_title = dir_dialog_title
-            tk.Entry(self._container, textvariable=self._var_root_dir).pack(side=tk.LEFT, fill=tk.X, expand=True)
-            tk.Button(self._container, text="Browse", command=self._on_btn_browse, width=12)\
-                .pack(side=tk.RIGHT, padx=(3, 0))
+        def __init__(self, master: tk.BaseWidget, config: BSConfig):
+            super().__init__(master, config, allow_empty_dir=True, ask_create_dir_if_not_exist=False)
 
         @classmethod
         def get_name(cls) -> str:
             return cls.NAME
 
-        def get_widget(self) -> tk.Widget:
-            return self._container
-
-        def get_variable(self) -> tk.Variable:
-            return self._var_root_dir
-
-        def check_input(self) -> None:
-            directory = self._var_root_dir.get()
-            if directory and not os.path.isdir(directory):
-                raise self.InvalidInput("No such directory: %s" % directory)
-
-        def reset(self, config: BSConfig):
-            root_dir = config.midi_root_directory.get()
+        def reset(self) -> None:
+            root_dir = self.config.midi_root_directory.get()
             if root_dir:
                 assert os.path.isdir(root_dir), "directory doesn't exist: %s" % root_dir  # TODO handle this properly
-            self._var_root_dir.set(root_dir)
+            self.__get_variable__().set(root_dir)
 
-        def _on_btn_browse(self):
-            current_root_dir = self._var_root_dir.get()
-
-            # NOTE: askdirectory returns the path with forward slashes, even on Windows!
-            directory = tkinter.filedialog.askdirectory(
-                title=self._dir_dialog_title,
-                parent=self.master,
-                initialdir=current_root_dir
-            )
-
-            if not os.path.isdir(directory):
-                return
-
-            self._var_root_dir.set(directory)
-
-    class RhythmResolutionInput(Input):
-        NAME = "Rhythm resolution"
-
-        def __init__(self, *args, **kw):
-            super().__init__(*args, **kw)
-            self._var_resolution = tk.StringVar()
-            self._entry = tk.Entry(self.master, textvariable=self._var_resolution)
+    class RhythmResolutionInput(IntegerInput):
+        NAME = "Rhythm resolution (PPQN)"
 
         @classmethod
         def get_name(cls) -> str:
             return cls.NAME
 
-        def get_widget(self) -> tk.Widget:
-            return self._entry
+        def check_input(self, raw_value: str):
+            super().check_input(raw_value)
+            value = self.get_value()  # shouldn't raise any exceptions, since super().check_input didn't
+            if value <= 0:
+                raise InvalidInput("Resolution must be greater than zero")
 
-        def get_variable(self) -> tk.Variable:
-            return self._var_resolution
+        def reset(self) -> None:
+            resolution = self.config.rhythm_resolution.get()
+            self.set_value(resolution)
 
-        def check_input(self) -> None:
-            resolution_str = self._var_resolution.get()
-            if not resolution_str:
-                raise self.InvalidInput("Please set a resolution")
-            try:
-                resolution = int(resolution_str)
-            except ValueError:
-                raise self.InvalidInput("How is \"%s\" a number? :-)" % resolution_str)
-            if resolution <= 0:
-                raise self.InvalidInput("Resolution should be greater than zero")
+    class MidiDrumMappingReducerInput(ComboboxInput):
+        NAME = "Midi Mapping Reducer"
+        MAPPING_REDUCER_FRIENDLY_NAMES = tuple(get_drum_mapping_reducer_implementation_friendly_names())
 
-        def reset(self, config: BSConfig):
-            resolution = config.rhythm_resolution.get()
-            self._var_resolution.set(resolution)
+        @classmethod
+        def get_values_by_labels(cls) -> OrderedDict:
+            reducers_by_friendly_names = OrderedDict()
+            reducers_by_friendly_names['None'] = None
 
-    class MidiDrumMappingReducerInput(Input):
-        NAME = "MIDI Mapping Reducer"
-        MAPPING_REDUCER_NAMES = ["None"] + list(get_drum_mapping_reducer_implementation_friendly_names())
+            for friendly_name in cls.MAPPING_REDUCER_FRIENDLY_NAMES:
+                reducers_by_friendly_names[friendly_name] = get_drum_mapping_reducer_implementation(friendly_name)
 
-        def __init__(self, *args, **kw):
-            super().__init__(*args, **kw)
-            self._var_reducer = tk.StringVar()
-            self._combobox = ttk.Combobox(
-                self.master,
-                values=self.MAPPING_REDUCER_NAMES,
-                textvariable=self._var_reducer,
-                state="readonly"
-            )
+            return reducers_by_friendly_names
 
         @classmethod
         def get_name(cls) -> str:
             return cls.NAME
 
-        def get_widget(self) -> tk.Widget:
-            return self._combobox
-
-        def get_variable(self) -> tkinter.Variable:
-            return self._var_reducer
-
-        def check_input(self) -> None:
-            reducer_name = self._var_reducer.get()
-            if reducer_name not in self.MAPPING_REDUCER_NAMES:
-                raise self.InvalidInput("Unknown mapping reducer: %s (choose between: %s)" % (
-                    reducer_name, str(self.MAPPING_REDUCER_NAMES)))
-
-        def reset(self, config: BSConfig):
-            reducer = config.mapping_reducer.get()
-            friendly_name = "None"
-            if reducer:
-                friendly_name = reducer.__friendly_name__
-                assert friendly_name in self.MAPPING_REDUCER_NAMES
-            self._var_reducer.set(friendly_name)
+        def reset(self) -> None:
+            reducer = self.config.mapping_reducer.get()
+            self.set_value(reducer)
 
     def __init__(self, app, min_width=360, min_height=60, **kwargs):
-        super().__init__(app, **kwargs)
+        BSAppWindow.__init__(self, app, **kwargs)
+        BSConfigFormMixin.__init__(self)
+
         self.wm_title(self.TITLE)
         self.minsize(min_width, min_height)
         self.resizable(False, False)
 
-        main_container = tk.Frame(self)
-        main_container.pack(fill=tk.BOTH, padx=6, pady=6)
-        config = self.controller.get_config()
+        self.btn_container = tk.Frame(self)
+        self.form_container.pack(fill=tk.BOTH, padx=6, pady=6)
 
-        self._inputs = {
-            self.RhythmsRootDirInput: None,
-            self.RhythmResolutionInput: None,
-            self.MidiDrumMappingReducerInput: None,
-        }  # type: tp.Dict[tp.Type[BSSettingsWindow.Input], BSSettingsWindow.Input]
+        # we keep track of the initial input values to check whether settings where changed by the user
+        # since the settings window was opened
+        self._initial_input_values = dict()  # type: tp.Dict[BSConfigInput, tp.Any]
 
-        self._initial_values = {}
+        for inp in self.get_input_iterator():
+            self._initial_input_values[inp] = inp.get_value()
+            inp.on_change(eat_args(self._update_btn_apply_state))
 
-        for input_field_cls in self._inputs.keys():
-            input_container = tk.Frame(main_container)
-            input_field_obj = input_field_cls(input_container)
-            input_field_obj.reset(config)
-            self._initial_values[input_field_cls] = input_field_obj.get_value()
-            tk.Label(input_container, text=input_field_obj.get_name(), anchor=tk.W).pack(fill=tk.X)
-            input_field_obj.get_widget().pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
-            input_field_obj.on_change(eat_args(self._update_btn_apply_state))
-            input_container.pack(fill=tk.X)
-            self._inputs[input_field_cls] = input_field_obj
+        self._bottom_btn_bar = tk.Frame(self)
+        self._btn_apply = self._setup_button_bar()
 
-        bottom_btn_bar = tk.Frame(self)
+    @classmethod
+    def get_input_classes(cls) -> tp.Iterable[tp.Type[BSConfigInput]]:
+        return [
+            cls.RhythmsRootDirInput,
+            cls.RhythmResolutionInput,
+            cls.MidiDrumMappingReducerInput
+        ]
 
-        btn_ok = tk.Button(bottom_btn_bar, text="OK", command=self._handle_ok)
-        btn_cancel = tk.Button(bottom_btn_bar, text="Cancel", command=self.destroy)
-        btn_apply = tk.Button(bottom_btn_bar, text="Apply", command=self._handle_apply, state=tk.DISABLED)
+    def get_config(self) -> BSConfig:
+        return self.controller.get_config()
+
+    def _handle_ok(self):
+        if self._check_if_settings_changed() and not self._handle_apply():
+            # don't close the settings window if something
+            # _handle_apply did not go well (e.g. validation err)
+            return
+        self.destroy()
+
+    def _handle_apply(self):
+        controller = self.controller
+        config = controller.get_config()
+
+        if not self.validate_inputs():
+            return False
+
+        rhythms_root_dir = self.get_input(self.RhythmsRootDirInput).get_value()
+        rhythm_resolution = self.get_input(self.RhythmResolutionInput).get_value()
+        mapping_reducer = self.get_input(self.MidiDrumMappingReducerInput).get_value()
+
+        # update and save config .ini file
+        config.rhythm_resolution.set(rhythm_resolution)
+        config.midi_root_directory.set(rhythms_root_dir)
+        config.mapping_reducer.set(mapping_reducer)
+        config.save()
+
+        # reload the corpus with the new settings
+        controller.load_corpus()
+
+        # reset the initial values (now that they're saved)
+        self._reset_initial_values()
+        self._update_btn_apply_state()
+        return True
+
+    def _check_if_settings_changed(self):
+        for inp in self.get_input_iterator():
+            initial_value = self._initial_input_values[inp]
+            curr_value = inp.get_value()
+            if initial_value != curr_value:
+                return True
+        return False
+
+    def _update_btn_apply_state(self):
+        self._btn_apply.config(state=tk.NORMAL if self._check_if_settings_changed() else tk.DISABLED)
+
+    def _reset_initial_values(self):
+        self._initial_input_values.clear()
+        for inp in self.get_input_iterator():
+            self._initial_input_values[inp] = inp.get_value()
+
+    def _setup_button_bar(self):  # returns the apply button (whoever this is reading, sorry, this is not intuitive)
+        btn_bar = self._bottom_btn_bar
+
+        btn_ok = tk.Button(btn_bar, text="OK", command=self._handle_ok)
+        btn_cancel = tk.Button(btn_bar, text="Cancel", command=self.destroy)
+        btn_apply = tk.Button(btn_bar, text="Apply", command=self._handle_apply, state=tk.DISABLED)
 
         buttons = (btn_ok, btn_cancel, btn_apply)
         largest_btn_text = max(len(btn.cget("text")) for btn in buttons)
@@ -992,199 +1273,97 @@ class BSSettingsWindow(BSAppWindow):
             btn.configure(width=largest_btn_text)
             btn.pack(side=tk.RIGHT, padx=(0, 3))
 
-        bottom_btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=6, padx=3)
-        self._btn_apply = btn_apply
-
-    def _handle_apply(self):
-        controller = self.controller
-        config = controller.get_config()
-        inputs = self._inputs
-
-        for inp in inputs.values():
-            try:
-                inp.check_input()
-            except self.Input.InvalidInput as e:
-                messagebox.showerror(
-                    parent=self,
-                    title=inp.get_name(),
-                    message=str(e)
-                )
-                return False
-
-        rhythms_root_dir = inputs[self.RhythmsRootDirInput].get_value()
-        rhythm_resolution = inputs[self.RhythmResolutionInput].get_value()
-        mapping_reducer_friendly_name = inputs[self.MidiDrumMappingReducerInput].get_value()
-
-        if mapping_reducer_friendly_name == "None":
-            mapping_reducer_cls = None
-        else:
-            mapping_reducer_cls = get_drum_mapping_reducer_implementation(mapping_reducer_friendly_name)
-
-        config.rhythm_resolution.set(rhythm_resolution)
-        config.midi_root_directory.set(rhythms_root_dir)
-        config.mapping_reducer.set(mapping_reducer_cls)
-        config.save()
-
-        # reload the corpus with the new settings
-        controller.load_corpus()
-
-        self._initial_values = dict(tuple((inp.__class__, inp.get_value()) for inp in inputs.values()))
-        self._update_btn_apply_state()
-        return True
-
-    def _handle_ok(self):
-        if self._settings_changed() and not self._handle_apply():
-            # don't close the settings window if something
-            # _handle_apply did not go well (e.g. validation err)
-            return
-        self.destroy()
-
-    def _settings_changed(self):
-        for input_cls, input_obj in self._inputs.items():
-            initial_value = self._initial_values[input_cls]
-            curr_value = input_obj.get_value()
-            if initial_value != curr_value:
-                return True
-        return False
-
-    def _update_btn_apply_state(self, _=None):
-        self._btn_apply.config(state=tk.NORMAL if self._settings_changed() else tk.DISABLED)
+        btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=6, padx=3)
+        return btn_apply
 
 
-class BSMidiBatchExportWindow(BSAppWindow):
-    TITLE = "MIDI Batch Export"
+class BSMidiBatchExportWindow(BSAppWindow, BSConfigFormMixin):
+    TITLE = "Midi Batch Export"
 
-    class MidiExportDirectory(BSSettingsWindow.RhythmsRootDirInput):
+    class MidiExportDirectory(DirectoryInput):
         NAME = "MIDI Export Directory"
 
-        def __init__(self, *args, **kw):
-            super().__init__(*args, dir_dialog_title="MIDI Export Directory", **kw)
+        def __init__(self, master: tk.BaseWidget, config: BSConfig):
+            super().__init__(master, config, allow_empty_dir=False, ask_create_dir_if_not_exist=True)
 
         @classmethod
         def get_name(cls) -> str:
             return cls.NAME
 
-        def reset(self, config: BSConfig):
-            export_dir = config.midi_batch_export_directory.get()
-            self.get_variable().set(export_dir)
+        def reset(self) -> None:
+            export_dir = self.config.midi_batch_export_directory.get()
+            self.set_value(export_dir)
 
-    class RhythmsToExport(BSSettingsWindow.Input):
+    class RhythmsToExport(ComboboxInput):
         NAME = "Rhythms to export"
 
-        OPTIONS = OrderedDict([
-            ("All rhythms", "all"),
-            ("Only selected rhythms", "selection")
-        ])
-
-        def __init__(self, master: tk.Widget):
-            super().__init__(master)
-            self._var_rhythms = tk.StringVar()
-            self._combobox = ttk.Combobox(master, values=tuple(self.OPTIONS.keys()),
-                                          state="readonly", textvariable=self._var_rhythms)
-            self._combobox.current(0)
+        @classmethod
+        def get_values_by_labels(cls) -> OrderedDict:
+            d = OrderedDict()
+            d['Selected rhythms'] = "selection"
+            d['All rhythms'] = "all"
+            return d
 
         @classmethod
         def get_name(cls) -> str:
             return cls.NAME
 
-        def get_widget(self) -> tk.Widget:
-            return self._combobox
-
-        def get_variable(self) -> tkinter.Variable:
-            return self._var_rhythms
-
-        def get_value(self):
-            label = self._var_rhythms.get()
-            return self.OPTIONS[label]
-
-        def check_input(self) -> None:
-            value = self.get_value()
-            if value not in self.OPTIONS.values():
-                raise self.InvalidInput("Unknown option: %s. Choose between: %s" % (value, self.OPTIONS.values()))
-
-        def reset(self, config: BSConfig):
-            value = config.midi_batch_export_rhythms_to_export.get()
-            label = next(l for l, v in self.OPTIONS.items() if v == value)
-            self._var_rhythms.set(label)
+        def reset(self) -> None:
+            rhythms_to_export = self.config.midi_batch_export_rhythms_to_export.get()
+            self.set_value(rhythms_to_export)
 
     def __init__(self, app, min_width=360, min_height=60, **kwargs):
-        super().__init__(app, **kwargs)
+        BSAppWindow.__init__(self, app, **kwargs)
+        BSConfigFormMixin.__init__(self)
 
         self.wm_title(self.TITLE)
         self.minsize(min_width, min_height)
         self.resizable(False, False)
 
-        config = app.controller.get_config()
-        main_container = tk.Frame(self)
-        main_container.pack(fill=tk.BOTH, padx=6, pady=6)
+        self.form_container.pack(fill=tk.BOTH, padx=6, pady=6)
+        self._button_bar = tk.Frame(self)
+        self._setup_button_bar()
 
-        self._inputs = {
-            self.RhythmsToExport: None,
-            self.MidiExportDirectory: None
-        }  # type: tp.Dict[tp.Type[BSSettingsWindow.Input], BSSettingsWindow.Input]
+    @classmethod
+    def get_input_classes(cls) -> tp.Iterable[tp.Type[BSConfigInput]]:
+        return [
+            cls.MidiExportDirectory,
+            cls.RhythmsToExport
+        ]
 
-        self._initial_values = {}
+    def get_config(self) -> BSConfig:
+        return self.controller.get_config()
 
-        for input_field_cls in self._inputs.keys():
-            input_container = tk.Frame(main_container)
-            input_field_obj = input_field_cls(input_container)
-            input_field_obj.reset(config)
-            self._initial_values[input_field_cls] = input_field_obj.get_value()
-            tk.Label(input_container, text=input_field_obj.get_name(), anchor=tk.W).pack(fill=tk.X)
-            input_field_obj.get_widget().pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
-            input_container.pack(fill=tk.X)
-            self._inputs[input_field_cls] = input_field_obj
+    def _handle_ok(self):
+        controller = self.controller
+        config = controller.get_config()
 
-        bottom_btn_bar = tk.Frame(self)
-        btn_export = tk.Button(bottom_btn_bar, text="Export", command=self._handle_ok, width=15)
-        btn_cancel = tk.Button(bottom_btn_bar, text="Cancel", command=self.destroy)
+        if not self.validate_inputs():
+            return
+
+        export_dir = self.get_input(self.MidiExportDirectory).get_value()
+        rhythms_to_export = self.get_input(self.RhythmsToExport).get_value()
+
+        # export the rhythms
+        controller.export_rhythms_as_midi(export_dir, rhythms_to_export)
+
+        # update the "default" midi batch export directory every time that a midi batch export is performed
+        config.midi_batch_export_directory.set(export_dir)
+        config.save()
+
+        self.destroy()
+
+    def _setup_button_bar(self):
+        btn_bar = self._button_bar
+        btn_export = tk.Button(btn_bar, text="Export", command=self._handle_ok, width=15)
+        btn_cancel = tk.Button(btn_bar, text="Cancel", command=self.destroy)
         btn_width = max(len(btn.cget("text")) for btn in (btn_export, btn_cancel))
 
         for btn in reversed([btn_export, btn_cancel]):
             btn.configure(width=btn_width)
             btn.pack(side=tk.RIGHT, padx=(0, 3))
 
-        bottom_btn_bar.pack(side=tk.BOTTOM, expand=True, fill=tk.X, padx=4, pady=4)
-        self._on_batch_export_request = no_callback
-
-    def _handle_ok(self):
-        controller = self.controller
-        config = controller.get_config()
-        inputs = self._inputs
-
-        for inp in inputs.values():
-            try:
-                inp.check_input()
-            except BSSettingsWindow.Input.InvalidInput as e:
-                messagebox.showerror(
-                    parent=self,
-                    title=inp.get_name(),
-                    message=str(e)
-                )
-                return False
-
-        export_dir = inputs[self.MidiExportDirectory].get_value()
-        rhythms_to_export = inputs[self.RhythmsToExport].get_value()
-
-        # export the rhythms
-        controller.export_rhythms_as_midi(export_dir, rhythms_to_export)
-
-        # update the "default" midi batch export directory every time
-        # that a midi batch export is performed
-        config.midi_batch_export_directory.set(export_dir)
-        config.save()
-
-        self.destroy()
-
-    @property
-    def on_request_batch_export(self):
-        return self._on_batch_export_request
-
-    @on_request_batch_export.setter
-    def on_request_batch_export(self, callback: tp.Callable[[str, str], tp.Any]):
-        if not callable(callback):
-            raise TypeError("Expected callable but got \"%s\"" % str(callback))
-        self._on_batch_export_request = callback
+        btn_bar.pack(side=tk.BOTTOM, expand=True, fill=tk.X, padx=4, pady=4)
 
 
 class BSApp(tk.Tk, object):

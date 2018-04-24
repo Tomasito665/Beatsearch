@@ -248,8 +248,8 @@ class BSConfig(object):
         )
 
         self.midi_batch_export_rhythms_to_export = BSConfigSettingHandle(
-            BSConfigSection.DEFAULT, "midi_batch_export_rhythms", "all", str,
-            validate=lambda val: val in ["all", "selection"]
+            BSConfigSection.DEFAULT, "midi_batch_export_rhythms", "selection", str,
+            validate=lambda val: val in ["selection", "all"]
         )
 
         for setting in (self.midi_root_directory, self.rhythm_resolution,
