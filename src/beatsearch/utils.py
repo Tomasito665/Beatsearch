@@ -145,7 +145,7 @@ def get_default_beatsearch_rhythms_fpath(mkdir=True):
     return os.path.join(beatsearch_dir, "rhythms.pkl")
 
 
-def no_callback(*_, **__):
+def no_callback(*_, **__) -> tp.Any:
     return None
 
 

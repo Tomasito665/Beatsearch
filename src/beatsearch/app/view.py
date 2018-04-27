@@ -1,4 +1,5 @@
 import os
+import uuid
 import signal
 import textwrap
 import tkinter.ttk
@@ -26,7 +27,8 @@ from beatsearch.utils import (
     type_check_and_instantiate_if_necessary,
     eat_args,
     color_variant,
-    normalize_directory)
+    normalize_directory
+)
 from beatsearch.app.control import BSController, BSMidiRhythmLoader
 from beatsearch.plot import RhythmLoopPlotter, SnapsToGridPolicy, get_rhythm_loop_plotter_classes
 from beatsearch.rhythm import (
@@ -206,9 +208,13 @@ class BSSearchForm(BSAppFrame):
 
 
 class ContextMenu(tk.Menu):
-    def __init__(self, root, event_show="<Button-3>", **kwargs):
-        tk.Menu.__init__(self, root, tearoff=0, **kwargs)
-        root.bind(event_show, lambda event: self.show(event.x_root, event.y_root))
+    def __init__(self, master, event_show="<Button-3>", enabled: bool = True, **kwargs):
+        tk.Menu.__init__(self, master, tearoff=0, **kwargs)
+        self._event_show = event_show
+        self._event_func_id = None
+        self.set_enabled(enabled)
+
+        self._event_func_id = master.bind(event_show, lambda event: self.show(event.x_root, event.y_root))
 
     def show(self, x, y):
         try:
@@ -216,10 +222,26 @@ class ContextMenu(tk.Menu):
         finally:
             self.grab_release()
 
-    def add_submenu(self, label):
+    def add_submenu(self, label: str) -> tk.Menu:
         submenu = tk.Menu(tearoff=0)
         self.add_cascade(label=label, menu=submenu)
         return submenu
+
+    def is_enabled(self) -> bool:
+        return bool(self._event_func_id)
+
+    def set_enabled(self, enabled: bool) -> None:
+        if enabled == self.is_enabled():
+            return
+
+        master = self.master
+        event = self._event_show
+
+        if enabled:
+            self._event_func_id = master.bind(event, lambda e: self.show(e.x_root, e.y_root))
+        else:
+            master.unbind(event, self._event_func_id)
+            self._event_func_id = None
 
 
 class BSRhythmList(BSAppFrame):
@@ -259,6 +281,7 @@ class BSRhythmList(BSAppFrame):
         # right-click menu
         context_menu = ContextMenu(tree_view)
         context_menu.add_command(label="Set as target rhythm", command=self._on_set_as_target_rhythm)
+        context_menu.add_command(label="Export as MIDI", command=self._on_export_as_midi_rhythm)
 
         # bind events
         self.bind("<MouseWheel>", self._on_mousewheel)
@@ -266,10 +289,11 @@ class BSRhythmList(BSAppFrame):
         tree_view.bind("<Double-Button-1>", self._on_double_click)
 
         # attributes
-        self._on_request_target_rhythm = no_callback
-        self._tree_view = tree_view
-        self._context_menu = context_menu
-        self._corpus_id = ""
+        self._on_request_target_rhythm = no_callback          # type: tp.Callable[[int], tp.Any]
+        self._on_request_export_rhythm_as_midi = no_callback  # type: tp.Callable[[int, str], tp.Any]
+        self._tree_view = tree_view                           # type: tkinter.ttk.Treeview
+        self._context_menu = context_menu                     # type: ContextMenu
+        self._corpus_id = None                                # type: tp.Union[uuid.UUID, None]
 
     def redraw(self):
         controller = self.controller
@@ -289,19 +313,36 @@ class BSRhythmList(BSAppFrame):
         self._sort_tree_view("Distance to target", 0)
 
     @property
-    def on_request_target_rhythm(self):  # type: () -> tp.Callable[int]
+    def on_request_target_rhythm(self) -> tp.Callable[[int], tp.Any]:
         return self._on_request_target_rhythm
 
     @on_request_target_rhythm.setter
-    def on_request_target_rhythm(self, callback):  # type: (tp.Callable[int]) -> None
+    def on_request_target_rhythm(self, callback: tp.Callable[[int], tp.Any]):
         if not callable(callback):
             raise TypeError("Expected a callback but got \"%s\"" % str(callback))
         self._on_request_target_rhythm = callback
+
+    @property
+    def on_request_export_rhythm_as_midi(self) -> tp.Callable[[int, str], tp.Any]:
+        return self._on_request_export_rhythm_as_midi
+
+    @on_request_export_rhythm_as_midi.setter
+    def on_request_export_rhythm_as_midi(self, callback: tp.Callable[[int, str], tp.Any]):
+        if not callable(callback):
+            raise TypeError("Expected a callback but got \"%s\"" % str(callback))
+        self._on_request_export_rhythm_as_midi = callback
 
     def _on_set_as_target_rhythm(self):
         selected_rhythms = self._get_selected_rhythm_indices()
         assert len(selected_rhythms) >= 1
         self.on_request_target_rhythm(selected_rhythms[0])
+
+    def _on_export_as_midi_rhythm(self):
+        tree = self._tree_view
+        tv_selection = tree.selection()
+        assert len(tv_selection) == 1
+        rhythm_ix, rhythm_name = next((self._get_rhythm_index(_id), self._get_rhythm_name(_id)) for _id in tv_selection)
+        self.on_request_export_rhythm_as_midi(rhythm_ix, "%s.mid" % rhythm_name)
 
     def _fill_tree_view(self):
         controller = self.controller
@@ -324,7 +365,15 @@ class BSRhythmList(BSAppFrame):
         tv = self._tree_view
         tv_item = tv.item(tree_view_item_iid)
         tv_values = tv_item['values']
-        return tv_values[0]
+        name_ix = BSController.get_rhythm_data_attr_names().index("I")
+        return tv_values[name_ix]
+
+    def _get_rhythm_name(self, tree_view_item_iid):
+        tv = self._tree_view
+        tv_item = tv.item(tree_view_item_iid)
+        tv_values = tv_item['values']
+        name_ix = BSController.get_rhythm_data_attr_names().index("Name")
+        return tv_values[name_ix]
 
     def _get_selected_rhythm_indices(self):
         tv_selection = self._tree_view.selection()
@@ -334,6 +383,8 @@ class BSRhythmList(BSAppFrame):
         controller = self.controller
         selected_rhythms = self._get_selected_rhythm_indices()
         controller.set_rhythm_selection(selected_rhythms)
+        # enable context menu only when just one rhythm is selected
+        self._context_menu.set_enabled(len(selected_rhythms) == 1)
 
     def _on_double_click(self, _):
         selected_rhythms = self._get_selected_rhythm_indices()
@@ -348,14 +399,6 @@ class BSRhythmList(BSAppFrame):
         for i, row_info in enumerate(data):
             tv.move(row_info[1], "", i)
         tv.heading(column, command=lambda col=column: self._sort_tree_view(col, not descending))
-
-    class SingleRhythmContextMenu(ContextMenu):
-        def __init__(self, root, **kwargs):
-            ContextMenu.__init__(self, root, **kwargs)
-            self.add_command(label="Set as target rhythm")
-            self.add_command(label="Plot rhythm")
-            self.add_separator()
-            self.add_command(label="Hola, soy Juan")
 
 
 class BSTransportControls(BSAppFrame, object):
@@ -687,6 +730,11 @@ class BSMainMenu(tk.Menu, object):
         tk.Menu.__init__(self, root, **kwargs)
         f_menu = tk.Menu(self, tearoff=0)
         f_menu.add_command(
+            label="New rhythm",
+            command=lambda: self.on_request_new_rhythm_window(),
+            accelerator="Ctrl+N"
+        )
+        f_menu.add_command(
             label="Settings",
             command=lambda: self.on_request_show_settings_window(),
             accelerator="Ctrl+,"
@@ -702,9 +750,20 @@ class BSMainMenu(tk.Menu, object):
             command=lambda: self.on_request_exit()
         )
         self.add_cascade(label="File", menu=f_menu)
+        self._on_request_new_rhythm_window = no_callback
         self._on_show_settings_window_request = no_callback
         self._on_show_midi_batch_export_window_request = no_callback
         self._on_request_exit = no_callback
+
+    @property
+    def on_request_new_rhythm_window(self) -> tp.Callable:
+        return self._on_request_new_rhythm_window
+
+    @on_request_new_rhythm_window.setter
+    def on_request_new_rhythm_window(self, callback: tp.Callable):
+        if not callable(callback):
+            raise TypeError("Expected callable but got \"%s\"" % str(callback))
+        self._on_request_new_rhythm_window = callback
 
     @property
     def on_request_exit(self):
@@ -1557,10 +1616,22 @@ class BSApp(tk.Tk, object):
         midi_export_window = BSMidiBatchExportWindow(self)
         midi_export_window.focus()
 
+    @staticmethod
+    def show_save_midi_box(fname: str) -> str:
+        fpath = filedialog.asksaveasfilename(
+            title="Export as MIDI file",
+            defaultextension=".mid",
+            initialfile=fname,
+            filetypes=(("MIDI files", "*.mid"), ("All files", "*.*"))
+        )
+
+        return fpath
+
     def _setup_frames(self):
         search_frame = self.frames[BSApp.FRAME_SEARCH]
-        rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]
+        rhythms_frame = self.frames[BSApp.FRAME_RHYTHM_LIST]  # type: BSRhythmList
         rhythms_frame.on_request_target_rhythm = self._handle_target_rhythm_request
+        rhythms_frame.on_request_export_rhythm_as_midi = self._handle_export_rhythm_as_midi_request
         search_frame.search_command = self.controller.calculate_distances_to_target_rhythm
         search_frame.on_new_measure = self.controller.set_distance_measure
         search_frame.on_new_tracks = self.controller.set_tracks_to_compare
@@ -1597,6 +1668,11 @@ class BSApp(tk.Tk, object):
         controller = self.controller
         rhythm = controller.get_rhythm_by_index(rhythm_ix)
         controller.set_target_rhythm(rhythm)
+
+    def _handle_export_rhythm_as_midi_request(self, rhythm_ix: int, fname: str):
+        controller = self.controller
+        fpath = self.show_save_midi_box(fname)
+        controller.export_single_rhythm_as_midi(fpath, rhythm_ix)
 
     @staticmethod
     def _on_loading_error(loading_error: BSMidiRhythmLoader.LoadingError):

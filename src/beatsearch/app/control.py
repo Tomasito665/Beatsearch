@@ -742,6 +742,20 @@ class BSController(object):
 
         return loader
 
+    def export_single_rhythm_as_midi(self, fpath: str, rhythm_ix: int):
+        """
+        Exports a single rhythm as a MIDI file, given its rhythm index.
+
+        :param fpath: path to export the MIDI file to (including the .mid extension)
+        :param rhythm_ix: rhythm index
+        :return: None
+        """
+
+        rhythm = self.get_rhythm_by_index(rhythm_ix)
+        midi_pattern = rhythm.as_midi_pattern()
+        LOGGER.info("Saving rhythm to: %s" % fpath)
+        midi.write_midifile(fpath, midi_pattern)
+
     def export_rhythms_as_midi(self, export_directory: str, rhythms: tp.Union[tp.Sequence[int], str]):
         """
         Exports rhythms as MIDI files to the given export directory. The rhythms can be given in two ways:
@@ -769,9 +783,7 @@ class BSController(object):
         for rhythm_ix in rhythm_indices:
             rhythm = self.get_rhythm_by_index(rhythm_ix)
             fpath = os.path.join(export_directory, "%s.mid" % rhythm.get_name())
-            midi_pattern = rhythm.as_midi_pattern()
-            LOGGER.info("Saving rhythm to: %s" % fpath)
-            midi.write_midifile(fpath, midi_pattern)
+            self.export_single_rhythm_as_midi(fpath, rhythm_ix)
 
     def bind(self, action, callback):
         """
