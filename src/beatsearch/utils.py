@@ -232,7 +232,7 @@ def get_midi_files_in_directory(directory):
         for f_name in files:
             if os.path.splitext(f_name)[1] != ".mid":
                 continue
-            yield os.path.join(directory, directory, f_name)
+            yield os.path.join(directory, f_name)
 
 
 class TupleView(collections.Sequence):
