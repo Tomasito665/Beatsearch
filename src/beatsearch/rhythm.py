@@ -2739,8 +2739,9 @@ class MidiRhythm(RhythmLoop):
             elif isinstance(msg, midi.SetTempoEvent):
                 bpm = float(msg.get_bpm())
             elif isinstance(msg, midi.EndOfTrackEvent):
+                # NOTE: Although this is the last event of the track, there might be other tracks coming, so don't put
+                # a break here (e.g. with midi format 1, where meta data and notes are divided into separate tracks)
                 eot_event = msg
-                break
 
         if ts_midi_event is None:
             raise ValueError("Given pattern contains no time signature")
