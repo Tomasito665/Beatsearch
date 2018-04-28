@@ -63,7 +63,8 @@ def plot_box_notation_grid(
         position: Point2D = Point2D(0, 0),
         textbox_width: int = 2,
         line_width: int = 1,
-        line_color: str = "black"
+        line_color: str = "black",
+        beat_colors=(to_rgba("black", 0.21), to_rgba("black", 0.09))
 ):
     # hide axis
     for axis in [axes.xaxis, axes.yaxis]:
@@ -88,6 +89,23 @@ def plot_box_notation_grid(
         x=text_box.x, y=text_box.y
     )
 
+    # draw beat rectangles
+    if beat_colors:
+        timesig = rhythm.get_time_signature()
+        beat_unit = timesig.get_beat_unit()
+        n_steps_per_beat = beat_unit.convert(1, unit, quantize=True)
+        n_beats = rhythm.get_duration(beat_unit, ceil=True)
+
+        for beat in range(n_beats):
+            beat_in_measure = beat % timesig.numerator
+            step = beat * n_steps_per_beat
+            axes.add_artist(plt.Rectangle(
+                [grid_box.x + step, grid_box.y],
+                width=n_steps_per_beat, height=grid_box.height,
+                facecolor=beat_colors[beat_in_measure % 2],
+                fill=True
+            ))
+
     # draw main box
     axes.add_artist(plt.Rectangle(
         container.position, container.width, container.height,
@@ -103,11 +121,12 @@ def plot_box_notation_grid(
         ))
 
     # add vertical lines
-    for pulse in range(grid_box.width):
-        pulse_x = grid_box.x + pulse
+    for step in range(grid_box.width):
+        step_x = grid_box.x + step
         axes.add_artist(plt.Line2D(
-            [pulse_x, pulse_x], [grid_box.y_bounds],
-            color=line_color, linewidth=line_width
+            [step_x, step_x], [grid_box.y_bounds],
+            color=line_color, linewidth=line_width,
+            solid_capstyle="butt"
         ))
 
     track_names = tuple(t.name for t in rhythm.get_track_iterator())
@@ -225,12 +244,14 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             subplot_layout: SubplotLayout,
             feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractor]] = None,
             snap_to_grid_policy: SnapsToGridPolicy = SnapsToGridPolicy.NOT_APPLICABLE,
-            snaps_to_grid: bool = None
+            snaps_to_grid: bool = None,
+            draws_own_legend: bool = False,
     ):
         self._subplot_layout = subplot_layout            # type: SubplotLayout
         self._feature_extractors = feature_extractors or dict()  # type: tp.Dict[str, RhythmFeatureExtractor]
         self._unit = None                                # type: Unit
         self._snaps_to_grid = None                       # type: bool
+        self._draws_own_legend = draws_own_legend        # type: bool
         self._snap_to_grid_policy = snap_to_grid_policy  # type: SnapsToGridPolicy
 
         if snaps_to_grid is None:
@@ -364,7 +385,8 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             **self.get_legend_kwargs()
         }
 
-        figure.legend(artist_handles, track_names, **legend_kwargs)
+        if not self._draws_own_legend:
+            figure.legend(artist_handles, track_names, **legend_kwargs)
 
         if show:
             plt.show()
@@ -638,7 +660,8 @@ class BoxNotation(RhythmLoopPlotter):
                 'onset_positions': OnsetPositionVector(),
                 **(extra_feature_extractors or dict())
             },
-            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
+            draws_own_legend=True
         )
 
         self.line_width = 1
@@ -692,15 +715,10 @@ class BoxNotation(RhythmLoopPlotter):
             axes.add_artist(plt.Rectangle(
                 [grid_box.x + onset_pos, grid_box.y + track_ix],
                 width=1, height=1, facecolor=kw['color'],
-                edgecolor="black", linewidth=0.75
+                edgecolor="black", linewidth=0.75, joinstyle="miter"
             ))
 
         return plt.Rectangle([0, 0], 1, 1)
-
-    def get_legend_kwargs(self):
-        # effectively hide the legend (move so far out that it's not visible anymore)
-        # we don't need the legend as we already draw the track names in the plot itself
-        return {'loc': "lower right", 'bbox_to_anchor': (0, 0)}
 
 
 class PolyphonicSyncopationVectorGraph(BoxNotation):
