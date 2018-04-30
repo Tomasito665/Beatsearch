@@ -591,9 +591,9 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
 
 
 class SyncopationVector(MonophonicRhythmFeatureExtractor):
-    def __init__(self, unit: UnitType = Unit.EIGHTH, equal_upbeat_salience_profile: bool = False):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
         super().__init__(unit)
-        self.equal_upbeat_salience_profile = bool(equal_upbeat_salience_profile)
+        self.salience_profile_type = salience_profile_type
 
     @staticmethod
     def init_pre_processors():
@@ -623,8 +623,7 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
 
         note_vector = pre_processor_results[0]
         time_signature = rhythm.get_time_signature()
-        metrical_weights = time_signature.get_salience_profile(
-            self.unit, equal_upbeats=self.equal_upbeat_salience_profile)
+        metrical_weights = time_signature.get_salience_profile(self.unit, kind=self.salience_profile_type)
 
         for n, [curr_event_type, _, curr_step] in enumerate(note_vector):
             next_event_type, next_event_duration, next_step = note_vector[(n + 1) % len(note_vector)]
@@ -779,9 +778,9 @@ class MultiChannelMonophonicRhythmFeatureVector(PolyphonicRhythmFeatureExtractor
 
 
 class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractor):
-    def __init__(self, unit: UnitType = Unit.EIGHTH, equal_upbeat_salience_profile: bool = False):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "hierarchical"):
         super().__init__(unit)
-        self.equal_upbeat_salience_profile = bool(equal_upbeat_salience_profile)
+        self.salience_profile_type = salience_profile_type  # type: str
         self._f_get_instrumentation_weight = None
         # type: tp.Optional[tp.Callable[[tp.Set[str], tp.Set[str]], tp.Union[int, float]]]
 
@@ -872,7 +871,7 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractor):
             return
 
         time_signature = rhythm.get_time_signature()
-        salience_profile = time_signature.get_salience_profile(self.unit, self.equal_upbeat_salience_profile)
+        salience_profile = time_signature.get_salience_profile(self.unit, kind=self.salience_profile_type)
         get_instrumentation_weight = self._f_get_instrumentation_weight or self.default_instrumentation_weight_function
 
         # A dictionary containing (instrument, event) tuples by event position

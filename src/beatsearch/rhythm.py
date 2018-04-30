@@ -354,7 +354,7 @@ class TimeSignature(object):
         return tuple(divisions)
 
     @parse_unit_argument
-    def get_salience_profile(self, unit: UnitType = Unit.EIGHTH, equal_upbeats: bool = False, root_weight: int = 0):
+    def get_salience_profile(self, unit: UnitType = Unit.EIGHTH, kind: str = "hierarchical", root_weight: int = 0):
         """Returns the metrical weights for a full measure of this time signature
 
         Returns the metrical weights for a full measure of this time signature with a step size of the given unit. When
@@ -368,21 +368,33 @@ class TimeSignature(object):
         computing the salience profile corresponds to the method proposed by H.C. Longuet-Higgins & C.S. Lee in their
         work titled "The Rhythmic Interpretation of Monophonic Music".
 
-        When equal_upbeats is set to true, this method will only construct a hierarchical meter for one beat of this
-        time signature with a root weight of the given root weight minus one. It will flatten that tree and repeat it
-        till one measure is filled after which the downbeat weight is set to the given root weight. This way of
-        computing the salience profile corresponds to the method proposed Maria A.G. Witek et al. in their work titled
-        "Syncopation, Body-Movement and Pleasure in Groove Music".
+        This method can create three kinds of salience profiles, depending on the given "kind" parameter.
+
+            'hierarchical'   A fully hierarchical salience profile.
+
+            'equal_upbeats'  A salience profile in which every beat is equally weighted except for the downbeat, which
+                             is heavier. The steps within the beats are fully hierarchical. This salience profile is
+                             used by Maria A.G. Witek et al in their work titled "Syncopation, Body-Movement and
+                             Pleasure in Groove Music".
+
+            'equal_beats'    A salience profile in which every beat (both upbeats and downbeats have the same weight) is
+                             equally weighted. The steps within the beats are fully hierarchical.
 
         :param unit: step time unit
-        :param equal_upbeats: when true, all beats will have the same weight except for the downbeat, which will have a
-                              greater weight
+        :param kind: one of {'hierarchical', 'equal_upbeats', 'equal_beats'}, see main method description for more info
         :param root_weight: weight of first node in the
         :return: the metrical weights for a full measure of this time signature with the given time unit
         """
 
-        f = self.__get_salience_profile_with_equal_upbeats if \
-            equal_upbeats else self.__get_salience_profile_full_hierarchical
+        try:
+            f = {
+                'hierarchical': self.__get_salience_profile_full_hierarchical,
+                'equal_upbeats': self.__get_salience_profile_with_equal_upbeats,
+                'equal_beats': self.__get_salience_profile_with_equal_beats
+            }[kind]
+        except KeyError:
+            raise ValueError("unknown kind: '%s', should be one of either "
+                             "hierarchical, equal_upbeats or equal_beats" % kind)
 
         return f(unit, root_weight)
 
@@ -460,16 +472,18 @@ class TimeSignature(object):
             lambda depth, *_: root_weight - depth
         )
 
-    def __get_salience_profile_with_equal_upbeats(self, unit: Unit, root_weight: int):
+    def __get_salience_profile_with_equal_beats(self, unit: Unit, root_weight: int):
         # get the fully hierarchical salience profile of one beat
         one_beat_ts = TimeSignature(1, self.denominator)
-        one_beat_weights = one_beat_ts.__get_salience_profile_full_hierarchical(unit, root_weight=root_weight-1)
+        one_beat_weights = one_beat_ts.__get_salience_profile_full_hierarchical(unit, root_weight=root_weight - 1)
 
-        # repeat the one-beat salience profile to fill one measure and assign the root weight to the downbeat
-        salience_profile = one_beat_weights * self.numerator
+        # repeat the one-beat salience profile to fill one measure
+        return one_beat_weights * self.numerator
+
+    def __get_salience_profile_with_equal_upbeats(self, unit: Unit, root_weight: int):
+        salience_profile = self.__get_salience_profile_with_equal_beats(unit, root_weight - 1)
         # noinspection PyTypeChecker
         salience_profile[0] = root_weight
-
         return salience_profile
 
     def __eq__(self, other):

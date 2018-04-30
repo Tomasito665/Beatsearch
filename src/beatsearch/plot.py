@@ -724,10 +724,12 @@ class BoxNotation(RhythmLoopPlotter):
 class PolyphonicSyncopationVectorGraph(BoxNotation):
     PLOT_TYPE_NAME = "Polyphonic syncopation vector graph"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "hierarchical"):
         super().__init__(
             unit=unit,
-            extra_feature_extractors={'poly_sync_vector': PolyphonicSyncopationVector()}
+            extra_feature_extractors={
+                'poly_sync_vector': PolyphonicSyncopationVector(salience_profile_type=salience_profile_type)
+            }
         )
 
         self.spacing = 1
@@ -868,7 +870,8 @@ def get_rhythm_loop_plotter_classes():
 def plot_salience_profile(
         salience_profile: tp.Sequence[int],
         bottom: tp.Optional[int] = None,
-        axes: tp.Optional[plt.Axes] = None
+        axes: tp.Optional[plt.Axes] = None,
+        **kwargs: tp.Dict[str, tp.Any]
 ):
     """Utility function to plot a metrical salience profile
 
@@ -878,6 +881,7 @@ def plot_salience_profile(
     :param salience_profile: salience profile returned by :meth:`beatsearch.rhythm.TimeSignature.get_salience_profile`
     :param bottom: the metrical salience value from which to draw the lines (defaults to min(salience_profile) - 1)
     :param axes: matplotlib axes object, when given, the salience profile will be drawn on these axes
+    :param: kwargs: keyword arguments passed to :meth:`matplotlib.pyplot.Axes.stem`
     :return: the matplotlib axes object on which the salience profile was drawn
     """
 
@@ -888,7 +892,7 @@ def plot_salience_profile(
     if bottom is None:
         bottom = min(salience_profile) - 1
 
-    axes.stem(salience_profile, bottom=bottom)
+    axes.stem(salience_profile, bottom=bottom, **kwargs)
     return axes
 
 
