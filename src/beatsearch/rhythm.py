@@ -3084,8 +3084,19 @@ class MidiRhythmCorpus(object):
         return self._id
 
     def __getitem__(self, i):
-        """Returns the i-th rhythm"""
-        return self._rhythm_data[i][self._RHYTHM_DATA_RHYTHM]
+        """Returns the i-th rhythm if i is an integer or the rhythm with the given name if i is a string"""
+        if isinstance(i, int):
+            return self._rhythm_data[i][self._RHYTHM_DATA_RHYTHM]
+        elif isinstance(i, str):
+            # TODO: Make this O(1)
+            try:
+                return next(rhythm for rhythm in self if rhythm.name == i)
+            except StopIteration:
+                raise KeyError("No rhythm named: %s" % i)
+        else:
+            raise TypeError("Please provide either an integer for "
+                            "indexing by rhythm index or a string for "
+                            "indexing by rhythm name.")
 
     def __len__(self):
         """Returns the number of rhythms within this corpus"""
