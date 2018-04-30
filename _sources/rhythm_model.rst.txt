@@ -42,7 +42,7 @@ simple polyphonic rhythm from a string:
    from textwrap import dedent
    from beatsearch.rhythm import PolyphonicRhythm
 
-   cascara = MonophonicRhythm.create.from_string(dedent("""
+   cascara = PolyphonicRhythm.create.from_string(dedent("""
        clave:       --x-x---x--x--x-
        timbales:    x-x-xx-xx-xx-x-x
        kick:        ---x------------

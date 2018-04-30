@@ -8,7 +8,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>Reference &mdash; Beatsearch 0.0.1.dev5 documentation</title>
+  <title>Reference &mdash; Beatsearch 0.0.1.dev8 documentation</title>
   
 
   
@@ -35,7 +35,7 @@
         <link rel="index" title="Index"
               href="genindex.html"/>
         <link rel="search" title="Search" href="search.html"/>
-    <link rel="top" title="Beatsearch 0.0.1.dev5 documentation" href="index.html"/>
+    <link rel="top" title="Beatsearch 0.0.1.dev8 documentation" href="index.html"/>
         <link rel="prev" title="Midi" href="midi.html"/> 
 
   
@@ -65,7 +65,7 @@
             
             
               <div class="version">
-                0.0.1.dev5
+                0.0.1.dev8
               </div>
             
           
@@ -612,6 +612,20 @@ or None to remove the time signature</td>
 </dd></dl>
 
 <dl class="method">
+<dt id="beatsearch.rhythm.PolyphonicRhythm.clear_tracks">
+<code class="descname">clear_tracks</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.PolyphonicRhythm.clear_tracks" title="Permalink to this definition">¶</a></dt>
+<dd><p>Clears all tracks.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">None</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
 <dt id="beatsearch.rhythm.PolyphonicRhythm.get_track_by_name">
 <code class="descname">get_track_by_name</code><span class="sig-paren">(</span><em>track_name</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.PolyphonicRhythm.get_track_by_name" title="Permalink to this definition">¶</a></dt>
 <dd><p>Returns the track with the given name or None if this rhythm has no track with the given name.</p>
@@ -654,6 +668,24 @@ always the same for each iterator returned by this method.</p>
 <tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">Iterator</span></code>[<code class="xref py py-class docutils literal"><span class="pre">Track</span></code>]</td>
 </tr>
 <tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">iterator over this rhythm&#8217;s tracks yielding PolyphonicRhythmImpl.Track objects</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.rhythm.PolyphonicRhythm.get_track_names">
+<code class="descname">get_track_names</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.PolyphonicRhythm.get_track_names" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a tuple containing the names of the tracks in this rhythm. The order in which the names are returned is
+the same as the order in which the tracks are yielded by the track iterator returned by
+<a class="reference internal" href="#beatsearch.rhythm.PolyphonicRhythm.get_track_iterator" title="beatsearch.rhythm.PolyphonicRhythm.get_track_iterator"><code class="xref py py-meth docutils literal"><span class="pre">beatsearch.rhythm.PolyphonicRhythm.get_track_iterator()</span></code></a>.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">Tuple</span></code>[<code class="xref py py-class docutils literal"><span class="pre">str</span></code>, ...]</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">tuple containing the track names</td>
 </tr>
 </tbody>
 </table>
@@ -724,11 +756,43 @@ in the given tracks.</p>
 </dd></dl>
 
 <dl class="method">
+<dt id="beatsearch.rhythm.MidiRhythm.get_midi_drum_mapping">
+<code class="descname">get_midi_drum_mapping</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.get_midi_drum_mapping" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the current MIDI drum mapping</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><a class="reference internal" href="#beatsearch.rhythm.MidiDrumMapping" title="beatsearch.rhythm.MidiDrumMapping"><code class="xref py py-class docutils literal"><span class="pre">MidiDrumMapping</span></code></a></td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">MIDI drum mapping object</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.rhythm.MidiRhythm.get_midi_drum_mapping_reducer">
+<code class="descname">get_midi_drum_mapping_reducer</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.get_midi_drum_mapping_reducer" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the current MIDI drum mapping reducer class or None if no mapping reducer has been set.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-data docutils literal"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal"><span class="pre">Type</span></code>[<a class="reference internal" href="#beatsearch.rhythm.MidiDrumMapping" title="beatsearch.rhythm.MidiDrumMapping"><code class="xref py py-class docutils literal"><span class="pre">MidiDrumMapping</span></code></a>]]</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">MIDI mapping reducer or None if no reducer set</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
 <dt id="beatsearch.rhythm.MidiRhythm.load_midi_pattern">
 <code class="descname">load_midi_pattern</code><span class="sig-paren">(</span><em>pattern</em>, <em>preserve_midi_duration=False</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.load_midi_pattern" title="Permalink to this definition">¶</a></dt>
-<dd><p>Loads a midi pattern and sets this rhythm&#8217;s tracks, time signature bpm and duration. The given midi pattern must
-have a resolution property and can&#8217;t have more than one track containing note events. The midi events map to
-rhythm properties like this:</p>
+<dd><p>Loads a midi pattern and sets this rhythm&#8217;s tracks, time signature, bpm and duration. The given midi pattern
+must have a resolution property and can&#8217;t have more than one track containing note events. The midi events map
+to rhythm properties like this:</p>
 <ul class="simple">
 <li><code class="xref py py-class docutils literal"><span class="pre">midi.NoteOnEvent</span></code>, adds an onset to this rhythm</li>
 <li><code class="xref py py-class docutils literal"><span class="pre">midi.TimeSignatureEvent</span></code>, set the time signature of this rhythm (required)</li>
@@ -759,6 +823,21 @@ otherwise it will be set to the first downbeat after the last note position</li>
 </dd></dl>
 
 <dl class="attribute">
+<dt id="beatsearch.rhythm.MidiRhythm.midi_drum_mapping_reducer">
+<code class="descname">midi_drum_mapping_reducer</code><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.midi_drum_mapping_reducer" title="Permalink to this definition">¶</a></dt>
+<dd><p>The MIDI drum mapping reducer class. Setting this property will reset the tracks of this rhythm. Set this
+property to None for no MIDI drum mapping reducer.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-data docutils literal"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal"><span class="pre">Type</span></code>[<code class="xref py py-class docutils literal"><span class="pre">MidiDrumMappingReducer</span></code>]]</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="attribute">
 <dt id="beatsearch.rhythm.MidiRhythm.midi_mapping">
 <code class="descname">midi_mapping</code><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.midi_mapping" title="Permalink to this definition">¶</a></dt>
 <dd><p>The midi mapping.</p>
@@ -771,6 +850,43 @@ otherwise it will be set to the first downbeat after the last note position</li>
 <dd><p>The mapping reducer class.</p>
 <p>The MIDI drum mapping reducer class is the class of the mapping reducer used to parse the MIDI data and create
 the tracks of this rhythm. This is a read-only property.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.rhythm.MidiRhythm.set_midi_drum_mapping">
+<code class="descname">set_midi_drum_mapping</code><span class="sig-paren">(</span><em>drum_mapping</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.set_midi_drum_mapping" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sets the MIDI drum mapping and resets the tracks accordingly.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>drum_mapping</strong> (<a class="reference internal" href="#beatsearch.rhythm.MidiDrumMapping" title="beatsearch.rhythm.MidiDrumMapping"><code class="xref py py-class docutils literal"><span class="pre">MidiDrumMapping</span></code></a>) &#8211; midi drum mapping</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Return type:</th><td class="field-body"><code class="docutils literal"><span class="pre">None</span></code></td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">None</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.rhythm.MidiRhythm.set_midi_drum_mapping_reducer">
+<code class="descname">set_midi_drum_mapping_reducer</code><span class="sig-paren">(</span><em>mapping_reducer_cls</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.MidiRhythm.set_midi_drum_mapping_reducer" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="docutils">
+<dt>Sets the MIDI drum mapping reducer and reloads the tracks. If no</dt>
+<dd>The rhythm duration will remain unchanged.</dd>
+</dl>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>mapping_reducer_cls</strong> (<code class="xref py py-data docutils literal"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal"><span class="pre">Type</span></code>[<code class="xref py py-class docutils literal"><span class="pre">MidiDrumMappingReducer</span></code>]]) &#8211; MIDI drum mapping reducer class or None to remove the mapping reducer</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">None</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="method">
@@ -903,8 +1019,9 @@ file names and file modification timestamps) to the files that were used to crea
 <dt id="beatsearch.rhythm.MidiRhythmCorpus.midi_mapping_reducer">
 <code class="descname">midi_mapping_reducer</code><a class="headerlink" href="#beatsearch.rhythm.MidiRhythmCorpus.midi_mapping_reducer" title="Permalink to this definition">¶</a></dt>
 <dd><p>The MIDI drum mapping reducer</p>
-<p>The MIDI drum mapping reducer applied to the rhythms in this corpus. This property will become a read-only
-property after the corpus has loaded.</p>
+<p>The MIDI drum mapping reducer applied to the rhythms in this corpus. Note that setting this property is an
+expensive operation, as it will iterate over every rhythm to reset its tracks according to the new mapping
+reducer.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
 <col class="field-body" />
@@ -1286,7 +1403,7 @@ MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defau
     <script type="text/javascript">
         var DOCUMENTATION_OPTIONS = {
             URL_ROOT:'./',
-            VERSION:'0.0.1.dev5',
+            VERSION:'0.0.1.dev8',
             COLLAPSE_INDEX:false,
             FILE_SUFFIX:'.html',
             HAS_SOURCE:  true,
