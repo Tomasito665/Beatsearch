@@ -1968,6 +1968,26 @@ class MidiDrumMapping(object, metaclass=ABCMeta):
 
         return iter(self.get_keys())
 
+    def __getitem__(self, item: tp.Union[int, str]) -> MidiDrumKey:
+        """Returns the midi drum key with the given midi pitch or id
+
+        :param item: either the midi or the key id
+        :return: midi drum key
+        :raises KeyError: if this mapping contains no midi drum key with given id or pitch
+        """
+
+        if isinstance(item, int):
+            midi_drum_key = self.get_key_by_midi_pitch(item)
+        elif isinstance(item, str):
+            midi_drum_key = self.get_key_by_id(item)
+        else:
+            raise TypeError("expected either an int (midi pitch) or a str (key id) but got %s" % item)
+
+        if not midi_drum_key:
+            raise KeyError("no midi drum key with id or midi pitch %s" % item)
+
+        return midi_drum_key
+
 
 class MidiDrumMappingImpl(MidiDrumMapping):
     """Midi drum mapping implementation
