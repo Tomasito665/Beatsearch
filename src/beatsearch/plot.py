@@ -724,11 +724,11 @@ class BoxNotation(RhythmLoopPlotter):
 class PolyphonicSyncopationVectorGraph(BoxNotation):
     PLOT_TYPE_NAME = "Polyphonic syncopation vector graph"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "hierarchical"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, **poly_sync_vector_kwargs):
         super().__init__(
             unit=unit,
             extra_feature_extractors={
-                'poly_sync_vector': PolyphonicSyncopationVector(salience_profile_type=salience_profile_type)
+                'poly_sync_vector': PolyphonicSyncopationVector(**poly_sync_vector_kwargs)
             }
         )
 

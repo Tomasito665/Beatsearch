@@ -494,6 +494,7 @@ class TestMultiChannelMonophonicRhythmFeatureVector(TestPolyphonicRhythmFeatureE
 
 
 # TODO: Add tests for polyphonic syncopation vector
+# TODO: Add tests for polyphonic syncopation vector (Witek)
 
 
 if __name__ == "__main__":

@@ -116,6 +116,34 @@ def head_trail_iter(iterable):
         yield first, last, item
 
 
+def current_next_pair_iter(seq: tp.Sequence, **kwargs) -> tp.Iterable[tp.Tuple[tp.Any, tp.Any]]:
+    """
+    Returns an iterator which yields a (curr_element, next_element) tuple on each iteration.
+
+    :param seq: sequence over which to iterate
+    :param kwargs:
+        post_final - if set, the iterator will include the last iteration and use this parameter as next element
+
+    :return: iterable yielding (curr_el, next_el) on each iteration (iteration count is N if given last or N-1 if not)
+    """
+
+    try:
+        post_final = kwargs["post_final"]
+        include_last = True
+    except KeyError:
+        post_final = None
+        include_last = False
+
+    for i, curr_el in enumerate(seq):
+        if (i + 1) == len(seq):  # if last
+            if not include_last:
+                break
+            next_el = post_final
+        else:
+            next_el = seq[i + 1]
+        yield curr_el, next_el
+
+
 def get_beatsearch_dir(mkdir=True):
     """Returns the beatsearch directory
     Returns the beatsearch directory. This directory is used to store *.ini files and output various beatsearch output
@@ -267,6 +295,9 @@ class TupleView(collections.Sequence):
 
         self._the_tuple = the_tuple
         self._indices = indices
+
+    def __str__(self):
+        return str(list(self))
 
     def __getitem__(self, index):
         actual_index = self._indices[index]
@@ -520,7 +551,7 @@ def find_all_concrete_subclasses(cls: tp.Type) -> tp.List[tp.Type]:
 
 __all__ = [
     'merge_dicts', 'format_timespan', 'print_progress_bar', 'friendly_named_class',
-    'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'get_beatsearch_dir',
+    'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'current_next_pair_iter', 'get_beatsearch_dir',
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
     'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable',

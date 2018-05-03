@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 
-__version__ = "0.0.1.dev8"
+__version__ = "0.0.1.dev9"
 
 
 def find_beatsearch_project_dir(max_levels: int = 5) -> str:
