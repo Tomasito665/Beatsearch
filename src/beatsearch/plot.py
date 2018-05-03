@@ -12,7 +12,8 @@ from abc import ABCMeta, abstractmethod
 from itertools import cycle, repeat
 from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
-    RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector
+    RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector, \
+    PolyphonicSyncopationVectorWitek
 from beatsearch.utils import Quantizable, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
 
 # make room for the labels
@@ -721,16 +722,13 @@ class BoxNotation(RhythmLoopPlotter):
         return plt.Rectangle([0, 0], 1, 1)
 
 
-class PolyphonicSyncopationVectorGraph(BoxNotation):
-    PLOT_TYPE_NAME = "Polyphonic syncopation vector graph"
+class PolyphonicSyncopationVectorGraphBase(BoxNotation, metaclass=ABCMeta):
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, **poly_sync_vector_kwargs):
-        super().__init__(
-            unit=unit,
-            extra_feature_extractors={
-                'poly_sync_vector': PolyphonicSyncopationVector(**poly_sync_vector_kwargs)
-            }
-        )
+    def __init__(
+            self,
+            unit: UnitType
+    ):
+        super().__init__(unit=unit, extra_feature_extractors={'poly_sync_vector': self.__get_sync_extractor__()})
 
         self.spacing = 1
         self.text_box_width = 3
@@ -745,7 +743,7 @@ class PolyphonicSyncopationVectorGraph(BoxNotation):
         box_notation_textbox = box_notation_setup_res['text_box']
 
         # compute the polyphonic syncopation vector
-        poly_sync_extractor = self.get_feature_extractor("poly_sync_vector")  # type: PolyphonicSyncopationVector
+        poly_sync_extractor = self.__get_sync_extractor__()
         poly_sync_vector = poly_sync_extractor.process(rhythm_loop)
 
         # retrieve the levels on which syncopations could occur
@@ -850,8 +848,82 @@ class PolyphonicSyncopationVectorGraph(BoxNotation):
 
         return box_notation_setup_res
 
-    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
-        return super().__draw_track__(rhythm_track, axes, **kw)
+    @abstractmethod
+    def __get_sync_extractor__(self):
+        # should return the polyphonic syncopation extractor
+
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
+    def get_plot_type_name(cls):
+        raise NotImplementedError
+
+
+class PolyphonicSyncopationVectorWitekGraph(PolyphonicSyncopationVectorGraphBase):
+    PLOT_TYPE_NAME = "Syncopation graph (Witek)"
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
+        self._extractor = PolyphonicSyncopationVectorWitek(unit)
+        super().__init__(unit)
+
+    @property
+    def salience_profile_type(self) -> str:
+        return self._extractor.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._extractor.salience_profile_type = salience_profile_type
+
+    def __get_sync_extractor__(self) -> PolyphonicSyncopationVectorWitek:
+        return self._extractor
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+
+class PolyphonicSyncopationVectorGraph(PolyphonicSyncopationVectorGraphBase):
+    PLOT_TYPE_NAME = "Syncopation graph"
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
+        self._extractor = PolyphonicSyncopationVector(unit)
+        super().__init__(unit)
+
+    @property
+    def salience_profile_type(self) -> str:
+        return self._extractor.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._extractor.salience_profile_type = salience_profile_type
+
+    @property
+    def instrumentation_weight_function(self) -> tp.Callable[[str, tp.Iterable[str]], int]:
+        return self._extractor.instrumentation_weight_function
+
+    @instrumentation_weight_function.setter
+    def instrumentation_weight_function(self, instr_w_function: tp.Callable[[str, tp.Iterable[str]], int]):
+        self._extractor.instrumentation_weight_function = instr_w_function
+
+    @property
+    def nested_syncopations(self):
+        return self._extractor.nested_syncopations
+
+    @nested_syncopations.setter
+    def nested_syncopations(self, nested_syncopations: str):
+        self._extractor.nested_syncopations = nested_syncopations
+
+    @property
+    def only_uninterrupted_syncopations(self) -> bool:
+        return self._extractor.only_uninterrupted_syncopations
+
+    @only_uninterrupted_syncopations.setter
+    def only_uninterrupted_syncopations(self, only_uninterrupted_syncopations: bool):
+        self._extractor.only_uninterrupted_syncopations = only_uninterrupted_syncopations
+
+    def __get_sync_extractor__(self) -> PolyphonicSyncopationVector:
+        return self._extractor
 
     @classmethod
     def get_plot_type_name(cls):
@@ -902,7 +974,7 @@ __all__ = [
 
     'SchillingerRhythmNotation', 'ChronotonicNotation', 'PolygonNotation',
     'SpectralNotation', 'TEDASNotation', 'IOIHistogram', 'BoxNotation',
-    'PolyphonicSyncopationVectorGraph',
+    'PolyphonicSyncopationVectorGraph', 'PolyphonicSyncopationVectorWitekGraph',
 
     # Subplot layouts
     'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
