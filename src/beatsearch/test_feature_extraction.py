@@ -1,3 +1,4 @@
+import functools
 import typing as tp
 from fractions import Fraction
 from unittest import TestCase, main
@@ -47,23 +48,18 @@ def set_rhythm_mock_properties(rhythm_mock, resolution, time_signature, duration
     rhythm_mock.get_duration.return_value = duration_in_ticks
 
 
-def get_mono_rhythm_mock_with_23_rumba_clave_onsets(resolution):
+def get_mono_rhythm_mock(rhythm_str: str, resolution: int, onset_char: str = "x") -> MonophonicRhythm:
+    # returns rhythm with duration of one measure in 4/4
+
     rhythm_mock = MagicMock(MonophonicRhythm)
-    assert resolution >= 4, "the 2/3 claves pattern is is not representable with a resolution smaller than 4"
-
-    onset_positions = (
-        int(resolution / 4.0 * 0),
-        int(resolution / 4.0 * 3),
-        int(resolution / 4.0 * 7),
-        int(resolution / 4.0 * 10),
-        int(resolution / 4.0 * 12)
-    )
-
+    onset_positions = tuple(resolution / 4.0 * i for i, c in enumerate(rhythm_str) if c == onset_char)
     mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
+
     rhythm_mock.get_onsets.return_value = mocked_onsets
     rhythm_mock.onsets = rhythm_mock.get_onsets.return_value
-
     set_rhythm_mock_properties(rhythm_mock, resolution, (4, 4), int(resolution) * 4)
+
+    # noinspection PyTypeChecker
     return rhythm_mock
 
 
@@ -195,7 +191,7 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(TestRhythmFeatureE
     def __init__(self, *args, **kw):
         # noinspection PyArgumentList
         super().__init__(*args, **kw)
-        self.rhythm = get_mono_rhythm_mock_with_23_rumba_clave_onsets(4)  # type: MonophonicRhythm
+        self.rhythm = get_mono_rhythm_mock(self.get_rhythm_str(), 4)  # type: MonophonicRhythm
         self.feature_extractor = None  # type: tp.Union[MonophonicRhythmFeatureExtractor, None]
 
     # noinspection PyPep8Naming
@@ -214,6 +210,10 @@ class TestMonophonicRhythmFeatureExtractorImplementationMixin(TestRhythmFeatureE
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         raise NotImplementedError
 
+    @staticmethod
+    def get_rhythm_str():
+        return "x--x---x--x-x---"
+
 
 class TestBinaryOnsetVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
@@ -228,6 +228,14 @@ class TestBinaryOnsetVector(TestMonophonicRhythmFeatureExtractorImplementationMi
 
 class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
 
+    def setUp(self):
+        super().setUp()
+
+        # TODO mock time signature and its methods
+        rhythm = self.rhythm
+        rhythm.time_signature = TimeSignature(4, 4)
+        rhythm.get_time_signature.return_value = rhythm.time_signature
+
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         return NoteVector
@@ -238,18 +246,60 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
         # Syncopation vector does not support tick-based computation
         return list(Unit)
 
-    def test_process(self):
-        expected_note_vector_string = "N2 R1 N1 R2 R1 N1 R2 N2 N4"
-        to_event = lambda c: [NoteVector.NOTE, NoteVector.REST]["NR".index(c)]
+    @staticmethod
+    def create_note_vector(note_vec_str: str) -> tp.Sequence[tp.Tuple[str, int, int]]:
+        note_vec_str = note_vec_str.split()
+        get_e_type = lambda char: [NoteVector.NOTE, NoteVector.TIED_NOTE, NoteVector.REST]["NTR".index(char)]
+        positions = functools.reduce(lambda out, x: out + [out[-1] + x], (int(s[1]) for s in note_vec_str), [0])
+        return tuple((get_e_type(s[0]), int(s[1]), p) for s, p in zip(note_vec_str, positions))
 
-        # TODO mock time signature and its methods
-        rhythm = self.rhythm
-        rhythm.time_signature = TimeSignature(4, 4)
-        rhythm.get_time_signature.return_value = rhythm.time_signature
+    def test_defaults_to_tied_notes(self):
+        extractor = self.feature_extractor  # type: NoteVector
+        self.assertTrue(extractor.tied_notes)
 
-        expected_note_vector = tuple((to_event(s[0]), int(s[1])) for s in expected_note_vector_string.split())
-        actual_note_vector = self.feature_extractor.process(rhythm)
+    def test_defaults_to_cyclic(self):
+        extractor = self.feature_extractor  # type: NoteVector
+        self.assertTrue(extractor.cyclic)
+
+    def test_process_with_tied_notes(self):
+        extractor = self.feature_extractor  # type: NoteVector
+        extractor.tied_notes = True
+
+        expected_note_vector = self.create_note_vector("N2 T1 N1 T2 R1 N1 T2 N2 N4")
+        actual_note_vector = extractor.process(self.rhythm)
+
         self.assertSequenceEqual(actual_note_vector, expected_note_vector)
+
+    def test_process_without_tied_notes(self):
+        extractor = self.feature_extractor  # type: NoteVector
+        extractor.tied_notes = False
+
+        expected_note_vector = self.create_note_vector("N2 R1 N1 R2 R1 N1 R2 N2 N4")
+        actual_note_vector = extractor.process(self.rhythm)
+
+        self.assertSequenceEqual(actual_note_vector, expected_note_vector)
+
+    def test_process_cyclic_rhythm_counts_first_rest_as_tied_note(self):
+        rhythm = get_mono_rhythm_mock("--x-x---x--x--x-", 4)  # rumba 23
+        rhythm.get_time_signature.return_value = TimeSignature(4, 4)
+        rhythm.time_signature = rhythm.get_time_signature.return_value
+
+        extractor = self.feature_extractor  # type: NoteVector
+        extractor.tied_notes = True
+        extractor.cyclic = True
+
+        self.assertEqual(self.create_note_vector("T2")[0], extractor.process(rhythm)[0])
+
+    def test_process_non_cyclic_rhythm_doesnt_count_first_rest_as_tied_note(self):
+        rhythm = get_mono_rhythm_mock("--x-x---x--x--x-", 4)  # rumba 23
+        rhythm.get_time_signature.return_value = TimeSignature(4, 4)
+        rhythm.time_signature = rhythm.get_time_signature.return_value
+
+        extractor = self.feature_extractor  # type: NoteVector
+        extractor.tied_notes = True
+        extractor.cyclic = False
+
+        self.assertEqual(self.create_note_vector("R2")[0], extractor.process(rhythm)[0])
 
 
 class TestIOIVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):

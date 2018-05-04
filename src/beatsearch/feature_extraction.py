@@ -244,13 +244,30 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
 
 
 class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
-    REST = 0
-    NOTE = 1
+    NOTE = "N"
+    """Note event"""
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, ret_positions: bool = False):
+    TIED_NOTE = "T"
+    """Tied note event"""
+
+    REST = "R"
+    """Rest event"""
+
+    _GET_REST_OR_TIED_NOTE = {
+        # With support for tied notes
+        True: lambda prev_e: NoteVector.TIED_NOTE if prev_e == NoteVector.NOTE else NoteVector.REST,
+        # Without support for tied notes
+        False: lambda _: NoteVector.REST
+    }
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, tied_notes: bool = True, cyclic: bool = True):
         super().__init__(unit)
-        self._ret_positions = None
-        self.ret_positions = ret_positions  # call setter
+        self._tied_notes = None
+        self._cyclic = None
+
+        # call setters
+        self.tied_notes = tied_notes
+        self.cyclic = cyclic
 
     def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         if unit is None:
@@ -262,12 +279,20 @@ class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtra
         yield BinaryOnsetVector()
 
     @property
-    def ret_positions(self):
-        return self._ret_positions
+    def tied_notes(self):
+        return self._tied_notes
 
-    @ret_positions.setter
-    def ret_positions(self, ret_position):
-        self._ret_positions = bool(ret_position)
+    @tied_notes.setter
+    def tied_notes(self, tied_notes: bool):
+        self._tied_notes = bool(tied_notes)
+
+    @property
+    def cyclic(self):
+        return self._cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        self._cyclic = bool(cyclic)
 
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         # TODO Add documentation
@@ -275,39 +300,48 @@ class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtra
         Rhythm.Precondition.check_time_signature(rhythm)
         time_sig = rhythm.get_time_signature()
 
-        natural_duration_map = time_sig.get_natural_duration_map(self.unit)
+        natural_duration_map = time_sig.get_natural_duration_map(self.unit, trim_to_pulse=True)
         duration_pool = sorted(set(natural_duration_map))  # NOTE The rest of this method depends on this being sorted
         binary_vector = pre_processor_results[0]
 
-        if self._ret_positions:
-            get_yield_values = lambda event_type, event_duration, event_position: \
-                (event_type, event_duration, event_position)
-        else:
-            get_yield_values = lambda event_type, event_duration, event_position: (event_type, event_duration)
+        tied_note_support = self.tied_notes
+        get_rest_or_tied_note = self._GET_REST_OR_TIED_NOTE[tied_note_support]
 
-        i, n = 0, len(binary_vector)
+        step = 0
+        step_count = len(binary_vector)
+        note_vector = []  # type: tp.List[tp.Tuple[str, int, int]]
 
-        while i < n:
-            metrical_position = i % len(natural_duration_map)
+        while step < step_count:
+            metrical_position = step % len(natural_duration_map)
             natural_duration = natural_duration_map[metrical_position]
-            is_onset = binary_vector[i]
+            is_onset = binary_vector[step]
 
-            # compute the duration till the next note trimmed at the natural duration
-            max_duration = next((j for j in range(1, natural_duration) if binary_vector[i + j]), natural_duration)
+            # Compute the duration till the next note trimmed at the natural duration (which itself is pulse-trimmed)
+            max_duration = next((j for j in range(1, natural_duration) if binary_vector[step + j]), natural_duration)
 
             if is_onset:
-                # get the maximum available duration that fits the max duration
+                # Get the maximum available duration that fits the max duration
                 note_duration = next(d for d in reversed(duration_pool) if d <= max_duration)
-                yield get_yield_values(self.NOTE, note_duration, i)
+                note_vector.append((self.NOTE, note_duration, step))
 
-                i += note_duration
+                step += note_duration
                 continue
 
             rests = tuple(minimize_term_count(max_duration, duration_pool, assume_sorted=True))
+            prev_e_type = note_vector[-1][0] if note_vector else self.REST
 
             for rest_duration in rests:
-                yield get_yield_values(self.REST, rest_duration, i)
-                i += rest_duration
+                curr_e_type = get_rest_or_tied_note(prev_e_type)
+                note_vector.append((curr_e_type, rest_duration, step))
+                prev_e_type = curr_e_type
+                step += rest_duration
+
+        # Adjust heading rest to tied note if necessary
+        if self.cyclic and note_vector and note_vector[0][0] == self.REST:
+            last_e_type = note_vector[-1][0]
+            note_vector[0] = (get_rest_or_tied_note(last_e_type), *note_vector[0][1:])
+
+        return note_vector
 
 
 class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
@@ -608,7 +642,7 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
 
     @staticmethod
     def init_pre_processors():
-        yield NoteVector(ret_positions=True)
+        yield NoteVector()
 
     def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         if unit is None:
@@ -652,8 +686,8 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
         for n, [curr_event_type, _, curr_step] in enumerate(note_vector):
             next_event_type, next_event_duration, next_step = note_vector[(n + 1) % len(note_vector)]
 
-            # only iterate over note-rest pairs
-            if not (curr_event_type == NoteVector.NOTE and next_event_type == NoteVector.REST):
+            # only iterate over [note, rest or tied note] pairs
+            if not (curr_event_type == NoteVector.NOTE and next_event_type in (NoteVector.TIED_NOTE, NoteVector.REST)):
                 continue
 
             note_weight = metrical_weights[curr_step % len(metrical_weights)]
@@ -1062,7 +1096,7 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractor):
     @staticmethod
     def init_pre_processors():
         multi_channel_note_vector = MultiChannelMonophonicRhythmFeatureVector(Unit.EIGHTH)
-        multi_channel_note_vector.monophonic_extractor = NoteVector(ret_positions=True)
+        multi_channel_note_vector.monophonic_extractor = NoteVector()
         yield multi_channel_note_vector
 
     def set_unit(self, unit: tp.Optional[UnitType]) -> None:
@@ -1153,6 +1187,7 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractor):
         instrument_event_pairs_by_position = defaultdict(lambda: set())
         for instrument, events in note_vectors.items():
             # NoteVector with ret_positions set to True adds event position as 3rd element (= e[2])
+            # NoteVector returns the position
             for e in events:
                 instrument_event_pairs_by_position[e[2]].add((instrument, e))
 
