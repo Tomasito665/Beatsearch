@@ -1,15 +1,18 @@
 import enum
 import types
+import logging
 import itertools
 import numpy as np
 import typing as tp
 from fractions import Fraction
-from collections import OrderedDict, defaultdict, namedtuple
+from collections import OrderedDict, defaultdict
 from abc import ABCMeta, abstractmethod
-from beatsearch.utils import Quantizable, minimize_term_count, TupleView, current_next_pair_iter
+from beatsearch.utils import Quantizable, minimize_term_count, TupleView
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
     Unit, UnitType, parse_unit_argument, convert_tick
 
+
+LOGGER = logging.getLogger(__name__)
 
 ######################################
 # Feature extractor abstract classes #
@@ -809,10 +812,14 @@ class MonophonicTensionVector(MonophonicRhythmFeatureExtractor):
     note (non-sounding note), then the tension of E(i) equals the tension of E(i-1).
     """
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH,
+                 salience_profile_type: str = "equal_upbeats", normalize: bool = False):
         super().__init__(unit)
         self._salience_prf_type = None
+        self._normalize = None
+
         self.salience_profile_type = salience_profile_type
+        self.normalize = normalize
 
     @staticmethod
     def init_pre_processors():
@@ -836,6 +843,16 @@ class MonophonicTensionVector(MonophonicRhythmFeatureExtractor):
     def salience_profile_type(self, salience_profile_type: str):
         self._salience_prf_type = salience_profile_type
 
+    @property
+    def normalize(self) -> bool:
+        """When set to True, the tension will have a range of [0, 1]"""
+
+        return self._normalize
+
+    @normalize.setter
+    def normalize(self, normalize: bool):
+        self._normalize = bool(normalize)
+
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         time_sig = rhythm.get_time_signature()
         salience_profile = time_sig.get_salience_profile(self.unit, self.salience_profile_type)
@@ -844,12 +861,20 @@ class MonophonicTensionVector(MonophonicRhythmFeatureExtractor):
         tension_per_event = []                  # type: tp.List[int]
         prev_e_tension = None                   # type: tp.Optional[int]
 
+        if self.normalize:
+            assert max(salience_profile) == 0
+            salience_range = abs(min(salience_profile))
+            assert salience_range > 0
+            normalizer = 1.0 / salience_range
+        else:
+            normalizer = 1.0
+
         for event_index, [e_type, _, e_pos] in enumerate(note_vector):
             if e_type == NoteVector.TIED_NOTE:
                 e_tension = prev_e_tension
             else:
                 metrical_pos = e_pos % len(salience_profile)
-                e_tension = salience_profile[metrical_pos] * -1
+                e_tension = salience_profile[metrical_pos] * -1 * normalizer
 
             tension_per_event.append(e_tension)
             prev_e_tension = e_tension
@@ -1296,6 +1321,112 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractor):
                 yield syncopation_degree, curr_step, next_step
 
 
+class PolyphonicTensionVector(PolyphonicRhythmFeatureExtractor):
+    """
+    This feature extractor computes the monophonic tension vector per track. It multiplies the monophonic tensions with
+    instrument weights and then returns the sum. Instrument weights can be set with
+    :meth:`beatsearch.feature_extraction.PolyphonicTensionVector.set_instrument_weights`.
+    """
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH,
+                 salience_profile_type: str = "hierarchical", normalize: bool = False):
+        super().__init__(unit)
+        self._instr_weights = dict()
+        self.salience_profile_type = salience_profile_type  # type: str
+        self.normalize = normalize
+
+    @staticmethod
+    def init_pre_processors():
+        mc_tension_vec = MultiChannelMonophonicRhythmFeatureVector(Unit.EIGHTH)
+        mc_tension_vec.monophonic_extractor = MonophonicTensionVector()
+        yield mc_tension_vec
+
+    @property
+    def salience_profile_type(self) -> str:
+        mc_tension_vec = self.get_pre_processors()[0]           # type: MultiChannelMonophonicRhythmFeatureVector
+        mono_tension_vec = mc_tension_vec.monophonic_extractor  # type: MonophonicTensionVector
+        return mono_tension_vec.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        mc_tension_vec = self.get_pre_processors()[0]           # type: MultiChannelMonophonicRhythmFeatureVector
+        mono_tension_vec = mc_tension_vec.monophonic_extractor  # type: MonophonicTensionVector
+        mono_tension_vec.salience_profile_type = salience_profile_type
+
+    @property
+    def normalize(self):
+        """When set to True, the tension will have a range of [0, 1]"""
+        mc_tension_vec = self.get_pre_processors()[0]           # type: MultiChannelMonophonicRhythmFeatureVector
+        mono_tension_vec = mc_tension_vec.monophonic_extractor  # type: MonophonicTensionVector
+        return mono_tension_vec.normalize
+
+    @normalize.setter
+    def normalize(self, normalize: bool):
+        mc_tension_vec = self.get_pre_processors()[0]           # type: MultiChannelMonophonicRhythmFeatureVector
+        mono_tension_vec = mc_tension_vec.monophonic_extractor  # type: MonophonicTensionVector
+        mono_tension_vec.normalize = normalize
+
+    def set_instrument_weights(self, instrument_weights: tp.Dict[str, float]):
+        """
+        Sets the instrument weights. This will clear the previous weights. The instrument weights must be given as a
+        dictionary containing the weights by instrument name. The weights must be given as a float (or something
+        interpretable as a float). The instrument names must be given as a strings.
+
+        :param instrument_weights: dictionary containing weights by instrument name
+        :return: None
+        """
+
+        self._instr_weights.clear()
+
+        for instr, weight in instrument_weights.items():
+            instr = str(instr)
+            weight = float(weight)
+            self._instr_weights[instr] = weight
+
+    def get_instrument_weights(self):
+        """
+        Returns a new dictionary containing the weights per instrument. Weights are floating point numbers between 0
+        and 1. Instruments are instrument names (track names).
+
+        :return: dictionary containing weights per instrument
+        """
+
+        return {**self._instr_weights}
+
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        if unit is None:
+            raise ValueError("PolyphonicTensionVector does not support tick-based computation")
+        super().set_unit(unit)
+
+    def __process__(self, rhythm: PolyphonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        weights = self.get_instrument_weights()
+        mono_tension_vectors = pre_processor_results[0]  # type: tp.Dict[str, tp.Sequence[int]]
+        default_weight = 1.0 / rhythm.get_track_count()
+        tension_vectors_scaled = []
+
+        for instr, tension_vec in mono_tension_vectors.items():
+            try:
+                w = weights[instr]
+            except KeyError:
+                LOGGER.warning("Weight unknown for: %s (defaulting to %.2f)" % (instr, default_weight))
+
+                # We add the default weight to the weights dictionary for normalization. Note that we aren't actually
+                # affecting the weights of this extractor because get_instrument_weights returns a hard copy of the
+                # weights dictionary
+                w = weights[instr] = default_weight
+
+            scaled_tension_vec = tuple(t * w for t in tension_vec)
+            tension_vectors_scaled.append(scaled_tension_vec)
+
+        if self.normalize:
+            # We can assume that the max mono tension = 1.0 (because it's normalized)
+            normalizer = 1.0 / sum(weights.values())
+        else:
+            normalizer = 1.0
+
+        return tuple(sum(col) * normalizer for col in zip(*tension_vectors_scaled))
+
+
 __all__ = [
     # Feature extractor abstract base classes (or interfaces)
     'FeatureExtractor', 'RhythmFeatureExtractor',
@@ -1307,5 +1438,6 @@ __all__ = [
     'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicTensionVector',
 
     # Polyphonic rhythm feature extractor implementations
-    'MultiChannelMonophonicRhythmFeatureVector', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek'
+    'MultiChannelMonophonicRhythmFeatureVector', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek',
+    'PolyphonicTensionVector'
 ]
