@@ -553,6 +553,8 @@ class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementa
         tension_vector = extractor.process(rhythm)
         self.assertSequenceEqual(tension_vector[0:4], [0] * 4)
 
+# TODO Add tests for MonophonicTension
+
 
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):
@@ -613,6 +615,7 @@ class TestMultiChannelMonophonicRhythmFeatureVector(TestPolyphonicRhythmFeatureE
 # TODO: Add tests for polyphonic syncopation vector
 # TODO: Add tests for polyphonic syncopation vector (Witek)
 # TODO: Add tests for polyphonic tension vector
+# TODO: Add tests for polyphonic tension
 
 
 if __name__ == "__main__":

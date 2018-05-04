@@ -1,3 +1,4 @@
+import math
 import enum
 import types
 import logging
@@ -887,6 +888,37 @@ class MonophonicTensionVector(MonophonicRhythmFeatureExtractor):
         return tuple(itertools.chain(*(itertools.repeat(t, e[1]) for t, e in zip(tension_per_event, note_vector))))
 
 
+class MonophonicTension(MonophonicRhythmFeatureExtractor):
+    # TODO Add documentation
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "hierarchical"):
+        super().__init__(unit)
+        self._instr_weights = dict()
+        self.salience_profile_type = salience_profile_type  # type: str
+
+    @staticmethod
+    def init_pre_processors():
+        tension_vec = MonophonicTensionVector(normalize=True)
+        yield tension_vec
+
+    def set_instrument_weights(self, weights: tp.Dict[str, float]):
+        tension_vec = self.get_pre_processors()[0]  # type: PolyphonicTensionVector
+        tension_vec.set_instrument_weights(weights)
+
+    def get_instrument_weights(self) -> tp.Dict[str, float]:
+        tension_vec = self.get_pre_processors()[0]  # type: PolyphonicTensionVector
+        return tension_vec.get_instrument_weights()
+
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        if unit is None:
+            raise ValueError("MonophonicTension does not support tick-based computation")
+        super().set_unit(unit)
+
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        tension_vec = pre_processor_results[0]
+        return math.sqrt(sum(t * t for t in tension_vec))
+
+
 #######################################################
 # Polyphonic rhythm feature extractor implementations #
 #######################################################
@@ -1383,7 +1415,7 @@ class PolyphonicTensionVector(PolyphonicRhythmFeatureExtractor):
             weight = float(weight)
             self._instr_weights[instr] = weight
 
-    def get_instrument_weights(self):
+    def get_instrument_weights(self) -> tp.Dict[str, float]:
         """
         Returns a new dictionary containing the weights per instrument. Weights are floating point numbers between 0
         and 1. Instruments are instrument names (track names).
@@ -1425,6 +1457,37 @@ class PolyphonicTensionVector(PolyphonicRhythmFeatureExtractor):
             normalizer = 1.0
 
         return tuple(sum(col) * normalizer for col in zip(*tension_vectors_scaled))
+
+
+class PolyphonicTension(PolyphonicRhythmFeatureExtractor):
+    # TODO Add documentation
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "hierarchical"):
+        super().__init__(unit)
+        self._instr_weights = dict()
+        self.salience_profile_type = salience_profile_type  # type: str
+
+    @staticmethod
+    def init_pre_processors():
+        tension_vec = PolyphonicTensionVector(normalize=True)
+        yield tension_vec
+
+    def set_instrument_weights(self, weights: tp.Dict[str, float]):
+        tension_vec = self.get_pre_processors()[0]  # type: PolyphonicTensionVector
+        tension_vec.set_instrument_weights(weights)
+
+    def get_instrument_weights(self) -> tp.Dict[str, float]:
+        tension_vec = self.get_pre_processors()[0]  # type: PolyphonicTensionVector
+        return tension_vec.get_instrument_weights()
+
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        if unit is None:
+            raise ValueError("PolyphonicTension does not support tick-based computation")
+        super().set_unit(unit)
+
+    def __process__(self, rhythm: PolyphonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        tension_vec = pre_processor_results[0]
+        return math.sqrt(sum(t * t for t in tension_vec))
 
 
 __all__ = [
