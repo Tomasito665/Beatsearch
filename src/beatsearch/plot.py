@@ -13,7 +13,7 @@ from itertools import cycle, repeat
 from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector, \
-    PolyphonicSyncopationVectorWitek
+    PolyphonicSyncopationVectorWitek, MonophonicTensionVector, PolyphonicTensionVector
 from beatsearch.utils import Quantizable, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
 
 # make room for the labels
@@ -930,6 +930,107 @@ class PolyphonicSyncopationVectorGraph(PolyphonicSyncopationVectorGraphBase):
         return cls.PLOT_TYPE_NAME
 
 
+class MonophonicTensionVectorGraph(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Tension vector (mono)"
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'tension': MonophonicTensionVector(unit, salience_profile_type, normalize=True)},
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+        )
+
+    @property
+    def salience_profile_type(self) -> str:
+        tension_vector = self.get_feature_extractor("tension")  # type: MonophonicTensionVector
+        return tension_vector.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        tension_vector = self.get_feature_extractor("tension")  # type: MonophonicTensionVector
+        tension_vector.salience_profile_type = salience_profile_type
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        plot_rhythm_grid(axes, rhythm_loop, self.get_unit())
+        axes.set_ylim(0, 1)  # normalize is set to True, which makes the tension go from 0 to 1
+
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        chronotonic_chain = self.get_feature_extractor("tension").process(rhythm_track)
+        return axes.plot(chronotonic_chain, color=kw['color'], drawstyle="steps-pre")
+
+
+class PolyphonicTensionVectorGraph(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Tension vector (poly)"
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={
+                'mono_tension': MonophonicTensionVector(unit, salience_profile_type, normalize=True),
+                'poly_tension': PolyphonicTensionVector(unit, salience_profile_type, normalize=True)
+            },
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+        )
+
+    @property
+    def salience_profile_type(self) -> str:
+        mono_tension = self.get_feature_extractor("mono_tension")  # type: MonophonicTensionVector
+        poly_tension = self.get_feature_extractor("poly_tension")  # type: PolyphonicTensionVector
+        assert mono_tension.salience_profile_type == poly_tension.salience_profile_type
+        return mono_tension.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        mono_tension = self.get_feature_extractor("mono_tension")  # type: MonophonicTensionVector
+        poly_tension = self.get_feature_extractor("poly_tension")  # type: PolyphonicTensionVector
+        mono_tension.salience_profile_type = salience_profile_type
+        poly_tension.salience_profile_type = salience_profile_type
+
+    def set_instrument_weights(self, weights: tp.Dict[str, float]):
+        poly_tension = self.get_feature_extractor("poly_tension")  # type: PolyphonicTensionVector
+        poly_tension.set_instrument_weights(weights)
+
+    def get_instrument_weights(self):
+        poly_tension = self.get_feature_extractor("poly_tension")  # type: PolyphonicTensionVector
+        return poly_tension.get_instrument_weights()
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        plot_rhythm_grid(axes, rhythm_loop, self.get_unit())
+        axes.set_ylim(0, 1)
+
+        poly_tension_extractor = self.get_feature_extractor("poly_tension")
+        poly_tension = poly_tension_extractor.process(rhythm_loop)
+
+        axes.plot(poly_tension, color="black", linewidth=2)
+
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        mono_tension_extractor = self.get_feature_extractor("mono_tension")  # type: MonophonicTensionVector
+        mono_tension = mono_tension_extractor.process(rhythm_track)
+
+        weights = self.get_instrument_weights()
+        weights_sum = sum(weights.values())
+
+        try:
+            normalized_instr_w = weights[rhythm_track.name] / weights_sum
+            weight_known = True
+        except KeyError:
+            normalized_instr_w = 1
+            weight_known = False
+
+        axes.set_axisbelow(True)
+        return axes.plot(mono_tension, "-" if weight_known else ":", color=to_rgba(kw['color'], normalized_instr_w))
+
+
 def get_rhythm_loop_plotter_classes():
     """Returns RhythmLoopPlotter subclasses
 
@@ -975,6 +1076,7 @@ __all__ = [
     'SchillingerRhythmNotation', 'ChronotonicNotation', 'PolygonNotation',
     'SpectralNotation', 'TEDASNotation', 'IOIHistogram', 'BoxNotation',
     'PolyphonicSyncopationVectorGraph', 'PolyphonicSyncopationVectorWitekGraph',
+    'MonophonicTensionVectorGraph', 'PolyphonicTensionVector',
 
     # Subplot layouts
     'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
