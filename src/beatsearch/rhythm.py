@@ -475,7 +475,7 @@ class TimeSignature(object):
     def __get_salience_profile_with_equal_beats(self, unit: Unit, root_weight: int):
         # get the fully hierarchical salience profile of one beat
         one_beat_ts = TimeSignature(1, self.denominator)
-        one_beat_weights = one_beat_ts.__get_salience_profile_full_hierarchical(unit, root_weight=root_weight - 1)
+        one_beat_weights = one_beat_ts.__get_salience_profile_full_hierarchical(unit, root_weight=root_weight)
 
         # repeat the one-beat salience profile to fill one measure
         return one_beat_weights * self.numerator

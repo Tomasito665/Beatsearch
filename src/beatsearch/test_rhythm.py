@@ -16,7 +16,7 @@ from beatsearch.rhythm import RhythmBase, MonophonicRhythmBase, SlavedRhythmBase
 from beatsearch.rhythm import MonophonicRhythmImpl, PolyphonicRhythmImpl, Track, RhythmLoop, MidiRhythm
 
 # misc
-from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping, MidiDrumKey
+from beatsearch.rhythm import TimeSignature, Onset, MidiDrumMapping, MidiDrumKey, Unit
 import midi
 
 
@@ -1389,7 +1389,31 @@ class TestOnset(TestCase):
         self.assertEqual(onset.tick, 5)     # 3 * 1.6 = 4.8
 
 
-# TODO Add tests for TimeSignature
+class TestTimeSignature(TestCase):
+    # TODO Cover remaining methods
+
+    def test_salience_profile_hierarchical(self):
+        ts = TimeSignature(4, 4)
+        root_weight = 123
+        expected_salience_profile = [w + root_weight for w in
+                                     [0, -4, -3, -4, -2, -4, -3, -4, -1, -4, -3, -4, -2, -4, -3, -4]]
+        actual_salience_profile = ts.get_salience_profile(Unit.SIXTEENTH, "hierarchical", root_weight=root_weight)
+        self.assertSequenceEqual(actual_salience_profile, expected_salience_profile)
+
+    def test_salience_profile_equal_upbeats(self):
+        ts = TimeSignature(4, 4)
+        root_weight = 123
+        expected_salience_profile = [w + root_weight for w in
+                                     [0, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3]]
+        actual_salience_profile = ts.get_salience_profile(Unit.SIXTEENTH, "equal_upbeats", root_weight=root_weight)
+        self.assertSequenceEqual(actual_salience_profile, expected_salience_profile)
+
+    def test_salience_profile_equal_beats(self):
+        ts = TimeSignature(4, 4)
+        root_weight = 123
+        expected_salience_profile = [w + root_weight for w in
+                                     [0, -2, -1, -2, 0, -2, -1, -2, 0, -2, -1, -2, 0, -2, -1, -2]]
+        actual_salience_profile = ts.get_salience_profile(Unit.SIXTEENTH, "equal_beats", root_weight=root_weight)
 
 
 if __name__ == "__main__":
