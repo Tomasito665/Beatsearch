@@ -244,6 +244,21 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
 
 
 class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtractorMixin):
+    """
+    This feature extractor predicts the durations of the onsets in the given rhythm. It computes the so-called note
+    vector, which is a sequence containing musical events. Musical events can be of three types:
+
+        - NOTE          a sounding note
+        - TIED_NOTE     a non-sounding note
+        - REST          a rest
+
+    Events are expressed as tuples containing three elements:
+
+        - e_type    the type of the event (NOTE, TIED_NOTE or REST)
+        - e_dur     the duration of the event
+        - e_pos     the position of the event
+    """
+
     NOTE = "N"
     """Note event"""
 
@@ -295,8 +310,6 @@ class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtra
         self._cyclic = bool(cyclic)
 
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
-        # TODO Add documentation
-
         Rhythm.Precondition.check_time_signature(rhythm)
         time_sig = rhythm.get_time_signature()
 
@@ -788,6 +801,67 @@ class OnsetDensity(MonophonicRhythmFeatureExtractor):
         return float(n_onsets) / len(binary_vector)
 
 
+class MonophonicTensionVector(MonophonicRhythmFeatureExtractor):
+    """
+    This feature extractor computes the monophonic tension of a rhythm. If E(i) is the i-th event in the note vector of
+    the given rhythm (see :class:`beatsearch.feature_extraction.NoteVector`, it is said that the tension during event
+    E(i) equals the metrical weight of the starting position of E(i) for rests and sounding notes. If E(i) is a tied
+    note (non-sounding note), then the tension of E(i) equals the tension of E(i-1).
+    """
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
+        super().__init__(unit)
+        self._salience_prf_type = None
+        self.salience_profile_type = salience_profile_type
+
+    @staticmethod
+    def init_pre_processors():
+        yield NoteVector(tied_notes=True)
+
+    @property
+    def cyclic(self) -> bool:
+        note_vector = self.get_pre_processors()[0]  # type: NoteVector
+        return note_vector.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        note_vector = self.get_pre_processors()[0]  # type: NoteVector
+        note_vector.cyclic = cyclic
+
+    @property
+    def salience_profile_type(self) -> str:
+        return self._salience_prf_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._salience_prf_type = salience_profile_type
+
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        time_sig = rhythm.get_time_signature()
+        salience_profile = time_sig.get_salience_profile(self.unit, self.salience_profile_type)
+
+        note_vector = pre_processor_results[0]  # type: tp.Sequence[tp.Tuple[str, int, int]]
+        tension_per_event = []                  # type: tp.List[int]
+        prev_e_tension = None                   # type: tp.Optional[int]
+
+        for event_index, [e_type, _, e_pos] in enumerate(note_vector):
+            if e_type == NoteVector.TIED_NOTE:
+                e_tension = prev_e_tension
+            else:
+                metrical_pos = e_pos % len(salience_profile)
+                e_tension = salience_profile[metrical_pos] * -1
+
+            tension_per_event.append(e_tension)
+            prev_e_tension = e_tension
+
+        if tension_per_event and tension_per_event[0] is None:
+            assert self.cyclic
+            tension_per_event[0] = tension_per_event[-1]
+
+        # Expand each tension element N times where N is the duration of the corresponding event (= e[1])
+        return tuple(itertools.chain(*(itertools.repeat(t, e[1]) for t, e in zip(tension_per_event, note_vector))))
+
+
 #######################################################
 # Polyphonic rhythm feature extractor implementations #
 #######################################################
@@ -1230,7 +1304,7 @@ __all__ = [
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
-    'MeanSyncopationStrength', 'OnsetDensity',
+    'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicTensionVector',
 
     # Polyphonic rhythm feature extractor implementations
     'MultiChannelMonophonicRhythmFeatureVector', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek'

@@ -21,6 +21,7 @@ from beatsearch.feature_extraction import (
     SyncopationVector,
     SyncopatedOnsetRatio,
     MeanSyncopationStrength,
+    MonophonicTensionVector,
     IOIVector,
     IOIDifferenceVector,
     IOIHistogram
@@ -31,7 +32,7 @@ from beatsearch.feature_extraction import (
 )
 
 # misc
-from beatsearch.rhythm import Rhythm, Track, MonophonicRhythm, PolyphonicRhythm, Unit, TimeSignature
+from beatsearch.rhythm import Track, MonophonicRhythm, PolyphonicRhythm, Unit, TimeSignature
 from beatsearch.test_rhythm import mock_onset
 
 
@@ -486,6 +487,73 @@ class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, 
         self.assertEqual(actual_onset_density, expected_onset_density)
 
 
+class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+
+        # TODO mock time signature and its methods
+        rhythm = self.rhythm
+        rhythm.time_signature = TimeSignature(4, 4)
+        rhythm.get_time_signature.return_value = rhythm.time_signature
+
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return MonophonicTensionVector
+
+    @staticmethod
+    def get_rhythm_str():
+        return "x--x--x------x--"
+
+    @staticmethod
+    def get_legal_units():
+        # noinspection PyTypeChecker
+        # Syncopation vector does not support tick-based computation
+        return list(Unit)
+
+    def test_defaults_to_cyclic(self):
+        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        self.assertTrue(extractor.cyclic)
+
+    def test_defaults_to_equal_upbeats_salience_prf(self):
+        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
+
+    SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF = [0, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3]
+
+    @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
+    def test_process(self, _):
+        extractor = self.feature_extractor  # type: MonophonicTensionVector
+
+        expected_tension_vector = tuple(int(c) for c in "0003332222221333")
+        actual_tension_vector = extractor.process(self.rhythm)
+
+        self.assertSequenceEqual(actual_tension_vector, expected_tension_vector)
+
+    @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
+    def test_process_tension_during_first_tied_note_event_equals_last_with_cyclic_rhythm(self, _):
+        rhythm = get_mono_rhythm_mock("----x-x-----x--x", 4)
+        rhythm.get_time_signature.return_value = TimeSignature(4, 4)
+        rhythm.time_signature = rhythm.get_time_signature.return_value
+
+        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor.cyclic = True
+
+        tension_vector = extractor.process(rhythm)
+        self.assertSequenceEqual(tension_vector[0:4], [tension_vector[-1]] * 4)
+
+    @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
+    def test_process_tension_during_first_tied_note_event_is_zero_with_non_cyclic_rhythm(self, _):
+        rhythm = get_mono_rhythm_mock("----x-x-----x--x", 4)
+        rhythm.get_time_signature.return_value = TimeSignature(4, 4)
+        rhythm.time_signature = rhythm.get_time_signature.return_value
+
+        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor.cyclic = False
+
+        tension_vector = extractor.process(rhythm)
+        self.assertSequenceEqual(tension_vector[0:4], [0] * 4)
+
+
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
     def test_not_instantiable(self):
         self.assertRaises(Exception, PolyphonicRhythmFeatureExtractor)
@@ -520,8 +588,7 @@ class TestPolyphonicRhythmFeatureExtractorImplementationMixin(TestRhythmFeatureE
         raise NotImplementedError
 
 
-class TestMultiChannelMonophonicRhythmFeatureVector(TestPolyphonicRhythmFeatureExtractorImplementationMixin,
-                                                    TestCase):
+class TestMultiChannelMonophonicRhythmFeatureVector(TestPolyphonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[PolyphonicRhythmFeatureExtractor]:
         return MultiChannelMonophonicRhythmFeatureVector
