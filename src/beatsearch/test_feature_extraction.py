@@ -487,6 +487,9 @@ class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, 
         self.assertEqual(actual_onset_density, expected_onset_density)
 
 
+# TODO Add tests for MonophonicOnsetLikelihoodVector
+
+
 class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     def setUp(self):
         super().setUp()

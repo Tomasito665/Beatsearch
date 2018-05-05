@@ -210,6 +210,8 @@ def parse_unit_argument(func: tp.Callable[[tp.Any], tp.Any]) -> tp.Callable[[tp.
             unit = Unit.get(unit)
             args = itertools.chain(args[:unit_param_position], [unit], args[unit_param_position + 1:])
         else:
+            if unit_param.default is inspect.Parameter.empty:
+                raise ValueError("%s() requires a unit parameter, either positional or as named argument" % func.__name__)
             kwargs['unit'] = Unit.get(unit_param.default)
 
         return func(*args, **kwargs)
