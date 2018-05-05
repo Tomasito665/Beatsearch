@@ -46,6 +46,19 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
 
         raise NotImplementedError
 
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        """Returns an iterable of rhythm preconditions that will be checked when calling process()
+
+        Override this method to add preconditions to this feature extractor. The precondition must be a callable
+        accepting one positional parameter, 'rhythm'. The callables are expected to raise an exception if the
+        precondition is not met. The preconditions will be called before this feature is processed.
+
+        :return: iterable with callables raising an exception if a precondition is not met, given a rhythm
+        """
+
+        return []
+
     @abstractmethod
     def get_unit(self) -> tp.Union[Unit, None]:
         """Returns the musical unit of this preprocessor
@@ -70,6 +83,10 @@ class RhythmFeatureExtractor(FeatureExtractor, metaclass=ABCMeta):
         :param rhythm: rhythm of which to compute the feature
         :return: the rhythm feature value
         """
+
+        # Check if given rhythm meets all preconditions
+        for precondition in self.get_preconditions():
+            precondition(rhythm)
 
         pre_processor_results = list(pre_processor.process(rhythm) for pre_processor in self.get_pre_processors())
         ret = self.__process__(rhythm, pre_processor_results)
@@ -215,6 +232,11 @@ class PolyphonicRhythmFeatureExtractor(RhythmFeatureExtractorBase, metaclass=ABC
 
 
 class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
+
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        yield Rhythm.Precondition.check_resolution
+
     def __process__(self, rhythm: MonophonicRhythm, _):
         """
         Returns the binary representation of the note onsets of the given rhythm where each step where a note onset
@@ -224,8 +246,6 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractor):
         :param rhythm: the monophonic rhythm from which to compute the binary onset vector
         :return: the binary representation of the note onsets in the given rhythm
         """
-
-        Rhythm.Precondition.check_resolution(rhythm)
 
         unit = self.unit
         n_steps = rhythm.get_duration(unit, ceil=True)
@@ -313,8 +333,11 @@ class NoteVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtra
     def cyclic(self, cyclic: bool):
         self._cyclic = bool(cyclic)
 
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        yield Rhythm.Precondition.check_time_signature
+
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
-        Rhythm.Precondition.check_time_signature(rhythm)
         time_sig = rhythm.get_time_signature()
 
         natural_duration_map = time_sig.get_natural_duration_map(self.unit, trim_to_pulse=True)
@@ -380,6 +403,10 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
     def mode(self, mode: Mode):
         self._mode = mode
 
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        yield Rhythm.Precondition.check_resolution
+
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the time difference between the notes in the given rhythm. The elements of the vector will depend on
@@ -404,8 +431,6 @@ class IOIVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFeatureExtrac
         :param rhythm: the monophonic rhythm from which to compute the inter-onset interval vector
         :return: inter-onset interval vector of the given rhythm
         """
-
-        Rhythm.Precondition.check_resolution(rhythm)
 
         # TODO Implement both modes generically here
 
@@ -626,6 +651,10 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
         MonophonicRhythmFeatureExtractor.__init__(self, unit)
         QuantizableRhythmFeatureExtractorMixin.__init__(self, quantize_enabled)
 
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        yield Rhythm.Precondition.check_resolution
+
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Returns the absolute onset times of the notes in the given rhythm.
@@ -633,7 +662,6 @@ class OnsetPositionVector(MonophonicRhythmFeatureExtractor, QuantizableRhythmFea
         :return: a list with the onset times of this rhythm
         """
 
-        Rhythm.Precondition.check_resolution(rhythm)
         resolution = rhythm.get_resolution()
         quantize = self.is_quantize_enabled()
         unit = self.get_unit()
@@ -679,6 +707,10 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
     def salience_profile_type(self, salience_profile_type: str):
         self._salience_prf_type = str(salience_profile_type)
 
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        yield Rhythm.Precondition.check_time_signature
+
     def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]) -> tp.Iterable[_SyncType]:
         """
         Extracts the syncopations from the given monophonic rhythm. The syncopations are computed with the method
@@ -693,8 +725,6 @@ class SyncopationVector(MonophonicRhythmFeatureExtractor):
         :param rhythm: rhythm from which to extract the syncopations
         :return: the syncopations as (syncopation strength, note position, rest position) tuples
         """
-
-        Rhythm.Precondition.check_time_signature(rhythm)
 
         note_vector = pre_processor_results[0]
         time_signature = rhythm.get_time_signature()
@@ -1257,6 +1287,10 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractor):
         n_other_instruments = len(other_instruments)
         return min(3 - n_other_instruments, 0)
 
+    @classmethod
+    def get_preconditions(cls) -> tp.Iterable[tp.Callable[[Rhythm], None]]:
+        yield Rhythm.Precondition.check_time_signature
+
     def __process__(self, rhythm: PolyphonicRhythm, pre_processor_results: tp.List[tp.Any]):
         """
         Finds the polyphonic syncopations and their syncopation strengths. This is an implementation of the method
@@ -1304,7 +1338,6 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractor):
         :return: syncopations as (syncopation strength, syncopated event position, other event position) tuples
         """
 
-        Rhythm.Precondition.check_time_signature(rhythm)
         note_vectors = pre_processor_results[0]
 
         if not note_vectors:
