@@ -13,7 +13,7 @@ from itertools import cycle, repeat
 from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector, \
-    PolyphonicSyncopationVectorWitek, MonophonicTensionVector, PolyphonicTensionVector
+    PolyphonicSyncopationVectorWitek, MonophonicTensionVector, PolyphonicTensionVector, MonophonicVariationVector
 from beatsearch.utils import Quantizable, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
 
 # make room for the labels
@@ -1029,6 +1029,31 @@ class PolyphonicTensionVectorGraph(RhythmLoopPlotter):
 
         axes.set_axisbelow(True)
         return axes.plot(mono_tension, "-" if weight_known else ":", color=to_rgba(kw['color'], normalized_instr_w))
+
+
+class MonophonicVariationGraph(RhythmLoopPlotter):
+    PLOT_TYPE_NAME = "Variation (mono)"
+
+    @classmethod
+    def get_plot_type_name(cls):
+        return cls.PLOT_TYPE_NAME
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH):
+        super().__init__(
+            unit=unit,
+            subplot_layout=CombinedSubplotLayout(),
+            feature_extractors={'variation': MonophonicVariationVector(unit, cyclic=True)},
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+        )
+
+    def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
+        plot_rhythm_grid(axes, rhythm_loop, self.get_unit())
+        axes.set_ylim(0, 1)
+
+    def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
+        variation_extractor = self.get_feature_extractor('variation')
+        variation_vector = variation_extractor.process(rhythm_track)
+        return axes.plot(variation_vector, ".-", color=kw['color'])
 
 
 def get_rhythm_loop_plotter_classes():

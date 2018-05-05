@@ -975,6 +975,35 @@ class MonophonicOnsetLikelihoodVector(MonophonicRhythmFeatureExtractor):
             yield next(priors_pool)
 
 
+class MonophonicVariationVector(MonophonicRhythmFeatureExtractor):
+    # TODO Add documentation
+    # TODO Add PolyphonicVariationVector as soon as PolyphonicOnsetLikelihoodVector is ready
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, cyclic: bool = True):
+        super().__init__(unit)
+        self.cyclic = cyclic
+
+    @staticmethod
+    def init_pre_processors():
+        yield MonophonicOnsetLikelihoodVector(priors=None)
+        yield BinaryOnsetVector()
+
+    @property
+    def cyclic(self) -> bool:
+        bin_onset_likelihood_extractor = self.get_pre_processors()[0]  # type: MonophonicOnsetLikelihoodVector
+        return bin_onset_likelihood_extractor.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        bin_onset_likelihood_extractor = self.get_pre_processors()[0]  # type: MonophonicOnsetLikelihoodVector
+        bin_onset_likelihood_extractor.cyclic = cyclic
+
+    def __process__(self, rhythm: MonophonicRhythm, pre_processor_results: tp.List[tp.Any]):
+        predicted_onsets = pre_processor_results[0]  # binary onset likelihood vector
+        actual_onsets = pre_processor_results[1]     # binary onset vector
+        return (abs(a_onset - p_onset) for (p_onset, a_onset) in zip(predicted_onsets, actual_onsets))
+
+
 class MonophonicTensionVector(MonophonicRhythmFeatureExtractor):
     """
     This feature extractor computes the monophonic tension of a rhythm. If E(i) is the i-th event in the note vector of
@@ -1671,7 +1700,8 @@ __all__ = [
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
-    'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector', 'MonophonicTensionVector',
+    'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector', 'MonophonicVariationVector',
+    'MonophonicTensionVector',
 
     # Polyphonic rhythm feature extractor implementations
     'MultiChannelMonophonicRhythmFeatureVector', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek',

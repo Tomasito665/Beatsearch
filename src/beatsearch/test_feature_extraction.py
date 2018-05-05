@@ -557,6 +557,7 @@ class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementa
         self.assertSequenceEqual(tension_vector[0:4], [0] * 4)
 
 # TODO Add tests for MonophonicTension
+# TODO Add tests for MonophonicVariationVector
 
 
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
