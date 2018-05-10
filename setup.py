@@ -35,5 +35,5 @@ setup(
     author_email="jordi665@hotmail.com",
     description="Symbolic rhythm analysis",
     long_description=long_desc,
-    install_requires=["numpy", "matplotlib"]
+    install_requires=["numpy", "matplotlib", "anytree"]
 )

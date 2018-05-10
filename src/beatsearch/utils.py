@@ -6,7 +6,6 @@ import collections
 import numpy as np
 import typing as tp
 from time import time
-from abc import ABCMeta, abstractmethod
 from inspect import isclass, isabstract
 from functools import wraps, reduce
 from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
@@ -474,22 +473,33 @@ class Rectangle2D(collections.namedtuple("Rectangle2D", ["x", "y", "width", "hei
         return Dimensions2D(width=self.width, height=self.height)
 
 
-class Quantizable(object, metaclass=ABCMeta):
+class QuantizableMixin(object):
+    __quantize: bool  # whether the quantization is enabled
+
     @property
-    def quantize_enabled(self) -> bool:
-        return self.is_quantize_enabled()
+    def quantize(self) -> bool:
+        """Whether the quantization of this object is enabled. Defaults to False."""
+        try:
+            return self.__quantize
+        except AttributeError:
+            return False
 
-    @quantize_enabled.setter
-    def quantize_enabled(self, quantize_enabled: bool):
-        self.set_quantize_enabled(quantize_enabled)
+    @quantize.setter
+    def quantize(self, quantize_enabled: bool):
+        quantize_enabled = bool(quantize_enabled)
+        self.__quantize = quantize_enabled
+        self.__on_quantize_set__(quantize_enabled)
 
-    @abstractmethod
-    def set_quantize_enabled(self, quantize_enabled: bool):
-        raise NotImplementedError
+    def __on_quantize_set__(self, quantize: bool):
+        """This method will be called when the quantise property is set
 
-    @abstractmethod
-    def is_quantize_enabled(self) -> bool:
-        raise NotImplementedError
+        Override this method to get notified whenever the quantize attribute is set.
+
+        :param quantize: new value of quantize (same as self.quantize)
+        :return: None (not used)
+        """
+
+        pass
 
 
 def get_logging_level_by_name(level_name: str) -> int:
@@ -549,13 +559,46 @@ def find_all_concrete_subclasses(cls: tp.Type) -> tp.List[tp.Type]:
     return list(filter(lambda _cls: not isabstract(_cls), find_all_subclasses(cls)))
 
 
+def iterable_to_str(
+        iterable: tp.Sequence[tp.Any],
+        nested_iterables: bool = True,
+        iterable_types: tp.Iterable[tp.Type] = (tuple, list),
+        separator: str = ",",
+        boundary_chars: tp.Union[tp.Tuple[str, str], str] = "[]"
+):
+    """
+    Converts the given tuple/list into a string, converting all elements to strings with str(element).
+
+    :param iterable:                 iterable to convert into a string
+    :param nested_iterables: when true, this method will also represent nested iterables as strings
+    :param iterable_types:           iterable types to convert to strings, defaults to (tuple, list) (ignored if
+                                     convert_nested_iterables is false)
+    :param separator:                separator string between elements
+    :param boundary_chars:           characters to use at the beginning and ending of the sequence, defaults to "[]"
+
+    :return: string representation of iterable
+    """
+
+    str_elements = []
+    for e in iterable:
+        if not nested_iterables:
+            str_elements.append(str(e))
+            continue
+        if any(isinstance(e, t) for t in iterable_types):
+            e_str = iterable_to_str(e, nested_iterables, iterable_types, separator)
+        else:
+            e_str = str(e)
+        str_elements.append(e_str)
+    return "%s%s%s" % (boundary_chars[0], ("%s " % separator).join(str_elements), boundary_chars[1])
+
+
 __all__ = [
     'merge_dicts', 'format_timespan', 'print_progress_bar', 'friendly_named_class',
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'current_next_pair_iter', 'get_beatsearch_dir',
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
-    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'Quantizable',
+    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'QuantizableMixin',
     'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
     'Rectangle2D', 'get_logging_level_by_name', 'set_logging_level_by_name', 'find_all_subclasses',
-    'find_all_concrete_subclasses'
+    'find_all_concrete_subclasses', 'iterable_to_str'
 ]

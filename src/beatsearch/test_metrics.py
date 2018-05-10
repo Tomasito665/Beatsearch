@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock, PropertyMock, call
 from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm
 
 # miscellaneous
-from beatsearch.utils import friendly_named_class, Quantizable
+from beatsearch.utils import friendly_named_class, QuantizableMixin
 from beatsearch.rhythm import Unit
 
 # feature extractors
@@ -72,12 +72,12 @@ class TestMonophonicRhythmDistanceMeasureBase(TestCase):
 
     def test_all_quantizable_concrete_subclasses_have_quantize_named_argument_and_set_the_prop_accordingly(self):
         for clazz in get_concrete_monophonic_measure_implementations():
-            if not issubclass(clazz, Quantizable):
+            if not issubclass(clazz, QuantizableMixin):
                 continue
-            with patch.object(clazz, "quantize_enabled", new_callable=PropertyMock) as quantize_enabled_mock:
-                clazz(quantize="fake-quantize-enabled")
+            with patch.object(clazz, "quantize", new_callable=PropertyMock) as quantize_mock:
+                clazz(quantize="fake-quantize")
                 with self.subTest(msg=clazz.__name__):
-                    quantize_enabled_mock.assert_called_once_with("fake-quantize-enabled")
+                    quantize_mock.assert_called_once_with("fake-quantize")
 
     def test_get_measure_by_friendly_name(self):
         friendly_name = FakeMonophonicRhythmDistanceMeasureImpl.__friendly_name__

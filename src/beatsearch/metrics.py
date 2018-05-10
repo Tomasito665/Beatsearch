@@ -6,7 +6,7 @@ from abc import abstractmethod, ABCMeta
 from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, Unit, UnitType, parse_unit_argument
 from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, \
     IOIDifferenceVector, OnsetPositionVector, ChronotonicChain
-from beatsearch.utils import friendly_named_class, Quantizable
+from beatsearch.utils import friendly_named_class, QuantizableMixin
 
 
 class DistanceMeasure(object):
@@ -297,25 +297,22 @@ class HammingDistanceMeasure(MonophonicRhythmDistanceMeasure):
 
 
 @friendly_named_class("Euclidean interval vector distance")
-class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
+class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, QuantizableMixin):
     """
     The euclidean interval vector distance is the euclidean distance between the inter-onset vectors of the rhythms.
     """
 
     def __init__(self, unit: tp.Optional[UnitType] = None, length_policy="exact", quantize=False):
-        self._ioi_vector = IOIVector(unit, mode=IOIVector.Mode.POST_NOTE, quantize_enabled=quantize)
+        self._ioi_vector = IOIVector(unit, mode=IOIVector.POST_NOTE, quantize=quantize)
         super().__init__(unit, length_policy)  # super constructor must be called after self._ioi_vector definition
-        self.quantize_enabled = quantize
+        self.quantize = quantize
 
     def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._ioi_vector.set_unit(unit)
 
-    def set_quantize_enabled(self, quantize_enabled):
-        self._ioi_vector.set_quantize_enabled(quantize_enabled)
-
-    def is_quantize_enabled(self) -> bool:
-        return self._ioi_vector.is_quantize_enabled()
+    def __on_quantize_set__(self, quantize: bool):
+        self._ioi_vector.quantize = quantize
 
     def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._ioi_vector.unit == self.unit
@@ -332,7 +329,7 @@ class EuclideanIntervalVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Qu
 
 
 @friendly_named_class("Interval difference vector distance")
-class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
+class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, QuantizableMixin):
     """
     The interval difference vector distance is based on the interval difference vectors of the rhythms.
     """
@@ -340,8 +337,8 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
     def __init__(self, unit: tp.Optional[UnitType] = None, length_policy="fill", quantize=False, cyclic=True):
         self._ioi_diff_vector = IOIDifferenceVector(unit, cyclic)
         super().__init__(unit, length_policy)
-        self.quantize_enabled = quantize
-        self.cyclic = cyclic  # call setter
+        self.quantize = quantize
+        self.cyclic = cyclic
 
     def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
@@ -355,11 +352,8 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
     def cyclic(self, cyclic):
         self._ioi_diff_vector.cyclic = cyclic
 
-    def set_quantize_enabled(self, quantize_enabled: bool):
-        self._ioi_diff_vector.set_quantize_enabled(quantize_enabled)
-
-    def is_quantize_enabled(self) -> bool:
-        return self._ioi_diff_vector.is_quantize_enabled()
+    def __on_quantize_set__(self, quantize: bool):
+        self._ioi_diff_vector.quantize = quantize
 
     def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._ioi_diff_vector.unit == self.unit
@@ -381,7 +375,7 @@ class IntervalDifferenceVectorDistanceMeasure(MonophonicRhythmDistanceMeasure, Q
 
 
 @friendly_named_class("Swap distance")
-class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
+class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, QuantizableMixin):
     """
     The swap distance is the minimal number of swap operations required to transform one rhythm to another. A swap is an
     interchange of a one and a zero that are adjacent to each other in the binary representations of the rhythms.
@@ -394,17 +388,14 @@ class SwapDistanceMeasure(MonophonicRhythmDistanceMeasure, Quantizable):
     def __init__(self, unit: tp.Optional[UnitType] = Unit.EIGHTH, length_policy="multiple", quantize=False):
         self._onset_position_vector = OnsetPositionVector(unit, quantize)
         super().__init__(unit, length_policy)  # super constructor must be called after _onset_position_vector attr def
-        self.quantize_enabled = quantize
+        self.quantize = quantize
 
     def set_unit(self, unit: tp.Optional[UnitType]) -> None:
         super().set_unit(unit)
         self._onset_position_vector.set_unit(unit)
 
-    def set_quantize_enabled(self, quantize_enabled: bool):
-        self._onset_position_vector.set_quantize_enabled(quantize_enabled)
-
-    def is_quantize_enabled(self) -> bool:
-        return self._onset_position_vector.is_quantize_enabled()
+    def __on_quantize_set__(self, quantize: bool):
+        self._onset_position_vector.quantize = quantize
 
     def __get_iterable__(self, rhythm: MonophonicRhythm):
         assert self._onset_position_vector.unit == self.unit

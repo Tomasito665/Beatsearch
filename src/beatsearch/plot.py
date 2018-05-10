@@ -14,7 +14,7 @@ from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, R
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector, \
     PolyphonicSyncopationVectorWitek, MonophonicTensionVector, PolyphonicTensionVector, MonophonicVariationVector
-from beatsearch.utils import Quantizable, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
+from beatsearch.utils import QuantizableMixin, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
 
 # make room for the labels
 from matplotlib import rcParams
@@ -309,8 +309,8 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
         self._snaps_to_grid = snaps_to_grid
 
         # update quantizable feature extractors
-        for quantizable_extractor in (ext for ext in self._feature_extractors.values() if isinstance(ext, Quantizable)):
-            quantizable_extractor.set_quantize_enabled(snaps_to_grid)
+        for quantizable_extractor in (ext for ext in self._feature_extractors.values() if isinstance(ext, QuantizableMixin)):
+            quantizable_extractor.quantize = snaps_to_grid
 
     def draw(
             self,
@@ -596,8 +596,8 @@ class TEDASNotation(RhythmLoopPlotter):
             unit=unit,
             subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
             feature_extractors={
-                'onset_positions': OnsetPositionVector(quantize_enabled=True),
-                'ioi_vector': IOIVector(quantize_enabled=True)
+                'onset_positions': OnsetPositionVector(quantize=True),
+                'ioi_vector': IOIVector(quantize=True)
             },
             snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
         )

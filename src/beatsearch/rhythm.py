@@ -211,7 +211,8 @@ def parse_unit_argument(func: tp.Callable[[tp.Any], tp.Any]) -> tp.Callable[[tp.
             args = itertools.chain(args[:unit_param_position], [unit], args[unit_param_position + 1:])
         else:
             if unit_param.default is inspect.Parameter.empty:
-                raise ValueError("%s() requires a unit parameter, either positional or as named argument" % func.__name__)
+                raise ValueError("%s() requires a unit parameter, either "
+                                 "positional or as named argument" % func.__name__)
             kwargs['unit'] = Unit.get(unit_param.default)
 
         return func(*args, **kwargs)
@@ -521,6 +522,9 @@ class Rhythm(object, metaclass=ABCMeta):
         class TimeSignatureNotSet(Exception):
             pass
 
+        class DurationError(Exception):
+            pass
+
         @classmethod
         def needs_resolution(cls, f):
             @wraps(f)
@@ -536,6 +540,29 @@ class Rhythm(object, metaclass=ABCMeta):
                 cls.check_time_signature(rhythm)
                 return f(rhythm, *args, **kwargs)
             return wrapper
+
+        @classmethod
+        def check_rhythm_type(cls, rhythm):
+            if not isinstance(rhythm, Rhythm):
+                raise TypeError("Expected a Rhythm but got a '%s'" % type(rhythm))
+
+        @classmethod
+        def check_monophonic_rhythm_type(cls, rhythm):
+            if not isinstance(rhythm, MonophonicRhythm):
+                raise TypeError("Expected a MonophonicRhythm but got a '%s'" % type(rhythm))
+
+        @classmethod
+        def check_polyphonic_rhythm_type(cls, rhythm):
+            if not isinstance(rhythm, PolyphonicRhythm):
+                raise TypeError("Expected a PolyphonicRhythm but got a '%s'" % type(rhythm))
+
+        @classmethod
+        def check_duration_is_aligned_with_pulse(cls, rhythm):  # type: (Rhythm) -> None
+            time_sig = rhythm.get_time_signature()  # type: TimeSignature
+            duration = rhythm.get_duration(time_sig.get_beat_unit(), ceil=False)
+            if duration != int(duration):
+                raise cls.DurationError("Duration must be an exact multiple of the beat (given rhythm "
+                                        "has a duration of %s beats)" % str(duration))
 
         @classmethod
         def check_resolution(cls, rhythm):

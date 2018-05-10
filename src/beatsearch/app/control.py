@@ -21,7 +21,7 @@ from beatsearch.metrics import (
     SummedMonophonicRhythmDistance
 )
 from beatsearch.app.config import BSConfig
-from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, Quantizable
+from beatsearch.utils import no_callback, type_check_and_instantiate_if_necessary, QuantizableMixin
 import midi
 
 
@@ -585,7 +585,7 @@ class BSController(object):
         return self._config
 
     def is_current_distance_measure_quantizable(self):
-        return isinstance(self._rhythm_measure.monophonic_measure, Quantizable)
+        return isinstance(self._rhythm_measure.monophonic_measure, QuantizableMixin)
 
     def set_measure_quantization_unit(self, unit):
         """
