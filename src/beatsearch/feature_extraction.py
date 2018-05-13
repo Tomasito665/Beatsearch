@@ -10,7 +10,7 @@ from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from beatsearch.utils import QuantizableMixin, minimize_term_count, TupleView, iterable_to_str
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
-    Unit, UnitType, parse_unit_argument, convert_tick, TimeSignature
+    Unit, UnitType, parse_unit_argument, convert_tick
 
 LOGGER = logging.getLogger(__name__)
 
@@ -586,18 +586,14 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractorBase):
         unit = self.get_unit()
         n_steps = rhythm.get_duration(unit, ceil=True)
 
-        if rhythm.get_onset_count() == 0:
-            return itertools.repeat(0, n_steps)
-
         if unit is None:
             get_step = lambda tick: tick
         else:
             resolution = rhythm.get_resolution()
             get_step = lambda tick: unit.from_ticks(tick, resolution, True)
 
-        # Not worrying about StopIteration on next() because onset count > 0
         onset_step_indices = iter(get_step(onset.tick) for onset in rhythm.get_onsets())
-        next_onset_step_index = next(onset_step_indices)
+        next_onset_step_index = next(onset_step_indices, -1)
         curr_step = 0
 
         while curr_step < n_steps:
@@ -1172,163 +1168,136 @@ class OnsetDensity(MonophonicRhythmFeatureExtractorBase):
 
 
 class MonophonicOnsetLikelihoodVector(MonophonicRhythmFeatureExtractorBase):
-    # TODO Add documentation
+    """
+    Computes the likelihood of a step being an onset for every step in the given monophonic rhythm. The onset
+    likelihoods are ranged from 0 to 1. An onset likelihood of 0 means that there's no evidence -- according to the
+    model used by this extractor -- that the corresponding step will contain an onset. An onset likelihood of 1 means
+    that it is very likely that the corresponding step will contain an onset.
 
-    # IDEA: PolyphonicOnsetLikelihoodVector should NOT be a multi-channel mono version of this as prediction hits and
-    # errors must be considered together
+    The likelihoods are based on predictions made on different levels. Each level has a window size corresponding to a
+    musical unit. For each level, the prediction is that the current group will equal the last group. For example:
+
+    Rhythm            x o x o x o x o x o x x x o o o
+
+    Predictions
+                1/16 |?|x|o|x|o|x|o|x|o|x|o|x:x|o|o|o|
+                1/8  |? ?|x o|x o|x o|x o|x o|x x|x o|
+                1/4  |? ? ? ?|x o x o|x o x o|x x x o|
+                1/2  |? ? ? ? ? ? ? ?|x o x o x o x o|
+                1/1  |? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ?|
+
+    The groups containing question marks are groups that have no antecedents. The predictions of these uncertain groups
+    are handled according to the "priors" property.
+
+        - cyclic:       it is assumed that the rhythm is a loop, leaving no uncertain groups
+        - optimistic:   predictions are set to the ground truth (predictions of uncertain groups are always correct)
+        - pessimistic:  predictions are set to the negative ground truth (predictions of uncertain groups are always
+                        incorrect)
+    """
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (e.unit, e.cyclic, e.get_priors(), e.prior_weight)
+    __get_factors__ = lambda e: (e.unit, e.priors)
 
-    def __init__(
-            self,
-            unit: UnitType = _DEFAULT_UNIT,
-            cyclic: bool = True,
-            priors: tp.Optional[tp.Union[str, tp.Iterable[float]]] = None,
-            prior_weight: float = 0.0,
-            **kw
-    ):
+    CYCLIC = "cyclic"
+    OPTIMISTIC = "optimistic"
+    PESSIMISTIC = "pessimistic"
+
+    def __init__(self, unit: UnitType = _DEFAULT_UNIT, priors: str = CYCLIC, **kw):
         super().__init__(unit, **kw)
         self._bin_onset_vec = BinaryOnsetVector(unit, aux_to=self)
-        self._cyclic = None  # type: bool
-        self._priors = None  # type: tp.Optional[tp.Union[str, tp.Sequence[float]]]
-        self._prior_weight = None  # type: float
-
-        self.cyclic = cyclic
-        self.prior_weight = prior_weight
-        self.set_priors(priors)
+        self._priors = None   # type: str
+        self.priors = priors  # calling setter
 
     def __process__(self, rhythm: MonophonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
         binary_onset_vector = aux_fts[0]  # type: tp.Tuple[int]
-        n_steps = len(binary_onset_vector)
-        cyclic = self.cyclic
+        assert len(binary_onset_vector) == n_steps, \
+            "expected binary onset vector to have %i steps, not %i" % (n_steps, len(binary_onset_vector))
 
+        # Retrieve the window sizes and their weights
         time_signature = rhythm.get_time_signature()
         natural_duration_map = time_signature.get_natural_duration_map(self.unit, trim_to_pulse=False)
         window_sizes = sorted(w_size for w_size in set(natural_duration_map) if w_size < n_steps)
-        window_weights = tuple(ws / (sum(window_sizes)) for ws in window_sizes)
+        window_sizes_sum = sum(window_sizes)
+        window_weights = {w_size: (w_size / window_sizes_sum) for w_size in window_sizes}
+        priors = self.priors
 
-        if self._priors is None:
-            priors_pool = itertools.cycle([0.0])
-            prior_weight = 0.0
+        if priors == self.OPTIMISTIC:
+            get_prior_pred = lambda _step, _w_size: binary_onset_vector[_step]
+        elif priors == self.PESSIMISTIC:
+            get_prior_pred = lambda _step, _w_size: int(not binary_onset_vector[_step])
+        elif priors == self.CYCLIC:
+            get_prior_pred = lambda _step, _w_size: binary_onset_vector[(_step - _w_size) % n_steps]
         else:
-            priors_pool = itertools.cycle(self._create_priors_vector(n_steps, time_signature))
-            prior_weight = self.prior_weight
+            assert False, "Unknown priors value: %s" % priors
 
-        if cyclic:
-            binary_onset_vector = [*itertools.chain(binary_onset_vector, binary_onset_vector)]
+        # Iterate over the steps of the binary onset vector and make predictions about whether the step has an onset.
+        # Predictions are made on different levels and hit/err counts are kept for window prediction confidence
+        # coefficients (if a prediction with a certain window size has already made many errors in the current window,
+        # its confidence coefficient will decrease)
+        hit_count_prev_windows = {w_size: w_size for w_size in window_sizes}
+        err_count_curr_windows = {w_size: 0 for w_size in window_sizes}
 
-        onset_likelihood_vector = []
-        hit_count_prev_window = [0] * len(window_sizes)
-        err_count_curr_window = window_sizes[:]  # Start with maximum error count
+        for step, is_onset in enumerate(binary_onset_vector):
+            # We keep the onset likelihoods in a dictionary per window size
+            onset_likelihoods = []
 
-        for step, [is_onset, prior] in enumerate(zip(binary_onset_vector, priors_pool)):
-            onset_likelihoods_per_w_size = [0] * len(window_sizes)
-
-            for w_index, w_size in enumerate(window_sizes):
+            for w_size in window_sizes:
                 if step % w_size == 0:
-                    hit_count_prev_window[w_index] = w_size - err_count_curr_window[w_index]
-                    err_count_curr_window[w_index] = 0
+                    hit_count_prev_windows[w_size] = w_size - err_count_curr_windows[w_size]
+                    err_count_curr_windows[w_size] = 0
 
-                prediction_confidence = (hit_count_prev_window[w_index] - err_count_curr_window[w_index]) / w_size
-                is_onset_predicted = binary_onset_vector[step - w_size]
-                err_count_curr_window[w_index] += int(is_onset != is_onset_predicted)
+                if step < w_size:
+                    # If we don't have previous knowledge about this step on this window size, we
+                    onset_prediction = get_prior_pred(step, w_size)
+                else:
+                    onset_prediction = binary_onset_vector[step - w_size]
 
-                onset_likelihoods_per_w_size[w_index] = \
-                    prediction_confidence * window_weights[w_index] * is_onset_predicted
+                # The confidence of the prediction is the number of correctly predicted steps in the previous window
+                # minus the number of incorrectly predicted steps in the current window, normalized by the window size
+                prediction_confidence = (hit_count_prev_windows[w_size] - err_count_curr_windows[w_size]) / w_size
 
-            onset_likelihood = prior * prior_weight + (1.0 - prior_weight) * sum(onset_likelihoods_per_w_size)
-            onset_likelihood_vector.append(onset_likelihood)
+                err_count_curr_windows[w_size] += int(is_onset != onset_prediction)
+                onset_likelihoods.append(prediction_confidence * window_weights[w_size] * onset_prediction)
 
-        if cyclic:
-            assert len(onset_likelihood_vector) == 2 * n_steps
-            return tuple(onset_likelihood_vector[n_steps:])
-
-        return tuple(onset_likelihood_vector)
-
-    ##################
-    # Unique methods #
-    ##################
-
-    def get_priors(self) -> tp.Union[tp.Union[str, tp.Sequence[float]]]:
-        return self._priors
-
-    def set_priors(self, priors: tp.Optional[tp.Union[str, tp.Iterable[float]]]):
-        if priors is None:
-            self._priors = None
-        elif isinstance(priors, str):
-            assert priors in ["hierarchical", "equal_upbeats", "equal_beats"]
-            self._priors = priors
-        else:
-            self._priors = tuple(map(float, priors))
+            yield sum(onset_likelihoods)
 
     ##############
     # Properties #
     ##############
 
     @property
-    def cyclic(self):
-        return self._cyclic
+    def priors(self) -> tp.Union[str, tp.Tuple[int]]:
+        """The way that uncertain groups are handled. One of ['cyclic', 'optimistic', 'pessimistic']. See
+        :class:`beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector` for more info."""
+        return self._priors
 
-    @cyclic.setter
-    def cyclic(self, cyclic: bool):
-        self._cyclic = bool(cyclic)
-
-    @property
-    def prior_weight(self) -> float:
-        return self._prior_weight
-
-    @prior_weight.setter
-    def prior_weight(self, prior_weight: float):
-        prior_weight = float(prior_weight)
-        if not (0.0 <= prior_weight <= 1.0):
-            raise ValueError("Expected prior weight between (including) 0 and 1 but got %s" % prior_weight)
-        self._prior_weight = prior_weight
-
-    ###################
-    # Private methods #
-    ###################
-
-    def _create_priors_vector(self, n: int, time_sig: TimeSignature) -> tp.Iterable[float]:
-        abstract_priors = self.get_priors()
-
-        if abstract_priors is None:
-            return
-        elif isinstance(abstract_priors, str):
-            salience_profile = time_sig.get_salience_profile(self.unit, abstract_priors, root_weight=0)
-            min_metrical_weight = min(salience_profile)
-            priors_seq = tuple((s - min_metrical_weight) / abs(min_metrical_weight) for s in salience_profile)
-        else:
-            available_durations = set(time_sig.get_natural_duration_map(self.unit, trim_to_pulse=False))
-            available_durations.remove(1)
-
-            priors_seq = tuple(float(p) for p in abstract_priors)
-            n_priors = len(priors_seq)
-
-            if n_priors > 1 and not any(n_priors % d == 0 for d in available_durations):
-                raise RuntimeError("Number of priors must be a multiple of: %s (not %i)" % (
-                    str(list(sorted(available_durations))), len(priors_seq)))
-
-        priors_pool = itertools.cycle(priors_seq)
-
-        for _ in range(n):
-            yield next(priors_pool)
+    @priors.setter
+    def priors(self, priors: tp.Union[str, tp.Iterable[int]]):
+        legal_priors = (self.CYCLIC, self.OPTIMISTIC, self.PESSIMISTIC)
+        priors = str(priors)
+        if priors not in legal_priors:
+            raise ValueError("Unknown priors value: %s (choose between: %s)" % (priors, str(legal_priors)))
+        self._priors = priors
 
 
-class MonophonicVariationVector(MonophonicRhythmFeatureExtractorBase):
-    # TODO Add documentation
-    # TODO Add PolyphonicVariationVector as soon as PolyphonicOnsetLikelihoodVector is ready
+class MonophonicVariabilityVector(MonophonicRhythmFeatureExtractorBase):
+    """
+    Computes the variability of each step of the given monophonic rhythm. First, the onset likelihood vector is computed
+    with :class:`beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector`. The variability of step N is the
+    absolute difference of the probability of N being an onset and whether there was actually an onset on step N.
+    """
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (e.unit, e.cyclic)
+    __get_factors__ = lambda e: (e.unit, e.priors)
 
-    def __init__(self, unit: UnitType = _DEFAULT_UNIT, cyclic: bool = True, **kw):
+    def __init__(self, unit: UnitType = _DEFAULT_UNIT, priors: str = MonophonicOnsetLikelihoodVector.CYCLIC, **kw):
         super().__init__(unit, **kw)
-        self._mono_onset_likelihood_vec = MonophonicOnsetLikelihoodVector(priors=None, aux_to=self)
+        self._mono_onset_likelihood_vec = MonophonicOnsetLikelihoodVector(aux_to=self)
         self._bin_onset_vec = BinaryOnsetVector(aux_to=self)
-        self.cyclic = cyclic
+        self.priors = priors
 
     def __process__(self, rhythm: MonophonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
         predicted_onsets = aux_fts[0]  # binary onset likelihood vector
@@ -1340,20 +1309,21 @@ class MonophonicVariationVector(MonophonicRhythmFeatureExtractorBase):
     ##############
 
     @property
-    def cyclic(self) -> bool:
-        return self._mono_onset_likelihood_vec.cyclic
+    def priors(self) -> str:
+        """See :meth:`beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector.priors`"""
+        return self._mono_onset_likelihood_vec.priors
 
-    @cyclic.setter
-    def cyclic(self, cyclic: bool):
-        self._mono_onset_likelihood_vec.cyclic = cyclic
+    @priors.setter
+    def priors(self, priors: str):
+        self._mono_onset_likelihood_vec.priors = priors
 
 
-class MonophonicTensionVector(MonophonicRhythmFeatureExtractorBase):
+class MonophonicMetricalTensionVector(MonophonicRhythmFeatureExtractorBase):
     """
-    This feature extractor computes the monophonic tension of a rhythm. If E(i) is the i-th event in the note vector of
-    the given rhythm (see :class:`beatsearch.feature_extraction.NoteVector`, it is said that the tension during event
-    E(i) equals the metrical weight of the starting position of E(i) for rests and sounding notes. If E(i) is a tied
-    note (non-sounding note), then the tension of E(i) equals the tension of E(i-1).
+    This feature extractor computes the monophonic metrical tension of a rhythm. If E(i) is the i-th event in the note
+    vector of the given rhythm (see :class:`beatsearch.feature_extraction.NoteVector`, it is said that the tension
+    during event E(i) equals the metrical weight of the starting position of E(i) for rests and sounding notes. If E(i)
+    is a tied note (non-sounding note), then the tension of E(i) equals the tension of E(i-1).
     """
 
     __tick_based_computation_support__ = False
@@ -1438,20 +1408,51 @@ class MonophonicTensionVector(MonophonicRhythmFeatureExtractorBase):
         self._note_vec.cyclic = cyclic
 
 
-class MonophonicTension(MonophonicRhythmFeatureExtractorBase):
-    # TODO Add documentation
+class MonophonicMetricalTensionMagnitude(MonophonicRhythmFeatureExtractorBase):
+    """Computes the magnitude of the monophonic metrical tension vector (the euclidean distance to the zero vector)"""
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (e.unit, e.salience_profile_type)
+    __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.normalize, e.cyclic)
 
-    def __init__(self, unit: UnitType = _DEFAULT_UNIT, salience_profile_type: str = "hierarchical", **kw):
+    def __init__(self, unit: UnitType = _DEFAULT_UNIT, salience_profile_type: str = "equal_upbeats", **kw):
         super().__init__(unit, **kw)
-        self._tension_vec = MonophonicTensionVector(normalize=True, aux_to=self)
+        self._tension_vec = MonophonicMetricalTensionVector(normalize=True, aux_to=self)
         self.salience_profile_type = salience_profile_type  # type: str
 
     def __process__(self, rhythm: MonophonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
         return math.sqrt(sum(t * t for t in aux_fts[0]))
+
+    ##############
+    # Properties #
+    ##############
+
+    @property
+    def salience_profile_type(self) -> str:
+        return self._tension_vec.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._tension_vec.salience_profile_type = salience_profile_type
+
+    @property
+    def normalize(self) -> bool:
+        """When set to True, the magnitude will have a range of [0, sqrt(N)] where N is the step count of the given
+        rhythm with this extractor's unit"""
+
+        return self._tension_vec.normalize
+
+    @normalize.setter
+    def normalize(self, normalize: bool):
+        self._tension_vec.normalize = normalize
+
+    @property
+    def cyclic(self) -> bool:
+        return self._tension_vec.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        self._tension_vec.cyclic = cyclic
 
 
 #######################################################
@@ -2054,8 +2055,8 @@ __all__ = [
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
-    'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector', 'MonophonicVariationVector',
-    'MonophonicTensionVector',
+    'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector', 'MonophonicVariabilityVector',
+    'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
 
     # Polyphonic rhythm feature extractor implementations
     'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek',

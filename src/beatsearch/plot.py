@@ -13,7 +13,7 @@ from itertools import cycle, repeat
 from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector, \
-    PolyphonicSyncopationVectorWitek, MonophonicTensionVector, PolyphonicTensionVector, MonophonicVariationVector
+    PolyphonicSyncopationVectorWitek, MonophonicMetricalTensionVector, PolyphonicTensionVector, MonophonicVariabilityVector
 from beatsearch.utils import QuantizableMixin, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
 
 # make room for the labels
@@ -941,18 +941,18 @@ class MonophonicTensionVectorGraph(RhythmLoopPlotter):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
-            feature_extractors={'tension': MonophonicTensionVector(unit, salience_profile_type, normalize=True)},
+            feature_extractors={'tension': MonophonicMetricalTensionVector(unit, salience_profile_type, normalize=True)},
             snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
         )
 
     @property
     def salience_profile_type(self) -> str:
-        tension_vector = self.get_feature_extractor("tension")  # type: MonophonicTensionVector
+        tension_vector = self.get_feature_extractor("tension")  # type: MonophonicMetricalTensionVector
         return tension_vector.salience_profile_type
 
     @salience_profile_type.setter
     def salience_profile_type(self, salience_profile_type: str):
-        tension_vector = self.get_feature_extractor("tension")  # type: MonophonicTensionVector
+        tension_vector = self.get_feature_extractor("tension")  # type: MonophonicMetricalTensionVector
         tension_vector.salience_profile_type = salience_profile_type
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
@@ -976,7 +976,7 @@ class PolyphonicTensionVectorGraph(RhythmLoopPlotter):
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={
-                'mono_tension': MonophonicTensionVector(unit, salience_profile_type, normalize=True),
+                'mono_tension': MonophonicMetricalTensionVector(unit, salience_profile_type, normalize=True),
                 'poly_tension': PolyphonicTensionVector(unit, salience_profile_type, normalize=True)
             },
             snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
@@ -984,14 +984,14 @@ class PolyphonicTensionVectorGraph(RhythmLoopPlotter):
 
     @property
     def salience_profile_type(self) -> str:
-        mono_tension = self.get_feature_extractor("mono_tension")  # type: MonophonicTensionVector
+        mono_tension = self.get_feature_extractor("mono_tension")  # type: MonophonicMetricalTensionVector
         poly_tension = self.get_feature_extractor("poly_tension")  # type: PolyphonicTensionVector
         assert mono_tension.salience_profile_type == poly_tension.salience_profile_type
         return mono_tension.salience_profile_type
 
     @salience_profile_type.setter
     def salience_profile_type(self, salience_profile_type: str):
-        mono_tension = self.get_feature_extractor("mono_tension")  # type: MonophonicTensionVector
+        mono_tension = self.get_feature_extractor("mono_tension")  # type: MonophonicMetricalTensionVector
         poly_tension = self.get_feature_extractor("poly_tension")  # type: PolyphonicTensionVector
         mono_tension.salience_profile_type = salience_profile_type
         poly_tension.salience_profile_type = salience_profile_type
@@ -1014,7 +1014,7 @@ class PolyphonicTensionVectorGraph(RhythmLoopPlotter):
         axes.plot(poly_tension, color="black", linewidth=2)
 
     def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
-        mono_tension_extractor = self.get_feature_extractor("mono_tension")  # type: MonophonicTensionVector
+        mono_tension_extractor = self.get_feature_extractor("mono_tension")  # type: MonophonicMetricalTensionVector
         mono_tension = mono_tension_extractor.process(rhythm_track)
 
         weights = self.get_instrument_weights()
@@ -1042,7 +1042,7 @@ class MonophonicVariationGraph(RhythmLoopPlotter):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
-            feature_extractors={'variation': MonophonicVariationVector(unit, cyclic=True)},
+            feature_extractors={'variation': MonophonicVariabilityVector(unit, cyclic=True)},
             snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
         )
 

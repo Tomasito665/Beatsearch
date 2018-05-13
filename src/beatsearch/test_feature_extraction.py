@@ -16,10 +16,13 @@ from beatsearch.feature_extraction import (
     ChronotonicChain,
     OnsetDensity,
     OnsetPositionVector,
+    MonophonicOnsetLikelihoodVector,
+    MonophonicVariabilityVector,
     SyncopationVector,
     SyncopatedOnsetRatio,
     MeanSyncopationStrength,
-    MonophonicTensionVector,
+    MonophonicMetricalTensionVector,
+    MonophonicMetricalTensionMagnitude,
     IOIVector,
     IOIDifferenceVector,
     IOIHistogram
@@ -446,31 +449,97 @@ class TestOnsetDensity(TestMonophonicRhythmFeatureExtractorImplementationMixin, 
         self.assertEqual(actual_onset_density, expected_onset_density)
 
 
-# TODO Add tests for MonophonicOnsetLikelihoodVector
-
-
-class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+class TestMonophonicOnsetLikelihoodVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
-        return MonophonicTensionVector
+        return MonophonicOnsetLikelihoodVector
+
+    @staticmethod
+    def get_rhythm_str():
+        return "x-x-x-x-x-xxx-xx"
+
+    def test_defaults_to_cyclic_priors(self):
+        extractor = self.feature_extractor  # type: MonophonicOnsetLikelihoodVector
+        self.assertEqual(extractor.priors, "cyclic")
+
+    def test_process_with_cyclic_priors(self):
+        extractor = self.feature_extractor  # type: MonophonicOnsetLikelihoodVector
+        extractor.priors = "cyclic"
+        expected_onset_likelihood_vec = (1.0, 0.2, 0.8666667, 0.8, 0.8, 0.0, 0.8, 0.4666667,
+                                         0.8, 0.0, 0.8, 0.0, 0.6666667, 0.1333333, 0.6, 0.2)
+        actual_onset_likelihood_vec = extractor.process(self.rhythm)
+        self.assertEqual(len(actual_onset_likelihood_vec), len(expected_onset_likelihood_vec))
+        for actual_likelihood, expected_likelihood in zip(actual_onset_likelihood_vec, expected_onset_likelihood_vec):
+            self.assertAlmostEqual(actual_likelihood, expected_likelihood)
+
+    def test_process_with_optimistic_priors(self):
+        extractor = self.feature_extractor  # type: MonophonicOnsetLikelihoodVector
+        extractor.priors = "optimistic"
+        expected_onset_likelihood_vec = (1.0, 0.0666667, 0.9333333, 0.0, 0.9333333, 0.0, 0.9333333, 0.0,
+                                         0.9333333, 0.0, 0.9333333, 0.0, 0.8, 0.1333333, 0.7333333, 0.2)
+        actual_onset_likelihood_vec = extractor.process(self.rhythm)
+        self.assertEqual(len(actual_onset_likelihood_vec), len(expected_onset_likelihood_vec))
+        for actual_likelihood, expected_likelihood in zip(actual_onset_likelihood_vec, expected_onset_likelihood_vec):
+            self.assertAlmostEqual(actual_likelihood, expected_likelihood)
+
+    def test_process_with_pessimistic_priors(self):
+        extractor = self.feature_extractor  # type: MonophonicOnsetLikelihoodVector
+        extractor.priors = "pessimistic"
+        expected_onset_likelihood_vec = (0.0, 0.7333333, 0.0, 0.4, 0.1333333, 0.2, 0.1333333, 0.0666667,
+                                         0.4, 0.0, 0.4, 0.0, 0.2666667, 0.1333333, 0.2, 0.2)
+        actual_onset_likelihood_vec = extractor.process(self.rhythm)
+        self.assertEqual(len(actual_onset_likelihood_vec), len(expected_onset_likelihood_vec))
+        for actual_likelihood, expected_likelihood in zip(actual_onset_likelihood_vec, expected_onset_likelihood_vec):
+            self.assertAlmostEqual(actual_likelihood, expected_likelihood)
+
+
+class TestMonophonicVariabilityVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return MonophonicVariabilityVector
+
+    @staticmethod
+    def get_rhythm_str():
+        return "x-x-x-x-x-xxx-xx"
+
+    def test_defaults_to_cyclic_priors(self):
+        extractor = self.feature_extractor  # type: MonophonicVariabilityVector
+        self.assertEqual(extractor.priors, "cyclic")
+
+    @patch.object(MonophonicOnsetLikelihoodVector, "__process__")
+    @patch.object(BinaryOnsetVector, "__process__")
+    def test_process(self, binary_onset_process_mock, onset_likelihood_process_mock):
+        extractor = self.feature_extractor  # type: MonophonicVariabilityVector
+        onset_likelihood_process_mock.return_value = (0.1, 0.3, 0.03, 0.99, 0.07, 0.00, 0.1, 1.0)
+        binary_onset_process_mock.return_value = (0, 1, 1, 0, 0, 1, 0, 0)
+        expected_variability_vec = (0.1, 0.7, 0.97, 0.99, 0.07, 1.00, 0.1, 1.0)
+        actual_variability_vec = extractor.process(self.rhythm)
+        self.assertEqual(actual_variability_vec, expected_variability_vec)
+
+
+class TestMonophonicMetricalTensionVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return MonophonicMetricalTensionVector
 
     @staticmethod
     def get_rhythm_str():
         return "x--x--x------x--"
 
     def test_defaults_to_cyclic(self):
-        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
         self.assertTrue(extractor.cyclic)
 
     def test_defaults_to_equal_upbeats_salience_prf(self):
-        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
         self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
 
     SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF = [0, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3]
 
     @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
     def test_process(self, _):
-        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
+        extractor.cyclic = True
 
         expected_tension_vector = tuple(int(c) for c in "0003332222221333")
         actual_tension_vector = extractor.process(self.rhythm)
@@ -480,7 +549,7 @@ class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementa
     @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
     def test_process_tension_during_first_tied_note_event_equals_last_with_cyclic_rhythm(self, _):
         rhythm = get_mono_rhythm_mock("----x-x-----x--x", 4)
-        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
         extractor.cyclic = True
 
         tension_vector = extractor.process(rhythm)
@@ -489,14 +558,38 @@ class TestMonophonicTensionVector(TestMonophonicRhythmFeatureExtractorImplementa
     @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
     def test_process_tension_during_first_tied_note_event_is_zero_with_non_cyclic_rhythm(self, _):
         rhythm = get_mono_rhythm_mock("----x-x-----x--x", 4)
-        extractor = self.feature_extractor  # type: MonophonicTensionVector
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
         extractor.cyclic = False
 
         tension_vector = extractor.process(rhythm)
         self.assertSequenceEqual(tension_vector[0:4], [0] * 4)
 
-# TODO Add tests for MonophonicTension
-# TODO Add tests for MonophonicVariationVector
+
+class TestMonophonicMetricalTensionMagnitude(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
+        return MonophonicMetricalTensionMagnitude
+
+    @staticmethod
+    def get_rhythm_str():
+        return "x--x--x------x--"
+
+    def test_defaults_to_cyclic(self):
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionMagnitude
+        self.assertTrue(extractor.cyclic)
+
+    def test_defaults_to_equal_upbeats_salience_prf(self):
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionMagnitude
+        self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
+
+    @patch.object(MonophonicMetricalTensionVector, "__process__")
+    def test_process(self, mock_metrical_tension_vec_process):
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
+        mock_metrical_tension_vec_process.return_value = (0.0, 0.0, 0.0, 3.0, 3.0, 3.0, 2.0, 2.0,
+                                                          2.0, 2.0, 2.0, 2.0, 1.0, 3.0, 3.0, 1.0)
+        expected_vector_magnitude = 8.426149773176359
+        actual_vector_magnitude = extractor.process(self.rhythm)
+        self.assertAlmostEqual(actual_vector_magnitude, expected_vector_magnitude)
 
 
 class TestPolyphonicRhythmFeatureExtractor(TestCase):
