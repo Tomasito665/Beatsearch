@@ -1,7 +1,7 @@
 import functools
 import typing as tp
 from unittest import TestCase, main
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 from abc import ABCMeta, abstractmethod
 
 # feature extractor base classes
@@ -34,7 +34,8 @@ from beatsearch.feature_extraction import (
 
 # misc
 from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, Unit, TimeSignature
-from beatsearch.test_rhythm import get_mono_rhythm_mock, get_poly_rhythm_mock_with_songo_onsets
+from beatsearch.test_rhythm import get_mono_rhythm_mock, get_poly_rhythm_mock_with_songo_onsets, get_mocked_track, \
+    set_rhythm_mock_properties
 
 
 class TestFeatureExtractor(TestCase):
@@ -556,22 +557,36 @@ class TestMultiTrackMonoFeature(TestCase):
             named_a="fake_a", named_b="fake_b"
         )
 
-    def test_returns_mono_cls_and_mono_factors(self):
+    def test_defaults_to_per_track(self):
+        mock_mono_extr_cls = MagicMock(spec=MonophonicRhythmFeatureExtractor.__class__)
+        with patch("inspect.isclass", return_value=True):
+            # noinspection PyTypeChecker
+            mt_mono_feature_extr = MultiTrackMonoFeature(mock_mono_extr_cls)
+        self.assertEqual(mt_mono_feature_extr.multi_track_mode, MultiTrackMonoFeature.PER_TRACK)
+
+    def test_returns_own_and_mono_factors(self):
         mock_mono_extr_cls = MagicMock(spec=MonophonicRhythmFeatureExtractor.__class__)
         mock_mono_extr_obj = MagicMock(spec=MonophonicRhythmFeatureExtractor)
         mock_mono_extr_cls.return_value = mock_mono_extr_obj
+        fake_multi_track_mode = "fake-mt-mode"
 
         with patch("inspect.isclass", return_value=True):
             # noinspection PyTypeChecker
             mt_mono_feature_extr = MultiTrackMonoFeature(mock_mono_extr_cls)
 
+        own_factors = mock_mono_extr_obj.__class__, fake_multi_track_mode
         mono_factors = "fake-factor-1", "fake-factor-2", "fake-factor-3"
-        expected_mt_factors = mock_mono_extr_obj.__class__, mono_factors
         mock_mono_extr_obj.__get_factors__.return_value = mono_factors
-        actual_mt_factors = mt_mono_feature_extr.__get_factors__()
+        expected_mt_factors = own_factors, mono_factors
+
+        with patch("beatsearch.feature_extraction.MultiTrackMonoFeature.multi_track_mode",
+                   new_callable=PropertyMock) as mock_mt_mode_prop:
+            mock_mt_mode_prop.return_value = fake_multi_track_mode
+            actual_mt_factors = mt_mono_feature_extr.__get_factors__()
+
         self.assertSequenceEqual(actual_mt_factors, expected_mt_factors)
 
-    def test_process_returns_mono_process_per_track(self):
+    def test_process_per_track(self):
         mock_mono_extr_cls = MagicMock(spec=MonophonicRhythmFeatureExtractor.__class__)
         mock_mono_extr_obj = MagicMock(spec=MonophonicRhythmFeatureExtractor)
         mock_mono_extr_cls.return_value = mock_mono_extr_obj
@@ -579,6 +594,7 @@ class TestMultiTrackMonoFeature(TestCase):
         with patch("inspect.isclass", return_value=True):
             # noinspection PyTypeChecker
             mt_mono_feature_extr = MultiTrackMonoFeature(mock_mono_extr_cls)
+            mt_mono_feature_extr.multi_track_mode = MultiTrackMonoFeature.PER_TRACK
 
         mock_mono_extr_obj.__process__ = lambda fake_track, *_: "fake-%s-feature" % fake_track.name
         rhythm = get_poly_rhythm_mock_with_songo_onsets()
@@ -586,6 +602,69 @@ class TestMultiTrackMonoFeature(TestCase):
         actual_feature = mt_mono_feature_extr.process(rhythm)
 
         self.assertSequenceEqual(actual_feature, expected_feature)
+
+    def test_process_per_track_combination(self):
+        mock_mono_extr_cls = MagicMock(spec=MonophonicRhythmFeatureExtractor.__class__)
+        mock_mono_extr_obj = MagicMock(spec=MonophonicRhythmFeatureExtractor)
+        mock_mono_extr_cls.return_value = mock_mono_extr_obj
+
+        with patch("inspect.isclass", return_value=True):
+            # noinspection PyTypeChecker
+            mt_mono_feature_extr = MultiTrackMonoFeature(mock_mono_extr_cls)
+            mt_mono_feature_extr.multi_track_mode = MultiTrackMonoFeature.PER_TRACK_COMBINATION
+
+        # Let the mono extractor return the raw onsets
+        mock_mono_extr_obj.__process__ = lambda fake_track_combi, *_: fake_track_combi.get_onsets()
+
+        resolution = 4
+        duration_in_ticks = 8
+        ts = TimeSignature(4, 4)  # TODO Mock time signature
+        rhythm_mock = MagicMock(spec=PolyphonicRhythm)
+
+        # Rhythm mock:
+        #   kick:   x---xx--
+        #   snare:  --x--xx-
+        #
+        # Expected combinations:
+        #   [kick]          x---xx--
+        #   [snare]         --x--xx-
+        #   [kick, snare]   x-x-xxx-
+
+        kick_track_mock = get_mocked_track("kick", [
+            int(resolution / 4.0 * 0),
+            int(resolution / 4.0 * 4),
+            int(resolution / 4.0 * 5)
+        ], resolution, ts, duration_in_ticks)
+
+        snare_track_mock = get_mocked_track("snare", [
+            int(resolution / 4.0 * 2),
+            int(resolution / 4.0 * 5),
+            int(resolution / 4.0 * 6)
+        ], resolution, ts, duration_in_ticks)
+
+        kick_snare_track_mock = get_mocked_track("kick-snare", [
+            int(resolution / 4.0 * 0),
+            int(resolution / 4.0 * 2),
+            int(resolution / 4.0 * 4),
+            int(resolution / 4.0 * 5),
+            int(resolution / 4.0 * 6)
+        ], resolution, ts, duration_in_ticks)
+
+        tracks = kick_track_mock, snare_track_mock
+        rhythm_mock.get_track_iterator.return_value = iter(tracks)
+        rhythm_mock.get_track_count.return_value = len(tracks)
+        rhythm_mock.get_track_names.return_value = tuple(t.name for t in tracks)
+        rhythm_mock.get_track_by_index = lambda i: kick_track_mock if i == 0 else snare_track_mock
+        set_rhythm_mock_properties(rhythm_mock, resolution, ts, duration_in_ticks)
+
+        expected_feature = (
+            ((0,), kick_track_mock.get_onsets()),
+            ((1,), snare_track_mock.get_onsets()),
+            ((0, 1), kick_snare_track_mock.get_onsets())
+        )
+
+        actual_feature = mt_mono_feature_extr.process(rhythm_mock)
+        self.assertEqual(actual_feature, expected_feature)
 
     def test_mono_extractor_registered_as_auxiliary_extractor(self):
         mock_mono_extr_cls = MagicMock(spec=MonophonicRhythmFeatureExtractor.__class__)

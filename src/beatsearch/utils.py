@@ -2,6 +2,7 @@
 import os
 import sys
 import logging
+import itertools
 import collections
 import numpy as np
 import typing as tp
@@ -316,7 +317,7 @@ def most_common_element(sequence: tp.Sequence[tp.Any]) -> tp.Any:
     return max(set(sequence), key=sequence.count)
 
 
-def sequence_product(iterable):
+def sequence_product(iterable: tp.Iterable[tp.Union[int, float]]) -> tp.Union[int, float]:
     """Returns the product of the given iterable
 
     Returns 0 if reduce() raise a TypeError.
@@ -474,7 +475,11 @@ class Rectangle2D(collections.namedtuple("Rectangle2D", ["x", "y", "width", "hei
 
 
 class QuantizableMixin(object):
-    __quantize: bool  # whether the quantization is enabled
+    """This mixin adds a 'quantize' property to classes that extend it. It also provides a hook that gets notified when
+    the quantize property has been set."""
+
+    # Whether the quantization of this object is enabled
+    __quantize: bool
 
     @property
     def quantize(self) -> bool:
@@ -491,7 +496,7 @@ class QuantizableMixin(object):
         self.__on_quantize_set__(quantize_enabled)
 
     def __on_quantize_set__(self, quantize: bool):
-        """This method will be called when the quantise property is set
+        """This method will be called when the quantize property is set
 
         Override this method to get notified whenever the quantize attribute is set.
 
@@ -500,6 +505,22 @@ class QuantizableMixin(object):
         """
 
         pass
+
+
+def zip_equal(*iterables: tp.Iterable) -> tp.Generator[tp.Tuple[tp.Any, ...], None, None]:
+    """
+    Zip utility function that raises a value error if the given iterables don't yield the same number of elements.
+
+    :param iterables: iterables yielding the same number of elements
+    :return: generator yielding tuples containing each n-th element of the given iterables
+    :raises: ValueError if the iterables don't yield the same number of iterables
+    """
+
+    sentinel = object()
+    for combo in itertools.zip_longest(*iterables, fillvalue=sentinel):
+        if sentinel in combo:
+            raise ValueError("Iterables have different lengths")
+        yield combo
 
 
 def get_logging_level_by_name(level_name: str) -> int:
@@ -592,13 +613,28 @@ def iterable_to_str(
     return "%s%s%s" % (boundary_chars[0], ("%s " % separator).join(str_elements), boundary_chars[1])
 
 
+def iterable_nth(iterable, n, default=None):
+    """
+    Returns the nth item or a default value.
+
+    From: https://docs.python.org/3/library/itertools.html#recipes
+
+    :param iterable: iterable
+    :param n: item index
+    :param default: default value
+    :return: nth item of given iterable
+    """
+
+    return next(itertools.islice(iterable, n, None), default)
+
+
 __all__ = [
     'merge_dicts', 'format_timespan', 'print_progress_bar', 'friendly_named_class',
     'err_print', 'make_dir_if_not_exist', 'head_trail_iter', 'current_next_pair_iter', 'get_beatsearch_dir',
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
-    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'QuantizableMixin',
+    'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'QuantizableMixin', 'zip_equal',
     'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
     'Rectangle2D', 'get_logging_level_by_name', 'set_logging_level_by_name', 'find_all_subclasses',
-    'find_all_concrete_subclasses', 'iterable_to_str'
+    'find_all_concrete_subclasses', 'iterable_to_str', 'iterable_nth'
 ]

@@ -8,7 +8,7 @@ import numpy as np
 import typing as tp
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
-from beatsearch.utils import QuantizableMixin, minimize_term_count, TupleView, iterable_to_str
+from beatsearch.utils import QuantizableMixin, minimize_term_count, TupleView, iterable_to_str, zip_equal
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
     Unit, UnitType, parse_unit_argument, convert_tick
 
@@ -1462,17 +1462,29 @@ class MonophonicMetricalTensionMagnitude(MonophonicRhythmFeatureExtractorBase):
 
 class MultiTrackMonoFeature(PolyphonicRhythmFeatureExtractor):
     """
-    This class can be used to "upgrade" a monophonic rhythm feature extractor to a polyphonic one. Instances of this
-    class have an underlying monophonic rhythm feature extractor. When processing a polyphonic rhythm, this class will
-    process the monophonic feature per track and return it like a (feature_track_a, feature_track_b, etc.) tuple. The
-    length of the tuple equals the number of tracks in the polyphonic rhythm. The features are returned in the same
-    order in which the tracks are returned by :meth:`beatsearch.rhythm.PolyphonicRhythm.get_track_iterator`. All
-    attributes/methods but `__process__` and `__get_auxiliaries__` are forwarded to the underlying monophonic feature
-    extractor.
+    This class can be used to "upgrade" a monophonic rhythm feature extractor to a polyphonic one. Objects of this class
+    have an underlying monophonic rhythm feature extractor. The behaviour of calling process() depends on the current
+    :meth:`beatsearch.feature_extraction.MultiTrackMonoFeature.multi_track_mode` of the MultiTrackMonoFeature extractor:
+
+        - PER_TRACK:
+            The monophonic feature is computed once for each track in the given polyphonic rhythm and returned in the
+            same order as a tuple.
+
+        - PER_TRACK_COMBINATION:
+            For each track combination (e.g., given a polyphonic rhythm with kick, snare and hi-hat, the combinations
+            are [kick], [snare], [hi-hat], [kick, snare], [kick, hi-hat], [snare, hi-hat] and [kick, snare, hi-hat]) a
+            new, merged, monophonic rhythm is created. The monophonic feature is then computed on each monophonic
+            rhythm. The monophonic features are then returned as a tuple of (track_indices, mono_feature) tuples where
+            track_indices is a tuple containing the indices of the tracks used to create the merged monophonic rhythm
+            that resulted in the corresponding monophonic feature.
     """
 
+    PER_TRACK = "per_track"
+    PER_TRACK_COMBINATION = "per_track_combination"
+    _OWN_ATTRIBUTES = ("multi_track_mode", "__multi_track_mode__", "__mono_extractor__")
+
     def __init__(self, mono_extr_cls: tp.Type[MonophonicRhythmFeatureExtractorBase],
-                 *args, aux_to: tp.Optional[FeatureExtractor]=None, **kwargs):
+                 *args, multi_track_mode: str = PER_TRACK, aux_to: tp.Optional[FeatureExtractor]=None, **kwargs):
         """
         Creates a new multi-track monophonic feature.
 
@@ -1483,6 +1495,13 @@ class MultiTrackMonoFeature(PolyphonicRhythmFeatureExtractor):
 
         if not inspect.isclass(mono_extr_cls):
             raise TypeError("Expected a class but got a '%s'" % type(mono_extr_cls))
+
+        if not issubclass(mono_extr_cls, MonophonicRhythmFeatureExtractor):
+            LOGGER.warning("Given mono_extr_cls '%s' is not a "
+                           "subclass of MonophonicRhythmFeatureExtractor" % str(mono_extr_cls))
+
+        self.__multi_track_mode__ = None
+        self.multi_track_mode = multi_track_mode
 
         # Instantiate the underlying monophonic rhythm feature extractor and explicitly register it as an auxiliary
         # extractor (not passing aux_to=self to mono extractor so that we don't have to rely on its constructor actually
@@ -1500,17 +1519,40 @@ class MultiTrackMonoFeature(PolyphonicRhythmFeatureExtractor):
         if aux_to:
             aux_to.register_auxiliary_extractor(self)
 
-    def __get_auxiliaries__(self, rhythm: PolyphonicRhythm) -> \
-            tp.Optional[tp.Iterable[FeatureExtractorAuxiliaryFeature]]:
-        for track in rhythm.get_track_iterator():
-            yield FeatureExtractorAuxiliaryFeature(track, self.__mono_extractor__)
+    ######################
+    # Overridden methods #
+    ######################
+
+    def __get_auxiliaries__(self, rhythm: PolyphonicRhythm) -> tp.Tuple[FeatureExtractorAuxiliaryFeature]:
+        mode = self.multi_track_mode
+
+        if mode == self.PER_TRACK:
+            return tuple(self.__get_auxiliaries_per_track__(rhythm))
+        elif mode == self.PER_TRACK_COMBINATION:
+            return tuple(self.__get_auxiliaries_per_track_combination(rhythm))
+        else:
+            assert False, "Unknown multi-track mode: %s" % mode
 
     def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
-        return aux_fts
+        mode = self.multi_track_mode
+
+        if mode == self.PER_TRACK:
+            return aux_fts
+        elif mode == self.PER_TRACK_COMBINATION:
+            try:
+                return tuple(zip_equal(self.__get_track_combinations__(rhythm), aux_fts))
+            except ValueError:
+                assert False, "aux_fts should have the same number of elements as the number of aux features"
+        else:
+            assert False, "Unknown multi-track mode: %s" % mode
 
     def __get_factors__(self) -> tp.Iterable[tp.Hashable]:
         mono_extractor = self.__mono_extractor__
-        return mono_extractor.__class__, mono_extractor.__get_factors__()
+        return (mono_extractor.__class__, self.multi_track_mode), mono_extractor.__get_factors__()
+
+    #####################
+    # Forwarded methods #
+    #####################
 
     def get_unit(self) -> tp.Union[Unit, None]:
         return self.__mono_extractor__.get_unit()
@@ -1519,18 +1561,46 @@ class MultiTrackMonoFeature(PolyphonicRhythmFeatureExtractor):
         self.__mono_extractor__.set_unit(unit)
 
     def __setattr__(self, name: str, value: tp.Any) -> None:
-        if self.__is_mono_extractor_already_set__():
-            # still setting things up in the constructor
-            setattr(self.__mono_extractor__, name, value)
-        else:
+        if name in self._OWN_ATTRIBUTES or not self.__is_mono_extractor_already_set__():
             super().__setattr__(name, value)
+        else:
+            setattr(self.__mono_extractor__, name, value)
 
     def __getattr__(self, name) -> tp.Any:
-        if self.__is_mono_extractor_already_set__():
-            # still setting things up in the constructor
-            return getattr(self.__mono_extractor__, name)
+        if name in self._OWN_ATTRIBUTES or not self.__is_mono_extractor_already_set__():
+            super().__getattribute__(name)
         else:
-            return super().__getattribute__(name)
+            return getattr(self.__mono_extractor__, name)
+
+    ##############
+    # Properties #
+    ##############
+
+    @property
+    def multi_track_mode(self) -> str:
+        return self.__multi_track_mode__
+
+    @multi_track_mode.setter
+    def multi_track_mode(self, multi_track_mode: str):
+        available_modes = [self.PER_TRACK, self.PER_TRACK_COMBINATION]
+        multi_track_mode = str(multi_track_mode)
+        if multi_track_mode not in available_modes:
+            raise ValueError("Expected one of: %s but got '%s'" % (str(available_modes), multi_track_mode))
+        self.__multi_track_mode__ = multi_track_mode
+
+    ###################
+    # Private methods #
+    ###################
+
+    def __get_auxiliaries_per_track__(self, rhythm: PolyphonicRhythm) -> tp.Iterable[FeatureExtractorAuxiliaryFeature]:
+        for track in rhythm.get_track_iterator():
+            yield FeatureExtractorAuxiliaryFeature(track, self.__mono_extractor__)
+
+    def __get_auxiliaries_per_track_combination(self, rhythm: PolyphonicRhythm):
+        for track_indices in self.__get_track_combinations__(rhythm):
+            tracks = (rhythm.get_track_by_index(track_i) for track_i in track_indices)
+            combined_rhythm = MonophonicRhythm.create.from_monophonic_rhythms(*tracks)
+            yield FeatureExtractorAuxiliaryFeature(combined_rhythm, self.__mono_extractor__)
 
     def __is_mono_extractor_already_set__(self):
         try:
@@ -1538,6 +1608,14 @@ class MultiTrackMonoFeature(PolyphonicRhythmFeatureExtractor):
             return True
         except AttributeError:
             return False
+
+    @staticmethod
+    def __get_track_combinations__(rhythm: PolyphonicRhythm) -> tp.Iterable[tp.Tuple[int]]:
+        n_tracks = rhythm.get_track_count()
+        track_indices = tuple(range(n_tracks))
+        for combo_length in range(1, n_tracks + 1):
+            for track_combo in itertools.combinations(track_indices, combo_length):
+                yield tuple(track_combo)
 
 
 class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
@@ -2059,6 +2137,5 @@ __all__ = [
     'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
 
     # Polyphonic rhythm feature extractor implementations
-    'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek',
-    'PolyphonicTensionVector'
+    'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek'
 ]

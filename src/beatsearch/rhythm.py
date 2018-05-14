@@ -22,7 +22,8 @@ from beatsearch.utils import (
     sequence_product,
     FileInfo,
     get_midi_files_in_directory,
-    make_dir_if_not_exist
+    make_dir_if_not_exist,
+    iterable_nth,
 )
 import midi  # after beatsearch import
 
@@ -1546,17 +1547,26 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
 
         raise NotImplementedError
 
-    def __getitem__(self, track_name: str):
+    def __getitem__(self, track_desc: tp.Union[int, str]):
         """
-        Returns the track with the given name. Raises a ValueError if no track with given name.
+        Returns the track with the given name or index. Raises ValueError if no track with given index/name.
 
-        :param track_name: name of the track
+        :param track_desc: name of the track
         :return: track with given name
+        :raises: KeyError if no track found with given name, IndexError if no track on given index
         """
 
-        track = self.get_track_by_name(track_name)
+        try:
+            track_index = int(track_desc)
+        except (TypeError, ValueError):
+            track_index = -1
+
+        track = self.get_track_by_index(track_index)
+        track = track or self.get_track_by_name(str(track_desc))
+
         if track is None:
-            raise ValueError
+            raise ValueError("No track with index/name %s" % track_desc)
+
         return track
 
     @abstractmethod
@@ -1565,6 +1575,17 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         Returns the track with the given name or None if this rhythm has no track with the given name.
 
         :param track_name: track name
+        :return: Track object or None
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_track_by_index(self, track_index: int):
+        """
+        Returns the track with the given index or None if invalid index.
+
+        :param track_index: track index
         :return: Track object or None
         """
 
@@ -1832,6 +1853,25 @@ class PolyphonicRhythmImpl(RhythmBase, PolyphonicRhythm):
         """
 
         return self._tracks.get(str(track_name), None)
+
+    def get_track_by_index(self, track_index: int) -> tp.Union[Track, None]:
+        """
+        Returns the track with the given index or None if invalid index.
+
+        :param track_index: track index
+        :return: Track object or None
+        """
+
+        track_index = int(track_index)
+
+        if 0 <= track_index < self.get_track_count():
+            track = iterable_nth(self._tracks.values(), track_index, None)
+            assert track is not None
+            return track
+
+        return None
+
+
 
     def get_track_names(self) -> tp.Tuple[str, ...]:
         """
