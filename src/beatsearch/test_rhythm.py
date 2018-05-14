@@ -473,6 +473,87 @@ def mock_onset(tick=0, velocity=0):
     onset_mock.__getitem__ = lambda self, i: self.tick if i == 0 else self.velocity
     return onset_mock
 
+def set_rhythm_mock_properties(rhythm_mock, resolution, time_signature, duration_in_ticks):
+    # resolution
+    rhythm_mock.get_resolution.return_value = resolution
+    rhythm_mock.resolution = resolution
+    # time signature
+    rhythm_mock.get_time_signature.return_value = time_signature
+    rhythm_mock.time_signature = time_signature
+    # duration (in ticks)
+    rhythm_mock.get_duration_in_ticks.return_value = duration_in_ticks
+    rhythm_mock.duration_in_ticks = duration_in_ticks
+    rhythm_mock.get_duration.return_value = duration_in_ticks
+
+
+def get_mono_rhythm_mock(rhythm_str: str, resolution: int,
+                         onset_char: str = "x", onset_velocity: int = 100) -> MonophonicRhythm:
+    # returns rhythm with duration of one measure in 4/4
+
+    rhythm_mock = MagicMock(MonophonicRhythm)
+    onset_positions = tuple(int(resolution / 4.0 * i) for i, c in enumerate(rhythm_str) if c == onset_char)
+    mocked_onsets = tuple(mock_onset(tick, onset_velocity) for tick in onset_positions)
+
+    rhythm_mock.get_onsets.return_value = mocked_onsets
+    rhythm_mock.onsets = rhythm_mock.get_onsets.return_value
+
+    # TODO Mock time signature
+    set_rhythm_mock_properties(rhythm_mock, resolution, TimeSignature(4, 4), int(resolution) * 4)
+
+    # noinspection PyTypeChecker
+    return rhythm_mock
+
+
+def get_mocked_track(name, onset_positions, resolution, time_signature, duration_in_ticks):
+    track_mock = MagicMock(Track)
+    mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
+
+    track_mock.get_name.return_value = name
+    track_mock.name = name
+    track_mock.get_onsets.return_value = mocked_onsets
+    track_mock.onsets = mocked_onsets
+
+    set_rhythm_mock_properties(track_mock, resolution, time_signature, duration_in_ticks)
+    return track_mock
+
+
+def get_poly_rhythm_mock_with_songo_onsets(resolution: int = 4):
+    rhythm_mock = MagicMock(spec=PolyphonicRhythm)
+    assert resolution >= 4, "the songo rhythm is not representable with a resolution smaller than 4"
+    ts = TimeSignature(4, 4)  # TODO Mock time signature
+    duration_in_ticks = 4 * resolution  # one measure 4/4
+
+    kick_track_mock = get_mocked_track("kick", [
+        int(resolution / 4.0 * 3),
+        int(resolution / 4.0 * 6),
+        int(resolution / 4.0 * 11),
+        int(resolution / 4.0 * 14)
+    ], resolution, ts, duration_in_ticks)
+
+    snare_track_mock = get_mocked_track("snare", [
+        int(resolution / 4.0 * 2),
+        int(resolution / 4.0 * 5),
+        int(resolution / 4.0 * 7),
+        int(resolution / 4.0 * 9),
+        int(resolution / 4.0 * 10),
+        int(resolution / 4.0 * 13),
+        int(resolution / 4.0 * 15)
+    ], resolution, ts, duration_in_ticks)
+
+    hihat_track_mock = get_mocked_track("hihat", [
+        int(resolution / 4.0 * 0),
+        int(resolution / 4.0 * 4),
+        int(resolution / 4.0 * 8),
+        int(resolution / 4.0 * 12)
+    ], resolution, ts, duration_in_ticks)
+
+    tracks = kick_track_mock, snare_track_mock, hihat_track_mock
+    rhythm_mock.get_track_iterator.return_value = iter(tracks)
+    rhythm_mock.get_track_count.return_value = len(tracks)
+    rhythm_mock.get_track_names.return_value = tuple(t.name for t in tracks)
+    set_rhythm_mock_properties(rhythm_mock, resolution, ts, duration_in_ticks)
+    return rhythm_mock
+
 
 class TestMonophonicRhythmImpl(TestRhythmBase):
     class MonophonicRhythmMockedSettersMixin(MonophonicRhythm, RhythmMockedSetters, metaclass=ABCMeta):
@@ -1262,6 +1343,33 @@ class TestMonophonicRhythmFactory(TestCase):
             time_signature=(7, 8),
             velocity=20,
             unit="eighth"
+        )
+
+    @patch("beatsearch.rhythm.MonophonicRhythmImpl")
+    def test_from_monophonic_rhythms(self, mock_monophonic_rhythm_impl_constructor):
+        vel_a = 10
+        vel_b = 20
+
+        mock_rhythm_a = get_mono_rhythm_mock("x---x-x-", 4, onset_velocity=vel_a)
+        mock_rhythm_b = get_mono_rhythm_mock("x-x-----x-x---x-", 4, onset_velocity=vel_b)
+
+        assert vel_b > vel_a
+
+        expected_onsets = (
+            mock_onset(0, vel_b),  # <- overlapping onset (assuming that vel_b > vel_a)
+            mock_onset(2, vel_b),
+            mock_onset(4, vel_a),
+            mock_onset(6, vel_a),
+            mock_onset(8, vel_b),
+            mock_onset(10, vel_b),
+            mock_onset(14, vel_b)
+        )
+
+        MonophonicRhythm.create.from_monophonic_rhythms(mock_rhythm_a, mock_rhythm_b)
+
+        mock_monophonic_rhythm_impl_constructor.assert_called_once_with(
+            onsets=expected_onsets, time_signature=mock_rhythm_a.time_signature,
+            resolution=mock_rhythm_a.resolution, duration_in_ticks=16
         )
 
 

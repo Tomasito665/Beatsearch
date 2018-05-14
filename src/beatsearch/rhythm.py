@@ -1207,6 +1207,60 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
                 time_signature=time_signature
             )
 
+        @classmethod
+        def from_monophonic_rhythms(cls, *rhythms):  # type: (tp.Iterable[MonophonicRhythm]) -> MonophonicRhythm
+            """
+            Merges the given monophonic rhythms into one new rhythm. The given rhythms must have the same tick-
+            resolution and time signature. Onsets of the given rhythms are merged. If multiple rhythms contain an onset
+            on a particular tick position, the onset with the greatest velocity remains. The duration of the new rhythm
+            equals the duration of the longest given rhythm.
+
+            :param rhythms: rhythms to merge into one
+            :return: new rhythm
+            """
+
+            if not rhythms:
+                raise ValueError("At least one rhythm must be given")
+
+            res = None
+            time_sig = None
+            duration_in_ticks = 0
+
+            # Keep combined onsets in a dictionary mapping tick positions to onsets
+            combined_onsets_dict = {}  # type: tp.Dict[int, Onset]
+
+            for rhythm in rhythms:
+                curr_res = rhythm.get_resolution()
+                curr_time_sig = rhythm.get_time_signature()
+
+                res = res or curr_res
+                time_sig = time_sig or curr_time_sig
+
+                if curr_res != res:
+                    raise ValueError("Rhythms must have the same tick resolution")
+                if curr_time_sig != time_sig:
+                    raise ValueError("Rhythms must have the same time signature")
+
+                # Tick duration of combined rhythm will be set to the tick duration of the longest mono rhythm
+                duration_in_ticks = max(duration_in_ticks, rhythm.get_duration_in_ticks())
+
+                for onset in rhythm.get_onsets():
+                    position = onset.tick
+
+                    # Add this onset to the combined onset dictionary. If there's already an onset on this onset's tick
+                    # position, we keep the onset with the greatest velocity.
+                    combined_onsets_dict[position] = max(
+                        onset, combined_onsets_dict.get(position, onset), key=lambda o: o.velocity)
+
+            # Compile our onsets tuple
+            combined_onsets_tuple = tuple(combined_onsets_dict[tick] for tick in sorted(combined_onsets_dict))
+
+            # Create our merged rhythm
+            return MonophonicRhythmImpl(
+                onsets=combined_onsets_tuple, duration_in_ticks=duration_in_ticks,
+                resolution=res, time_signature=time_sig
+            )
+
 
 class MonophonicRhythmBase(MonophonicRhythm, metaclass=ABCMeta):
     """Monophonic rhythm base class implementing MonophonicRhythm
