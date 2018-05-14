@@ -8,7 +8,8 @@ import numpy as np
 import typing as tp
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
-from beatsearch.utils import QuantizableMixin, minimize_term_count, TupleView, iterable_to_str, zip_equal
+from beatsearch.utils import QuantizableMixin, minimize_term_count, TupleView, iterable_to_str, zip_equal, \
+    InstrumentWeightedMixin, sequence_product
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
     Unit, UnitType, parse_unit_argument, convert_tick
 
@@ -1421,7 +1422,11 @@ class MonophonicMetricalTensionMagnitude(MonophonicRhythmFeatureExtractorBase):
         self.salience_profile_type = salience_profile_type  # type: str
 
     def __process__(self, rhythm: MonophonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
-        return math.sqrt(sum(t * t for t in aux_fts[0]))
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+        mono_metrical_tension_vector = aux_fts[0]
+        assert len(mono_metrical_tension_vector) == n_steps
+        vector_magnitude = math.sqrt(sum(t * t for t in mono_metrical_tension_vector))
+        return vector_magnitude / math.sqrt(n_steps) if self.normalize else vector_magnitude
 
     ##############
     # Properties #
@@ -1990,139 +1995,181 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
         return self._f_get_instrumentation_weight
 
 
-class PolyphonicTensionVector(PolyphonicRhythmFeatureExtractorBase):
+class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):
     """
-    This feature extractor computes the monophonic tension vector per track. It multiplies the monophonic tensions with
-    instrument weights and then returns the sum. Instrument weights can be set with
-    :meth:`beatsearch.feature_extraction.PolyphonicTensionVector.set_instrument_weights`.
+    Computes the weighted monophonic metrical tension vector for each track (or each track combination if
+    include_combination_tracks is set to True) and returns the sum. The monophonic metrical tension is computed with
+    :class:`beatsearch.feature_extraction.MonophonicMetricalTensionVector`. The weights of the tracks are specified
+    with the :meth:`beatsearch.feature_extraction.PolyphonicMetricalTensionVector.set_instrument_weights`. The weights
+    for the track combinations are specified as the factors of the individual instrument weights for the instruments
+    within that instrument group (e.g., w(kick) = 0.2 and w(snare) = 0.5 will result in 0.1 for the weight of the
+    combination kick-snare).
     """
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (
-        e.unit, e.salience_profile_type, e.normalize,
-        tuple(e.get_instrument_weights().items())  # <- convert to item tuple to make it hashable
-    )
+    __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.normalize, e.cyclic,
+                                 e.get_instrument_weights_as_tuple(), e.include_combination_tracks)
 
-    _mt_tension_vec: MonophonicTensionVector  # Enable type hinting for MultiTrackMonoFeature<MonophonicTensionVector>
+    # Enable type hinting for MonophonicMetricalTensionVector
+    _mt_monophonic_metrical_tension_vec: tp.Union[MultiTrackMonoFeature, MonophonicMetricalTensionVector]
 
     def __init__(self, unit: UnitType = _DEFAULT_UNIT,
-                 salience_profile_type: str = "hierarchical", normalize: bool = False):
-        super().__init__(unit)
-        self._mt_tension_vec = MultiTrackMonoFeature(MonophonicTensionVector, aux_to=self)
-        self._instr_weights = dict()
-        self.salience_profile_type = salience_profile_type  # type: str
+                 salience_profile_type: str = "equal_upbeats",
+                 normalize: bool = False, cyclic: bool = True,
+                 instrument_weights: tp.Optional[tp.Dict[str, float]] = None,
+                 include_combination_tracks: bool = False, **kw):
+        super().__init__(unit, **kw)
+        self._mt_monophonic_metrical_tension_vec = MultiTrackMonoFeature(MonophonicMetricalTensionVector, aux_to=self)
+        self.salience_profile_type = salience_profile_type
         self.normalize = normalize
+        self.cyclic = cyclic
+        self.set_instrument_weights(instrument_weights)
+        self.include_combination_tracks = include_combination_tracks
 
-    def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]):
+    def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+        poly_tension_vector = [0] * n_steps
         instrument_names = rhythm.get_track_names()
-        weights = self.get_instrument_weights()
-        mono_tension_vectors = aux_fts[0]
-        default_weight = 1.0 / rhythm.get_track_count()
-        tension_vectors_scaled = []
 
-        for instr_i, tension_vec in enumerate(mono_tension_vectors):
-            instr_name = instrument_names[instr_i]
+        mono_metrical_tension_vectors = iter(aux_fts[0])
+        individual_instrument_weights = self.get_normalized_weights(instrument_names)
+        total_instr_combinations_weight = 0
 
-            try:
-                w = weights[instr_name]
-            except KeyError:
-                LOGGER.warning("Weight unknown for: %s (defaulting to %.2f)" % (instr_name, default_weight))
+        if not self.include_combination_tracks:
+            mono_metrical_tension_vectors = iter(((i,), vec) for i, vec in enumerate(mono_metrical_tension_vectors))
 
-                # We add the default weight to the weights dictionary for normalization. Note that we aren't actually
-                # affecting the weights of this extractor because get_instrument_weights returns a hard copy of the
-                # weights dictionary
-                w = weights[instr_name] = default_weight
+        for instr_combo_indices, mono_tension_vec in mono_metrical_tension_vectors:
+            combo_weight = sequence_product((individual_instrument_weights[i] for i in instr_combo_indices))
+            for step, tension in enumerate(mono_tension_vec):
+                poly_tension_vector[step] += combo_weight * tension
+            total_instr_combinations_weight += combo_weight
 
-            scaled_tension_vec = tuple(t * w for t in tension_vec)
-            tension_vectors_scaled.append(scaled_tension_vec)
-
-        if self.normalize:
-            # We can assume that the max mono tension is 1.0, because it's normalized
-            normalizer = 1.0 / sum(weights.values())
-        else:
-            normalizer = 1.0
-
-        return tuple(sum(col) * normalizer for col in zip(*tension_vectors_scaled))
-
-    ##################
-    # Unique methods #
-    ##################
-
-    def set_instrument_weights(self, instrument_weights: tp.Dict[str, float]):
-        """
-        Sets the instrument weights. This will clear the previous weights. The instrument weights must be given as a
-        dictionary containing the weights by instrument name. The weights must be given as a float (or something
-        interpretable as a float). The instrument names must be given as a strings.
-
-        :param instrument_weights: dictionary containing weights by instrument name
-        :return: None
-        """
-
-        self._instr_weights.clear()
-
-        for instr, weight in instrument_weights.items():
-            instr = str(instr)
-            weight = float(weight)
-            self._instr_weights[instr] = weight
-
-    def get_instrument_weights(self) -> tp.Dict[str, float]:
-        """
-        Returns a new dictionary containing the weights per instrument. Weights are floating point numbers between 0
-        and 1. Instruments are instrument names (track names).
-
-        :return: dictionary containing weights per instrument
-        """
-
-        return {**self._instr_weights}
+        try:
+            return tuple(t / total_instr_combinations_weight for t in poly_tension_vector)
+        except ZeroDivisionError:
+            return tuple(itertools.repeat(0.0, n_steps))
 
     ##############
     # Properties #
-    # ############
+    ##############
 
     @property
     def salience_profile_type(self) -> str:
-        return self._mt_tension_vec.salience_profile_type
+        return self._mt_monophonic_metrical_tension_vec.salience_profile_type
 
     @salience_profile_type.setter
     def salience_profile_type(self, salience_profile_type: str):
-        self._mt_tension_vec.salience_profile_type = salience_profile_type
+        self._mt_monophonic_metrical_tension_vec.salience_profile_type = salience_profile_type
 
     @property
-    def normalize(self):
+    def normalize(self) -> bool:
         """When set to True, the tension will have a range of [0, 1]"""
-        return self._mt_tension_vec.normalize
+        return self._mt_monophonic_metrical_tension_vec.normalize
 
     @normalize.setter
     def normalize(self, normalize: bool):
-        self._mt_tension_vec.normalize = normalize
+        self._mt_monophonic_metrical_tension_vec.normalize = normalize
+
+    @property
+    def cyclic(self) -> bool:
+        return self._mt_monophonic_metrical_tension_vec.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        self._mt_monophonic_metrical_tension_vec.cyclic = cyclic
+
+    @property
+    def include_combination_tracks(self) -> bool:
+        multi_track_mode = self._mt_monophonic_metrical_tension_vec.multi_track_mode
+        if multi_track_mode == MultiTrackMonoFeature.PER_TRACK_COMBINATION:
+            return True
+        elif multi_track_mode == MultiTrackMonoFeature.PER_TRACK:
+            return False
+        else:
+            assert False, "Unexpected MultiTrackMonoFeature multi-track mode: %s" % multi_track_mode
+
+    @include_combination_tracks.setter
+    def include_combination_tracks(self, include_combination_tracks: bool):
+        multi_track_mode = MultiTrackMonoFeature.PER_TRACK_COMBINATION \
+            if include_combination_tracks else MultiTrackMonoFeature.PER_TRACK
+        self._mt_monophonic_metrical_tension_vec.multi_track_mode = multi_track_mode
 
 
-class PolyphonicTension(PolyphonicRhythmFeatureExtractorBase):
-    # TODO Add documentation
+class PolyphonicMetricalTensionMagnitude(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):
+    """Computes the magnitude of the polyphonic metrical tension vector (euclidean distance to the zero vector)"""
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (
-        e.unit, e.salience_profile_type, e.normalize,
-        tuple(e.get_instrument_weights().items())  # <- convert to item tuple to make it hashable
-    )
+    __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.normalize, e.cyclic,
+                                 e.get_instrument_weights_as_tuple(), e.include_combination_tracks)
 
-    def __init__(self, unit: UnitType = _DEFAULT_UNIT, salience_profile_type: str = "hierarchical"):
-        super().__init__(unit)
-        self._poly_tension_vec = PolyphonicTensionVector(normalize=True)
-        self._instr_weights = dict()
-        self.salience_profile_type = salience_profile_type  # type: str
+    def __init__(self, unit: UnitType = _DEFAULT_UNIT,
+                 salience_profile_type: str = "equal_upbeats",
+                 normalize: bool = False, cyclic: bool = True,
+                 instrument_weights: tp.Optional[tp.Dict[str, float]] = None,
+                 include_combination_tracks: bool = False, **kw):
+        super().__init__(unit, **kw)
+        self._poly_metrical_tension_vec = PolyphonicMetricalTensionVector(aux_to=self)
+        self.salience_profile_type = salience_profile_type
+        self.normalize = normalize
+        self.cyclic = cyclic
+        self.set_instrument_weights(instrument_weights)
+        self.include_combination_tracks = include_combination_tracks
 
     def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
-        tension_vec = aux_fts[0]
-        return math.sqrt(sum(t * t for t in tension_vec))
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+        poly_metrical_tension_vector = aux_fts[0]
+        assert len(poly_metrical_tension_vector) == n_steps
+        vector_magnitude = math.sqrt(sum(t * t for t in poly_metrical_tension_vector))
+        return vector_magnitude / math.sqrt(n_steps) if self.normalize else vector_magnitude
 
-    def set_instrument_weights(self, weights: tp.Dict[str, float]):
-        self._poly_tension_vec.set_instrument_weights(weights)
+    ######################
+    # Overridden methods #
+    ######################
 
-    def get_instrument_weights(self) -> tp.Dict[str, float]:
-        return self._poly_tension_vec.get_instrument_weights()
+    def set_instrument_weights(self, instrument_weights: tp.Optional[tp.Mapping[str, float]]) -> None:
+        self._poly_metrical_tension_vec.set_instrument_weights(instrument_weights)
+
+    def get_instrument_weights(self) -> tp.Mapping[str, float]:
+        return self._poly_metrical_tension_vec.get_instrument_weights()
+
+    ##############
+    # Properties #
+    ##############
+
+    @property
+    def salience_profile_type(self) -> str:
+        return self._poly_metrical_tension_vec.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._poly_metrical_tension_vec.salience_profile_type = salience_profile_type
+
+    @property
+    def normalize(self) -> bool:
+        """When set to True, the tension will have a range of [0, 1]"""
+        return self._poly_metrical_tension_vec.normalize
+
+    @normalize.setter
+    def normalize(self, normalize: bool):
+        self._poly_metrical_tension_vec.normalize = normalize
+
+    @property
+    def cyclic(self) -> bool:
+        return self._poly_metrical_tension_vec.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        self._poly_metrical_tension_vec.cyclic = cyclic
+
+    @property
+    def include_combination_tracks(self) -> bool:
+        return self._poly_metrical_tension_vec.include_combination_tracks
+
+    @include_combination_tracks.setter
+    def include_combination_tracks(self, include_combination_tracks: bool):
+        self._poly_metrical_tension_vec.include_combination_tracks = include_combination_tracks
 
 
 __all__ = [
@@ -2137,5 +2184,6 @@ __all__ = [
     'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
 
     # Polyphonic rhythm feature extractor implementations
-    'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek'
+    'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek',
+    'PolyphonicMetricalTensionVector', 'PolyphonicMetricalTensionMagnitude'
 ]

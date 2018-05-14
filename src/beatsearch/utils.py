@@ -7,6 +7,7 @@ import collections
 import numpy as np
 import typing as tp
 from time import time
+from types import MappingProxyType
 from inspect import isclass, isabstract
 from functools import wraps, reduce
 from matplotlib.colors import to_rgb, rgb_to_hsv, hsv_to_rgb, to_hex
@@ -523,6 +524,114 @@ def zip_equal(*iterables: tp.Iterable) -> tp.Generator[tp.Tuple[tp.Any, ...], No
         yield combo
 
 
+class InstrumentWeightedMixin(object):
+    """This mixin adds methods to set and get instrument weights. It also provides a hook that gets notified when new
+    instrument weights have been set."""
+
+    __instrument_weights_dict: tp.Dict[str, float]
+    __instrument_weights_proxy: tp.Mapping[str, float]
+
+    def set_instrument_weights(self, instrument_weights: tp.Optional[tp.Mapping[str, float]]) -> None:
+        """
+        Sets new instrument weights from the given mapping, which must map instrument names to their corresponding
+        weights. The weights should be given as (interpretable) floats. Note that the object will not take ownership
+        over the given mapping but make a copy of it.
+
+        :param instrument_weights: mapping containing weights by instrument name or None to remove weights
+        :return: None
+        """
+
+        instrument_weights = instrument_weights or {}
+
+        try:
+            internal_instrument_weights = self.__instrument_weights_dict
+        except AttributeError:
+            internal_instrument_weights = self.__instrument_weights_dict = {}
+            self.__instrument_weights_proxy = MappingProxyType(internal_instrument_weights)
+
+        # Clear old weights
+        internal_instrument_weights.clear()
+
+        for instrument, weight in instrument_weights.items():
+            instrument = str(instrument)
+            weight = float(weight)
+            # If this happens, instrument is probably an object with a very generic __str__ method
+            assert instrument not in internal_instrument_weights
+            internal_instrument_weights[instrument] = weight
+
+        # Notify about new weights
+        self.__on_instrument_weights_set(self.__instrument_weights_proxy)
+
+    def get_instrument_weights(self) -> tp.Mapping[str, float]:
+        """
+        Returns the instrument weights as a read-only dictionary, mapping instrument names to their corresponding
+        weights.
+
+        :return: a read-only dictionary mapping instrument names to their corresponding weights
+        """
+
+        try:
+            return self.__instrument_weights_proxy
+        except AttributeError:
+            return MappingProxyType({})
+
+    def get_instrument_weights_as_tuple(self):
+        """
+        Returns the instrument weights as a tuple containing the instrument/weight information.
+
+        :return: tuple containing (instrument, weight) tuples
+        """
+
+        instrument_weights = self.get_instrument_weights()
+        return tuple(instrument_weights.items())
+
+    def get_normalized_weights(self, instruments: tp.Sequence[str]) -> tp.Tuple[float]:
+        """
+        Returns the weights of the given instruments as a list, normalized, so that the combined weights add up to one.
+        This method will assign default weights to instruments for which no weight is known.
+
+        :param instruments: instrument names as a sequence
+        :return: iterator over
+        """
+
+        n_instruments = len(instruments)
+        weight_list = []  # type: tp.List[float]
+
+        if n_instruments == 0:
+            return tuple(weight_list)
+
+        known_weights = self.get_instrument_weights()
+        summed_known_weight = sum(known_weights.values())
+
+        if summed_known_weight > 0:
+            default_weight = summed_known_weight / float(n_instruments)
+        else:
+            default_weight = 1.0
+
+        for instrument in instruments:
+            instr_weight = known_weights.get(instrument, default_weight)
+            weight_list.append(instr_weight)
+
+        summed_weight_out = sum(weight_list)
+
+        try:
+            return tuple(w / summed_weight_out for w in weight_list)
+        except ZeroDivisionError:
+            return tuple(itertools.repeat(0, n_instruments))
+
+    def __on_instrument_weights_set(self, instrument_weights: tp.Mapping[str, float]) -> None:
+        """This method is called when setting new instrument weights
+
+        Override this method to get notified when new instrument weights are set.
+
+        :param instrument_weights: new instrument weights (same as result of calling get_instrument_weights) as a
+                                   read-only dictionary
+        :return: None (not used)
+        """
+
+        pass
+
+
 def get_logging_level_by_name(level_name: str) -> int:
     """
     Returns the numerical level of the given logging level, which can then be passed to :func:`logging.basicConfig`. The
@@ -634,7 +743,7 @@ __all__ = [
     'get_default_beatsearch_rhythms_fpath', 'no_callback', 'type_check_and_instantiate_if_necessary',
     'eat_args', 'color_variant', 'get_midi_files_in_directory', 'TupleView', 'most_common_element',
     'sequence_product', 'minimize_term_count', 'FileInfo', 'normalize_directory', 'QuantizableMixin', 'zip_equal',
-    'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
+    'InstrumentWeightedMixin', 'generate_unique_abbreviation', 'generate_abbreviations', 'Point2D', 'Dimensions2D',
     'Rectangle2D', 'get_logging_level_by_name', 'set_logging_level_by_name', 'find_all_subclasses',
     'find_all_concrete_subclasses', 'iterable_to_str', 'iterable_nth'
 ]
