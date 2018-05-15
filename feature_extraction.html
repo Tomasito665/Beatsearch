@@ -8,7 +8,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>Feature extraction &mdash; Beatsearch 0.0.1.dev8 documentation</title>
+  <title>Feature extraction &mdash; Beatsearch 0.0.2.a1 documentation</title>
   
 
   
@@ -35,7 +35,7 @@
         <link rel="index" title="Index"
               href="genindex.html"/>
         <link rel="search" title="Search" href="search.html"/>
-    <link rel="top" title="Beatsearch 0.0.1.dev8 documentation" href="index.html"/>
+    <link rel="top" title="Beatsearch 0.0.2.a1 documentation" href="index.html"/>
         <link rel="next" title="Midi" href="midi.html"/>
         <link rel="prev" title="Distance metrics" href="distance_metrics.html"/> 
 
@@ -66,7 +66,7 @@
             
             
               <div class="version">
-                0.0.1.dev8
+                0.0.2.a1
               </div>
             
           
@@ -184,19 +184,106 @@ extracted with implementations of the <code class="docutils literal"><span class
 <dt id="beatsearch.feature_extraction.FeatureExtractor">
 <em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">FeatureExtractor</code><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor" title="Permalink to this definition">¶</a></dt>
 <dd><dl class="method">
-<dt id="beatsearch.feature_extraction.FeatureExtractor.process">
-<code class="descname">process</code><span class="sig-paren">(</span><em>obj</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.process" title="Permalink to this definition">¶</a></dt>
-<dd><p>Computes and returns a feature
-Computes a feature of the given object and returns it.</p>
+<dt id="beatsearch.feature_extraction.FeatureExtractor.construct_full_auxiliary_tree">
+<code class="descname">construct_full_auxiliary_tree</code><span class="sig-paren">(</span><em>obj</em>, <em>root_auxiliary=None</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.construct_full_auxiliary_tree" title="Permalink to this definition">¶</a></dt>
+<dd><p>Constructs the complete feature auxiliary tree containing all auxiliaries needed to compute this feature for the
+given object. The following statements are true for the tree:</p>
+<blockquote>
+<div><ul class="simple">
+<li>the root node represents this feature extractor (highest abstraction level)</li>
+<li>the children of a node are its direct feature auxiliaries</li>
+<li>leaf nodes represent auxiliaries with an independent extractor (auxiliaries on lowest abstraction level)</li>
+</ul>
+</div></blockquote>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
 <col class="field-body" />
 <tbody valign="top">
-<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>obj</strong> &#8211; object of which to compute the feature</td>
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">the root node of the tree</td>
 </tr>
-<tr class="field-even field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-data docutils literal"><span class="pre">Any</span></code></td>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.feature_extraction.FeatureExtractor.get_auxiliary_extractors">
+<code class="descname">get_auxiliary_extractors</code><span class="sig-paren">(</span><em>extractor_type=None</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.get_auxiliary_extractors" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns an iterator over this extractor&#8217;s auxiliary extractors</p>
+<p>Returns an iterator over the auxiliary feature extractors registered with <code class="xref py py-meth docutils literal"><span class="pre">beatsearch.feature_extraction.</span>
+<span class="pre">FeatureExtractor.register_auxiliary_extractor()</span></code>. When given an extractor type, only the extractors returning
+<cite>isinstance(extr, extractor_type)</cite> will be returned.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>extractor_type</strong> &#8211; if given, only extractors of this exact type will be returned</td>
 </tr>
-<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">the feature value</td>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">iterator over registered auxiliary feature extractors</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.feature_extraction.FeatureExtractor.is_independent">
+<code class="descname">is_independent</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.is_independent" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns whether this feature extractor is independent. A feature extractor is considered to be independent if it
+has not registered any auxiliary feature extractors and therefore doesn&#8217;t depend on any other extractors.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">True if this extractor is independent</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.feature_extraction.FeatureExtractor.process">
+<code class="descname">process</code><span class="sig-paren">(</span><em>obj</em>, <em>pre_computed_auxiliary_features=()</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes and returns a feature</p>
+<p>Computes a feature of the given object and returns it.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>obj</strong> &#8211; object of which to compute the feature</li>
+<li><strong>pre_computed_auxiliary_features</strong> &#8211; pre-computed auxiliary features as a dictionary holding the pre-computed
+auxiliary features by <code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.</span>
+<span class="pre">FeatureExtractorAuxiliaryFeature</span></code> objects</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">the feature value</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="beatsearch.feature_extraction.FeatureExtractor.register_auxiliary_extractor">
+<code class="descname">register_auxiliary_extractor</code><span class="sig-paren">(</span><em>extractor</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.FeatureExtractor.register_auxiliary_extractor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Registers the given feature extractor as an auxiliary feature extractor</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><p class="first"><strong>extractor</strong> &#8211; auxiliary feature extractor</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first">given feature extractor</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Raises:</th><td class="field-body"><ul class="first last simple">
+<li><strong>TypeError</strong> &#8211; if given extractor is not a FeatureExtractor object</li>
+<li><strong>ValueError</strong> &#8211; if given feature extractor has already been registered</li>
+</ul>
+</td>
 </tr>
 </tbody>
 </table>
@@ -223,18 +310,22 @@ Feature extractors for these type of features are implemented as <code class="do
 </div>
 <p><strong>Implementations</strong></p>
 <ul class="simple">
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.BinaryOnsetVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.NoteVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIHistogram</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.BinarySchillingerChain</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.ChronotonicChain</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIDifferenceVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.OnsetPositionVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.SyncopationVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.SyncopatedOnsetRatio</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MeanSyncopationStrength</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.OnsetDensity</span></code></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.BinaryOnsetVector" title="beatsearch.feature_extraction.BinaryOnsetVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.BinaryOnsetVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.NoteVector" title="beatsearch.feature_extraction.NoteVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.NoteVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.BinarySchillingerChain" title="beatsearch.feature_extraction.BinarySchillingerChain"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.BinarySchillingerChain</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.ChronotonicChain" title="beatsearch.feature_extraction.ChronotonicChain"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.ChronotonicChain</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.OnsetDensity" title="beatsearch.feature_extraction.OnsetDensity"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.OnsetDensity</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.OnsetPositionVector" title="beatsearch.feature_extraction.OnsetPositionVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.OnsetPositionVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector" title="beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MonophonicVariabilityVector" title="beatsearch.feature_extraction.MonophonicVariabilityVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicVariabilityVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MonophonicSyncopationVector" title="beatsearch.feature_extraction.MonophonicSyncopationVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicSyncopationVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.SyncopatedOnsetRatio" title="beatsearch.feature_extraction.SyncopatedOnsetRatio"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.SyncopatedOnsetRatio</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MeanSyncopationStrength" title="beatsearch.feature_extraction.MeanSyncopationStrength"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MeanSyncopationStrength</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MonophonicMetricalTensionVector" title="beatsearch.feature_extraction.MonophonicMetricalTensionVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicMetricalTensionVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude" title="beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.IOIVector" title="beatsearch.feature_extraction.IOIVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.IOIDifferenceVector" title="beatsearch.feature_extraction.IOIDifferenceVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIDifferenceVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.IOIHistogram" title="beatsearch.feature_extraction.IOIHistogram"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIHistogram</span></code></a></li>
 </ul>
 </div>
 <div class="section" id="polyphonic-rhythm-features">
@@ -243,8 +334,11 @@ Feature extractors for these type of features are implemented as <code class="do
 <code class="docutils literal"><span class="pre">PolyphonicRhythmFeatureExtractor</span></code> subclasses.</p>
 <p><strong>Implementations</strong></p>
 <ul class="simple">
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MultiChannelMonophonicRhythmFeatureVector</span></code></li>
-<li><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.PolyphonicSyncopationVector</span></code></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.MultiTrackMonoFeature" title="beatsearch.feature_extraction.MultiTrackMonoFeature"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MultiTrackMonoFeature</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.PolyphonicMetricalTensionVector" title="beatsearch.feature_extraction.PolyphonicMetricalTensionVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.PolyphonicMetricalTensionVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude" title="beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.PolyphonicSyncopationVector" title="beatsearch.feature_extraction.PolyphonicSyncopationVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.PolyphonicSyncopationVector</span></code></a></li>
+<li><a class="reference internal" href="reference.html#beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek" title="beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek</span></code></a></li>
 </ul>
 </div>
 </div>
@@ -293,7 +387,7 @@ Feature extractors for these type of features are implemented as <code class="do
     <script type="text/javascript">
         var DOCUMENTATION_OPTIONS = {
             URL_ROOT:'./',
-            VERSION:'0.0.1.dev8',
+            VERSION:'0.0.2.a1',
             COLLAPSE_INDEX:false,
             FILE_SUFFIX:'.html',
             HAS_SOURCE:  true,

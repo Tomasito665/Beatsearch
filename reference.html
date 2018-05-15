@@ -8,7 +8,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>Reference &mdash; Beatsearch 0.0.1.dev8 documentation</title>
+  <title>Reference &mdash; Beatsearch 0.0.2.a1 documentation</title>
   
 
   
@@ -35,7 +35,7 @@
         <link rel="index" title="Index"
               href="genindex.html"/>
         <link rel="search" title="Search" href="search.html"/>
-    <link rel="top" title="Beatsearch 0.0.1.dev8 documentation" href="index.html"/>
+    <link rel="top" title="Beatsearch 0.0.2.a1 documentation" href="index.html"/>
         <link rel="prev" title="Midi" href="midi.html"/> 
 
   
@@ -65,7 +65,7 @@
             
             
               <div class="version">
-                0.0.1.dev8
+                0.0.2.a1
               </div>
             
           
@@ -101,6 +101,11 @@
 <li class="toctree-l3"><a class="reference internal" href="#id1">Rhythm</a></li>
 <li class="toctree-l3"><a class="reference internal" href="#monophonicrhythm">MonophonicRhythm</a></li>
 <li class="toctree-l3"><a class="reference internal" href="#polyphonicrhythm">PolyphonicRhythm</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#feature-extraction">Feature Extraction</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#monophonic-feature-extractors">Monophonic Feature Extractors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#polyphonic-feature-extractors">Polyphonic Feature Extractors</a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="#midi">Midi</a><ul>
@@ -626,6 +631,22 @@ or None to remove the time signature</td>
 </dd></dl>
 
 <dl class="method">
+<dt id="beatsearch.rhythm.PolyphonicRhythm.get_track_by_index">
+<code class="descname">get_track_by_index</code><span class="sig-paren">(</span><em>track_index</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.PolyphonicRhythm.get_track_by_index" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the track with the given index or None if invalid index.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>track_index</strong> (<code class="xref py py-class docutils literal"><span class="pre">int</span></code>) &#8211; track index</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">Track object or None</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
 <dt id="beatsearch.rhythm.PolyphonicRhythm.get_track_by_name">
 <code class="descname">get_track_by_name</code><span class="sig-paren">(</span><em>track_name</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.rhythm.PolyphonicRhythm.get_track_by_name" title="Permalink to this definition">¶</a></dt>
 <dd><p>Returns the track with the given name or None if this rhythm has no track with the given name.</p>
@@ -712,6 +733,626 @@ in the given tracks.</p>
 </tr>
 <tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">None</p>
 </td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="feature-extraction">
+<h2>Feature Extraction<a class="headerlink" href="#feature-extraction" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="monophonic-feature-extractors">
+<h3>Monophonic Feature Extractors<a class="headerlink" href="#monophonic-feature-extractors" title="Permalink to this headline">¶</a></h3>
+<dl class="class">
+<dt id="beatsearch.feature_extraction.BinaryOnsetVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">BinaryOnsetVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.BinaryOnsetVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the binary representation of the note onsets of the given rhythm where each step where a note onset
+happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
+quarter note) of the binary vector.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This is an independent feature extractor.</p>
+</div>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.NoteVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">NoteVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>tied_notes=True</em>, <em>cyclic=True</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.NoteVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>This feature extractor predicts the durations of the onsets in the given rhythm. It computes the so-called note
+vector, which is a sequence containing musical events. Musical events can be of three types:</p>
+<blockquote>
+<div><ul class="simple">
+<li>NOTE          a sounding note</li>
+<li>TIED_NOTE     a non-sounding note</li>
+<li>REST          a rest</li>
+</ul>
+</div></blockquote>
+<p>Events are expressed as tuples containing three elements:</p>
+<blockquote>
+<div><ul class="simple">
+<li>e_type:    the type of the event (NOTE, TIED_NOTE or REST)</li>
+<li>e_dur:     the duration of the event</li>
+<li>e_pos:     the position of the event</li>
+</ul>
+</div></blockquote>
+<p>To iterate over the events in a note vector and print some information about the events, one could do:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">e_type_names</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">NoteVector</span><span class="o">.</span><span class="n">NOTE</span><span class="p">:</span> <span class="s2">&quot;note&quot;</span><span class="p">,</span>
+    <span class="n">NoteVector</span><span class="o">.</span><span class="n">TIED_NOTE</span><span class="p">:</span> <span class="s2">&quot;tied note&quot;</span><span class="p">,</span>
+    <span class="n">NoteVector</span><span class="o">.</span><span class="n">REST</span><span class="p">:</span> <span class="s2">&quot;rest</span>
+<span class="p">}</span>
+
+<span class="k">for</span> <span class="n">e_type</span><span class="p">,</span> <span class="n">e_dur</span><span class="p">,</span> <span class="n">e_pos</span> <span class="ow">in</span> <span class="n">note_vector</span><span class="p">:</span>
+    <span class="n">e_pos_end</span> <span class="o">=</span> <span class="n">e_pos</span> <span class="o">+</span> <span class="n">e_dur</span>
+    <span class="n">e_name</span> <span class="o">=</span> <span class="n">e_type_names</span><span class="p">[</span><span class="n">e_type</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;There&#39;s a </span><span class="si">%s</span><span class="s2"> from step </span><span class="si">%i</span><span class="s2"> to step </span><span class="si">%i</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">e_name</span><span class="p">,</span> <span class="n">e_pos</span><span class="p">,</span> <span class="n">e_pos_end</span><span class="p">))</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This is an independent feature extractor.</p>
+</div>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.BinarySchillingerChain">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">BinarySchillingerChain</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>values=(1</em>, <em>0)</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.BinarySchillingerChain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the Schillinger notation of this rhythm where each onset is a change of a &#8220;binary note&#8221;.</p>
+<p>For example, given the Rumba Clave rhythm and with values (0, 1):</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">---</span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">-</span><span class="n">X</span><span class="o">---</span>
+<span class="mi">0001111000110000</span>
+</pre></div>
+</div>
+<p>However, when given the values (1, 0), the schillinger chain will be the opposite:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">---</span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">-</span><span class="n">X</span><span class="o">---</span>
+<span class="mi">1110000111001111</span>
+</pre></div>
+</div>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.BinarySchillingerChain.values">
+<code class="descname">values</code><a class="headerlink" href="#beatsearch.feature_extraction.BinarySchillingerChain.values" title="Permalink to this definition">¶</a></dt>
+<dd><p>The two values of the schillinger chain returned by process</p>
+<p>Binary vector to be used in the schillinger chain returned by process(). E.g. when set to (&#8216;a&#8217;, &#8216;b&#8217;), the
+schillinger chain returned by process() will consist of &#8216;a&#8217; and &#8216;b&#8217;.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.ChronotonicChain">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">ChronotonicChain</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.ChronotonicChain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the chronotonic chain representation of the given rhythm.</p>
+<dl class="docutils">
+<dt>For example, given the Rumba Clave rhythm:</dt>
+<dd>X&#8211;X&#8212;X&#8211;X-X&#8212;
+3334444333224444</dd>
+</dl>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.OnsetDensity">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">OnsetDensity</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.OnsetDensity" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the onset density of the given rhythm. The onset density is the number of onsets over the number of
+positions in the binary onset vector of the given rhythm.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.OnsetPositionVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">OnsetPositionVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>quantize=True</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.OnsetPositionVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Finds the absolute onset times of the notes in the given rhythm.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This is an independent feature extractor.</p>
+</div>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MonophonicOnsetLikelihoodVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>priors='cyclic'</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the likelihood of a step being an onset for every step in the given monophonic rhythm. The onset
+likelihoods are ranged from 0 to 1. An onset likelihood of 0 means that there&#8217;s no evidence &#8211; according to the
+model used by this extractor &#8211; that the corresponding step will contain an onset. An onset likelihood of 1 means
+that it is very likely that the corresponding step will contain an onset.</p>
+<p>The likelihoods are based on predictions made on different levels. Each level has a window size corresponding to a
+musical unit. For each level, the prediction is that the current group will equal the last group. For example:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>Rhythm            x o x o x o x o x o x x x o o o
+
+Predictions
+            1/16 |?|x|o|x|o|x|o|x|o|x|o|x:x|o|o|o|
+            1/8  |? ?|x o|x o|x o|x o|x o|x x|x o|
+            1/4  |? ? ? ?|x o x o|x o x o|x x x o|
+            1/2  |? ? ? ? ? ? ? ?|x o x o x o x o|
+            1/1  |? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ?|
+</pre></div>
+</div>
+<p>The groups containing question marks are groups that have no antecedents. The predictions of these uncertain groups
+are handled according to the &#8220;priors&#8221; property.</p>
+<blockquote>
+<div><ul class="simple">
+<li>cyclic:       it is assumed that the rhythm is a loop, leaving no uncertain groups</li>
+<li>optimistic:   predictions are set to the ground truth (predictions of uncertain groups are always correct)</li>
+<li><dl class="first docutils">
+<dt>pessimistic:  predictions are set to the negative ground truth (predictions of uncertain groups are always</dt>
+<dd>incorrect)</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector.priors">
+<code class="descname">priors</code><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector.priors" title="Permalink to this definition">¶</a></dt>
+<dd><p>The way that uncertain groups are handled. One of [&#8216;cyclic&#8217;, &#8216;optimistic&#8217;, &#8216;pessimistic&#8217;]. See
+<a class="reference internal" href="#beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector" title="beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector</span></code></a> for more info.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-data docutils literal"><span class="pre">Union</span></code>[<code class="xref py py-class docutils literal"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal"><span class="pre">Tuple</span></code>[<code class="xref py py-class docutils literal"><span class="pre">int</span></code>]]</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MonophonicVariabilityVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MonophonicVariabilityVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>priors='cyclic'</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicVariabilityVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the variability of each step of the given monophonic rhythm. First, the onset likelihood vector is computed
+with <a class="reference internal" href="#beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector" title="beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector</span></code></a>. The variability of step N is the
+absolute difference of the probability of N being an onset and whether there was actually an onset on step N.</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.MonophonicVariabilityVector.priors">
+<code class="descname">priors</code><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicVariabilityVector.priors" title="Permalink to this definition">¶</a></dt>
+<dd><p>See <a class="reference internal" href="#beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector.priors" title="beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector.priors"><code class="xref py py-meth docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector.priors()</span></code></a></p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">str</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MonophonicSyncopationVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MonophonicSyncopationVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>cyclic=True</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicSyncopationVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Finds the syncopations in a monophonic rhythm. The syncopations are computed with the method proposed by H.C.
+Longuet-Higgins and C. S. Lee in their work titled: &#8220;The Rhythmic Interpretation of Monophonic Music&#8221;.</p>
+<dl class="docutils">
+<dt>The syncopations are returned as a sequence of tuples containing three elements:</dt>
+<dd><ul class="first last simple">
+<li>the syncopation strength</li>
+<li>the syncopated note position</li>
+<li>the position of the rest against which the note is syncopated</li>
+</ul>
+</dd>
+</dl>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.MonophonicSyncopationVector.cyclic">
+<code class="descname">cyclic</code><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicSyncopationVector.cyclic" title="Permalink to this definition">¶</a></dt>
+<dd><p>When set to True, the extractor assumes that the processed rhythm is a loop, which allows it to find
+syncopations of notes that are syncopated against events &#8216;earlier&#8217; in the rhythm.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.MonophonicSyncopationVector.salience_profile_type">
+<code class="descname">salience_profile_type</code><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicSyncopationVector.salience_profile_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>The type of salience profile to be used for syncopation detection. This must be one of: [&#8216;hierarchical&#8217;,
+&#8216;equal_upbeats&#8217;, &#8216;equal_beats&#8217;]. See <code class="xref py py-meth docutils literal"><span class="pre">beatsearch.rhythm.TimeSignature.get_salience_profile()</span></code> for more info.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">str</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.SyncopatedOnsetRatio">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">SyncopatedOnsetRatio</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>ret_fraction=False</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.SyncopatedOnsetRatio" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the number of syncopated onsets over the total number of onsets. The syncopations are computed with
+<a class="reference internal" href="#beatsearch.feature_extraction.MonophonicSyncopationVector" title="beatsearch.feature_extraction.MonophonicSyncopationVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicSyncopationVector</span></code></a>.</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.SyncopatedOnsetRatio.ret_fraction">
+<code class="descname">ret_fraction</code><a class="headerlink" href="#beatsearch.feature_extraction.SyncopatedOnsetRatio.ret_fraction" title="Permalink to this definition">¶</a></dt>
+<dd><p>When this is set to true, process() will return a (numerator, denominator) instead of a float</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MeanSyncopationStrength">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MeanSyncopationStrength</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MeanSyncopationStrength" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the average syncopation strength per step. The step size depends on the unit (see set_unit). The
+syncopations are computed with MonophonicSyncopationVector.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MonophonicMetricalTensionVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MonophonicMetricalTensionVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>normalize=False</em>, <em>cyclic=True</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicMetricalTensionVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>This feature extractor computes the monophonic metrical tension of a rhythm. If E(i) is the i-th event in the note
+vector of the given rhythm (see <a class="reference internal" href="#beatsearch.feature_extraction.NoteVector" title="beatsearch.feature_extraction.NoteVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.NoteVector</span></code></a>, it is said that the tension
+during event E(i) equals the metrical weight of the starting position of E(i) for rests and sounding notes. If E(i)
+is a tied note (non-sounding note), then the tension of E(i) equals the tension of E(i-1).</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.MonophonicMetricalTensionVector.normalize">
+<code class="descname">normalize</code><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicMetricalTensionVector.normalize" title="Permalink to this definition">¶</a></dt>
+<dd><p>When set to True, the tension will have a range of [0, 1]</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MonophonicMetricalTensionMagnitude</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the magnitude of the monophonic metrical tension vector (the euclidean distance to the zero vector)</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude.normalize">
+<code class="descname">normalize</code><a class="headerlink" href="#beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude.normalize" title="Permalink to this definition">¶</a></dt>
+<dd><p>When set to True, the tension magnitude will range from 0 to 1</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.IOIVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">IOIVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>mode='post_note'</em>, <em>quantize=True</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.IOIVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the time difference between the notes in the given rhythm (Inter Onset Intervals). The elements of the
+vector will depend on this IOIVector extractor&#8217;s mode property:</p>
+<p><strong>PRE_NOTE</strong> Time difference between the current note and the previous note. The first note will return the time
+difference with the start of the rhythm. For example, given the Rumba Clave rhythm:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">---</span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">-</span><span class="n">X</span><span class="o">---</span>
+<span class="mi">0</span>  <span class="mi">3</span>   <span class="mi">4</span>  <span class="mi">3</span> <span class="mi">2</span>
+</pre></div>
+</div>
+<p><strong>POST_NOTE</strong> Time difference between the current note and the next note. The last note will return the time
+difference with the end (duration) of the rhythm. For example, given the Rumba Clave rhythm:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">---</span><span class="n">X</span><span class="o">--</span><span class="n">X</span><span class="o">-</span><span class="n">X</span><span class="o">---</span>
+<span class="mi">3</span>  <span class="mi">4</span>   <span class="mi">3</span>  <span class="mi">2</span> <span class="mi">4</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This is an independent feature extractor.</p>
+</div>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.IOIDifferenceVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">IOIDifferenceVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>quantize=True</em>, <em>cyclic=True</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.IOIDifferenceVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the interval difference vector (aka difference of rhythm vector) of the given rhythm. Per note, this is
+the difference between the current onset interval and the next onset interval. So, if N is the number of onsets,
+the returned vector will have a length of N - 1. This is different with cyclic rhythms, where the last onset&#8217;s
+interval is compared with the first onset&#8217;s interval. In this case, the length will be N.
+The inter-onset interval vector is computed in POST_NOTE mode.</p>
+<p>For example, given the POST_NOTE inter-onset interval vector for the Rumba clave:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>The interval difference vector would be:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">[</span><span class="mi">4</span><span class="o">/</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="o">/</span><span class="mi">4</span><span class="p">,</span> <span class="mi">2</span><span class="o">/</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="o">/</span><span class="mi">2</span><span class="p">]</span>        <span class="c1"># cyclic = False</span>
+<span class="p">[</span><span class="mi">4</span><span class="o">/</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="o">/</span><span class="mi">4</span><span class="p">,</span> <span class="mi">2</span><span class="o">/</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="o">/</span><span class="mi">4</span><span class="p">]</span>   <span class="c1"># cyclic = True</span>
+</pre></div>
+</div>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.IOIDifferenceVector.cyclic">
+<code class="descname">cyclic</code><a class="headerlink" href="#beatsearch.feature_extraction.IOIDifferenceVector.cyclic" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set to True for cyclic behaviour. See <a class="reference internal" href="#beatsearch.feature_extraction.IOIDifferenceVector" title="beatsearch.feature_extraction.IOIDifferenceVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.IOIDifferenceVector</span></code></a></p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.IOIHistogram">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">IOIHistogram</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.IOIHistogram" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the number of occurrences of the inter-onset intervals of the notes of the given rhythm in ascending
+order. The inter onset intervals are computed in POST_NOTE mode.</p>
+<p>For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">[</span>
+    <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span>  <span class="c1"># occurrences</span>
+    <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>   <span class="c1"># bins (interval durations)</span>
+<span class="p">]</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</div>
+<div class="section" id="polyphonic-feature-extractors">
+<h3>Polyphonic Feature Extractors<a class="headerlink" href="#polyphonic-feature-extractors" title="Permalink to this headline">¶</a></h3>
+<dl class="class">
+<dt id="beatsearch.feature_extraction.MultiTrackMonoFeature">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">MultiTrackMonoFeature</code><span class="sig-paren">(</span><em>mono_extr_cls</em>, <em>*args</em>, <em>multi_track_mode='per_track'</em>, <em>aux_to=None</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.MultiTrackMonoFeature" title="Permalink to this definition">¶</a></dt>
+<dd><p>This class can be used to &#8220;upgrade&#8221; a monophonic rhythm feature extractor to a polyphonic one. Objects of this class
+have an underlying monophonic rhythm feature extractor. The behaviour of calling process() depends on the current
+<code class="xref py py-meth docutils literal"><span class="pre">beatsearch.feature_extraction.MultiTrackMonoFeature.multi_track_mode()</span></code> of the MultiTrackMonoFeature extractor:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="first docutils">
+<dt>PER_TRACK:</dt>
+<dd>The monophonic feature is computed once for each track in the given polyphonic rhythm and returned in the
+same order as a tuple.</dd>
+</dl>
+</li>
+<li><dl class="first docutils">
+<dt>PER_TRACK_COMBINATION:</dt>
+<dd>For each track combination (e.g., given a polyphonic rhythm with kick, snare and hi-hat, the combinations
+are [kick], [snare], [hi-hat], [kick, snare], [kick, hi-hat], [snare, hi-hat] and [kick, snare, hi-hat]) a
+new, merged, monophonic rhythm is created. The monophonic feature is then computed on each monophonic
+rhythm. The monophonic features are then returned as a tuple of (track_indices, mono_feature) tuples where
+track_indices is a tuple containing the indices of the tracks used to create the merged monophonic rhythm
+that resulted in the corresponding monophonic feature.</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.PolyphonicMetricalTensionVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">PolyphonicMetricalTensionVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>normalize=False</em>, <em>cyclic=True</em>, <em>instrument_weights=None</em>, <em>include_combination_tracks=False</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicMetricalTensionVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the weighted monophonic metrical tension vector for each track (or each track combination if
+include_combination_tracks is set to True) and returns the sum. The monophonic metrical tension is computed with
+<a class="reference internal" href="#beatsearch.feature_extraction.MonophonicMetricalTensionVector" title="beatsearch.feature_extraction.MonophonicMetricalTensionVector"><code class="xref py py-class docutils literal"><span class="pre">beatsearch.feature_extraction.MonophonicMetricalTensionVector</span></code></a>. The weights of the tracks are specified
+with the <code class="xref py py-meth docutils literal"><span class="pre">beatsearch.feature_extraction.PolyphonicMetricalTensionVector.set_instrument_weights()</span></code>. The weights
+for the track combinations are specified as the factors of the individual instrument weights for the instruments
+within that instrument group (e.g., w(kick) = 0.2 and w(snare) = 0.5 will result in 0.1 for the weight of the
+combination kick-snare).</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.PolyphonicMetricalTensionVector.normalize">
+<code class="descname">normalize</code><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicMetricalTensionVector.normalize" title="Permalink to this definition">¶</a></dt>
+<dd><p>When set to True, the tension will have a range of [0, 1]</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">PolyphonicMetricalTensionMagnitude</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>normalize=True</em>, <em>cyclic=True</em>, <em>instrument_weights=None</em>, <em>include_combination_tracks=False</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the magnitude of the polyphonic metrical tension vector (euclidean distance to the zero vector)</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude.normalize">
+<code class="descname">normalize</code><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude.normalize" title="Permalink to this definition">¶</a></dt>
+<dd><p>When set to True, the tension magnitude will range from 0 to 1</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVector">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">PolyphonicSyncopationVector</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>instr_weighting_function=&lt;function PolyphonicSyncopationVector.&lt;lambda&gt;&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>interrupted_syncopations=True</em>, <em>nested_syncopations='keep_heaviest'</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVector" title="Permalink to this definition">¶</a></dt>
+<dd><p>Finds the polyphonic syncopations and their syncopation strengths. This is an adaption to the method proposed by
+M. Witek et al in their worked titled &#8220;Syncopation, Body-Movement and Pleasure in Groove Music&#8221;. This method is
+implemented in terms of the monophonic syncopation feature extractor. The monophonic syncopations are found per
+instrument. They are upgraded to polyphonic syncopations by adding an instrumentation weight. The syncopations
+are then filtered based on the properties &#8216;<cite>only_uninterrupted_syncopations</cite>&#8216; and &#8216;<cite>nested_syncopations</cite>&#8216;.</p>
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVector.instrumentation_weight_function">
+<code class="descname">instrumentation_weight_function</code><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVector.instrumentation_weight_function" title="Permalink to this definition">¶</a></dt>
+<dd><p>The instrumentation weight function is used to compute the instrumentation weights of the syncopations. This
+function receives two positional parameters:</p>
+<blockquote>
+<div><ul>
+<li><p class="first"><cite>syncopated_instrument: str</cite></p>
+<p>The name of the instrument that plays the syncopated note as a string.</p>
+</li>
+<li><p class="first"><cite>closing_instruments: Set[str]</cite></p>
+<p>The names of the instruments which syncopated_instrument is syncopated against (empty set if the
+syncopation is against a rest).</p>
+</li>
+</ul>
+</div></blockquote>
+<p>The instrumentation weight function must return the weight as an integer. When this property is set to None, the
+instrumentation weight will equal zero for all syncopations.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-data docutils literal"><span class="pre">Callable</span></code>[[<code class="xref py py-class docutils literal"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal"><span class="pre">Set</span></code>[<code class="xref py py-class docutils literal"><span class="pre">str</span></code>]], <code class="xref py py-class docutils literal"><span class="pre">int</span></code>]</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVector.nested_syncopations">
+<code class="descname">nested_syncopations</code><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVector.nested_syncopations" title="Permalink to this definition">¶</a></dt>
+<dd><p>This property determines the way in which nested syncopations are handled. Two syncopations are said to be
+nested if one syncopation starts during the other. Note that if only_uninterrupted_syncopations is set to True,
+there won&#8217;t be any nested syncopations detected, effectively ignoring this property.</p>
+<p>Nested syncopations can be handled in four different ways:</p>
+<blockquote>
+<div><ul>
+<li><p class="first"><cite>keep_heaviest</cite></p>
+<p>Only the syncopation with the highest syncopation strength remains.</p>
+</li>
+<li><p class="first"><cite>keep_first</cite></p>
+<p>Only the first (not nested) syncopation remains.</p>
+</li>
+<li><p class="first"><cite>keep_last</cite></p>
+<p>Only the last (most nested) syncopation remains.</p>
+</li>
+<li><p class="first"><cite>keep_all</cite></p>
+<p>All syncopations remain.</p>
+</li>
+</ul>
+</div></blockquote>
+<p>Suppose you have a rhythm with three instruments, instrument A, B and C. Then suppose these three nested
+syncopations:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">Instrument</span> <span class="n">A</span> <span class="p">(</span><span class="n">strength</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span> <span class="o">....</span><span class="p">:</span><span class="o">...&lt;|&gt;...</span>
+<span class="n">Instrument</span> <span class="n">B</span> <span class="p">(</span><span class="n">strength</span><span class="o">=</span><span class="mi">2</span><span class="p">):</span> <span class="o">&lt;---</span><span class="p">:</span><span class="o">----|&gt;...</span>
+<span class="n">Instrument</span> <span class="n">C</span> <span class="p">(</span><span class="n">strength</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span> <span class="o">....</span><span class="p">:</span><span class="o">&lt;---|&gt;...</span>
+
+<span class="n">Legend</span><span class="p">:</span>
+    <span class="o">&lt;</span> <span class="o">=</span> <span class="n">syncopated</span> <span class="n">note</span>        <span class="o">-</span> <span class="o">=</span> <span class="n">pending</span> <span class="n">syncopation</span>     <span class="o">&gt;</span> <span class="o">=</span> <span class="n">closing</span> <span class="n">note</span> <span class="p">(</span><span class="n">end</span> <span class="n">of</span> <span class="n">syncopation</span><span class="p">)</span>
+    <span class="o">|</span> <span class="o">=</span> <span class="n">crotchet</span> <span class="n">pulse</span>         <span class="p">:</span> <span class="o">=</span> <span class="n">quaver</span> <span class="n">pulse</span>
+
+<span class="n">From</span> <span class="n">these</span> <span class="n">three</span> <span class="n">syncopations</span><span class="p">:</span>
+
+    <span class="o">-</span> <span class="n">keep_heaviest</span><span class="p">:</span>  <span class="n">only</span> <span class="n">syncopation</span> <span class="n">C</span> <span class="n">remains</span>
+    <span class="o">-</span> <span class="n">keep_first</span><span class="p">:</span>     <span class="n">only</span> <span class="n">syncopation</span> <span class="n">B</span> <span class="n">remains</span>
+    <span class="o">-</span> <span class="n">keep_last</span><span class="p">:</span>      <span class="n">only</span> <span class="n">syncopation</span> <span class="n">A</span> <span class="n">remains</span>
+    <span class="o">-</span> <span class="n">keep_all</span><span class="p">:</span>       <span class="n">syncopation</span> <span class="n">A</span><span class="p">,</span> <span class="n">B</span> <span class="ow">and</span> <span class="n">C</span> <span class="n">remain</span>
+</pre></div>
+</div>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">str</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVector.only_uninterrupted_syncopations">
+<code class="descname">only_uninterrupted_syncopations</code><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVector.only_uninterrupted_syncopations" title="Permalink to this definition">¶</a></dt>
+<dd><p>Setting this property to True causes this feature extractor to only find uninterrupted syncopations. A
+syncopation is said to be interrupted if an other instrument plays a note during the syncopation. Note that
+setting this property to True will make syncopations containing nested syncopations undetectable, effectively
+ignoring the nested_syncopations property.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">bool</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVector.salience_profile_type">
+<code class="descname">salience_profile_type</code><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVector.salience_profile_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>The type of salience profile to be used for syncopation detection. This must be one of: [&#8216;hierarchical&#8217;,
+&#8216;equal_upbeats&#8217;, &#8216;equal_beats&#8217;]. See <code class="xref py py-meth docutils literal"><span class="pre">beatsearch.rhythm.TimeSignature.get_salience_profile()</span></code> for more info.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">str</span></code></td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek">
+<em class="property">class </em><code class="descclassname">beatsearch.feature_extraction.</code><code class="descname">PolyphonicSyncopationVectorWitek</code><span class="sig-paren">(</span><em>unit=&lt;Unit.EIGHTH: (Fraction(1</em>, <em>8)</em>, <em>('eighth'</em>, <em>'quaver'))&gt;</em>, <em>salience_profile_type='equal_upbeats'</em>, <em>instrumentation_weight_function=None</em>, <em>**kw</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek" title="Permalink to this definition">¶</a></dt>
+<dd><p>Finds the polyphonic syncopations and their syncopation strengths. This is an implementation of the method
+proposed by Maria A.G. Witek et al in their work titled &#8220;Syncopation, Body-Movement and Pleasure in Groove
+Music&#8221;.</p>
+<p>The definition of syncopation, as proposed in the work of Witek, goes as follows:</p>
+<blockquote>
+<div>If N is a note that precedes a rest, R, and R has a metric weight greater than or equal to N, then the
+pair (N, R) is said to constitute a monophonic syncopation. If N is a note on a certain instrument that
+precedes a note on a different instrument, Ndi, and Ndi has a metric weight greater than or equal to N,
+then the pair (N, Ndi) is said to constitute a polyphonic syncopation.</div></blockquote>
+<p>This definition is used to find the syncopations. Then, the syncopation strengths are computed with this
+formula:</p>
+<blockquote>
+<div>S = Ndi - N + I</div></blockquote>
+<p>where S is the degree of syncopation, Ndi is the metrical weight of the note succeeding the syncopated note, N
+is the metrical weight of the syncopated note and I is the instrumentation weight. The instrumentation weight
+depends on the relation of the instruments involved in the syncopation. This relation depends on two factors:</p>
+<blockquote>
+<div><ul class="simple">
+<li>the number of instruments involved in the syncopation</li>
+<li>the type of instruments involved in the syncopation</li>
+</ul>
+</div></blockquote>
+<p>As there is no formula given by Witek for how to compute this value, the computation of this value is up to the
+owner of this feature extractor. The function to compute the weight can be set through the
+set_instrumentation_weight_function method and should be a callable receiving two arguments:</p>
+<blockquote>
+<div><ul class="simple">
+<li>the names of the tracks (instruments) that play a syncopated note</li>
+<li>the names of the tracks (instruments) that the note is syncopated against (empty if syncopated against a
+rest)</li>
+</ul>
+</div></blockquote>
+<dl class="docutils">
+<dt>The syncopations are returned as a sequence of three-element tuples containing:</dt>
+<dd><ul class="first last simple">
+<li>the degree of syncopation (syncopation strength)</li>
+<li>position of the syncopated note(s)</li>
+<li>position of the note(s)/rest(s) against which the note(s) are syncopated</li>
+</ul>
+</dd>
+</dl>
+<p>The syncopations are returned (position, syncopation strength) tuples.</p>
+<p>NOTE: the formula in the Witek&#8217;s work is different: S = N - Ndi + I. I suspect that it is a typo, as examples
+in the same work show that the formula, S = Ndi - N + I, is used.</p>
+<dl class="staticmethod">
+<dt id="beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek.default_instr_weight_function">
+<em class="property">static </em><code class="descname">default_instr_weight_function</code><span class="sig-paren">(</span><em>syncopated_instruments</em>, <em>other_instruments</em><span class="sig-paren">)</span><a class="headerlink" href="#beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek.default_instr_weight_function" title="Permalink to this definition">¶</a></dt>
+<dd><p>The default instrumentation weight function</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><code class="xref py py-class docutils literal"><span class="pre">int</span></code></td>
 </tr>
 </tbody>
 </table>
@@ -1403,7 +2044,7 @@ MIDI pitch ([0, 127]) which is used to produce this sound and an ID, which defau
     <script type="text/javascript">
         var DOCUMENTATION_OPTIONS = {
             URL_ROOT:'./',
-            VERSION:'0.0.1.dev8',
+            VERSION:'0.0.2.a1',
             COLLAPSE_INDEX:false,
             FILE_SUFFIX:'.html',
             HAS_SOURCE:  true,
