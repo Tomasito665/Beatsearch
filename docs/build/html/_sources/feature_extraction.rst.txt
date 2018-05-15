@@ -47,16 +47,21 @@ Monophonic rhythm features are based on monophonic rhythm properties and are imp
 
 * :class:`beatsearch.feature_extraction.BinaryOnsetVector`
 * :class:`beatsearch.feature_extraction.NoteVector`
-* :class:`beatsearch.feature_extraction.IOIVector`
-* :class:`beatsearch.feature_extraction.IOIHistogram`
 * :class:`beatsearch.feature_extraction.BinarySchillingerChain`
 * :class:`beatsearch.feature_extraction.ChronotonicChain`
-* :class:`beatsearch.feature_extraction.IOIDifferenceVector`
+* :class:`beatsearch.feature_extraction.OnsetDensity`
 * :class:`beatsearch.feature_extraction.OnsetPositionVector`
-* :class:`beatsearch.feature_extraction.SyncopationVector`
+* :class:`beatsearch.feature_extraction.MonophonicOnsetLikelihoodVector`
+* :class:`beatsearch.feature_extraction.MonophonicVariabilityVector`
+* :class:`beatsearch.feature_extraction.MonophonicSyncopationVector`
 * :class:`beatsearch.feature_extraction.SyncopatedOnsetRatio`
 * :class:`beatsearch.feature_extraction.MeanSyncopationStrength`
-* :class:`beatsearch.feature_extraction.OnsetDensity`
+* :class:`beatsearch.feature_extraction.MonophonicMetricalTensionVector`
+* :class:`beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude`
+* :class:`beatsearch.feature_extraction.IOIVector`
+* :class:`beatsearch.feature_extraction.IOIDifferenceVector`
+* :class:`beatsearch.feature_extraction.IOIHistogram`
+
 
 Polyphonic rhythm features
 --------------------------
@@ -66,5 +71,8 @@ Polyphonic rhythm features are based on polyphonic rhythm properties and are imp
 
 **Implementations**
 
-* :class:`beatsearch.feature_extraction.MultiChannelMonophonicRhythmFeatureVector`
+* :class:`beatsearch.feature_extraction.MultiTrackMonoFeature`
+* :class:`beatsearch.feature_extraction.PolyphonicMetricalTensionVector`
+* :class:`beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude`
 * :class:`beatsearch.feature_extraction.PolyphonicSyncopationVector`
+* :class:`beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek`
