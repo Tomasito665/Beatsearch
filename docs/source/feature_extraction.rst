@@ -53,7 +53,7 @@ Monophonic rhythm features are based on monophonic rhythm properties and are imp
 * :class:`beatsearch.feature_extraction.ChronotonicChain`
 * :class:`beatsearch.feature_extraction.IOIDifferenceVector`
 * :class:`beatsearch.feature_extraction.OnsetPositionVector`
-* :class:`beatsearch.feature_extraction.SyncopationVector`
+* :class:`beatsearch.feature_extraction.MonophonicSyncopationVector`
 * :class:`beatsearch.feature_extraction.SyncopatedOnsetRatio`
 * :class:`beatsearch.feature_extraction.MeanSyncopationStrength`
 * :class:`beatsearch.feature_extraction.OnsetDensity`

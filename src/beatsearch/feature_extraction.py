@@ -1019,7 +1019,7 @@ Syncopations are expressed as a tuple of three elements:
 """
 
 
-class SyncopationVector(MonophonicRhythmFeatureExtractorBase):
+class MonophonicSyncopationVector(MonophonicRhythmFeatureExtractorBase):
     """
     Finds the syncopations in a monophonic rhythm. The syncopations are computed with the method proposed by H.C.
     Longuet-Higgins and C. S. Lee in their work titled: "The Rhythmic Interpretation of Monophonic Music".
@@ -1038,7 +1038,8 @@ class SyncopationVector(MonophonicRhythmFeatureExtractorBase):
                  salience_profile_type: str = "equal_upbeats",
                  cyclic: bool = True, **kw):
         super().__init__(unit, **kw)
-        self._note_vector = NoteVector(cyclic=True, aux_to=self)  # NOTE: Not related to SyncopationVector.cyclic
+        # NOTE: NoteVector cyclic is not related to MonophonicSyncopationVector.cyclic
+        self._note_vector = NoteVector(cyclic=False, tied_notes=False, aux_to=self)
         self._salience_prf_type = ""
         self._cyclic = None
         self.salience_profile_type = salience_profile_type
@@ -1104,7 +1105,7 @@ class SyncopationVector(MonophonicRhythmFeatureExtractorBase):
 class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractorBase):
     """
     Computes the number of syncopated onsets over the total number of onsets. The syncopations are computed with
-    :class:`beatsearch.feature_extraction.SyncopationVector`.
+    :class:`beatsearch.feature_extraction.MonophonicSyncopationVector`.
     """
 
     __tick_based_computation_support__ = False
@@ -1114,7 +1115,7 @@ class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractorBase):
     def __init__(self, unit: UnitType = _DEFAULT_UNIT, ret_fraction: bool = False, **kw):
         super().__init__(unit, **kw)
         self._binary_onset_vec = BinaryOnsetVector(aux_to=self)
-        self._sync_vector = SyncopationVector(aux_to=self)
+        self._sync_vector = MonophonicSyncopationVector(aux_to=self)
         self._ret_fraction = None
         self.ret_fraction = ret_fraction  # calling setter
 
@@ -1150,7 +1151,7 @@ class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractorBase):
 class MeanSyncopationStrength(MonophonicRhythmFeatureExtractorBase):
     """
     Computes the average syncopation strength per step. The step size depends on the unit (see set_unit). The
-    syncopations are computed with SyncopationVector.
+    syncopations are computed with MonophonicSyncopationVector.
     """
 
     __tick_based_computation_support__ = False
@@ -1159,7 +1160,7 @@ class MeanSyncopationStrength(MonophonicRhythmFeatureExtractorBase):
 
     def __init__(self, unit: UnitType = _DEFAULT_UNIT, **kw):
         super().__init__(unit, **kw)
-        self._sync_vector = SyncopationVector(aux_to=self)
+        self._sync_vector = MonophonicSyncopationVector(aux_to=self)
 
     def __process__(self, rhythm: MonophonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
         syncopation_vector = aux_fts[0]
@@ -1685,7 +1686,7 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
     ):
         super().__init__(unit, **kw)
         self._mt_bin_onset_vec_extr = MultiTrackMonoFeature(BinaryOnsetVector, aux_to=self)
-        self._mt_sync_vec_extr = MultiTrackMonoFeature(SyncopationVector, aux_to=self)
+        self._mt_sync_vec_extr = MultiTrackMonoFeature(MonophonicSyncopationVector, aux_to=self)
 
         self._instr_weighting_f = None  # type: tp.Callable[[str, tp.Set[str]], int]
         self._only_uninterrupted_sync = None  # type: bool
@@ -1801,7 +1802,7 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
 
     @salience_profile_type.setter
     def salience_profile_type(self, salience_profile_type: str):
-        self._mt_sync_vec_extr.salience_profile_type = salience_profile_type  # type: SyncopationVector
+        self._mt_sync_vec_extr.salience_profile_type = salience_profile_type  # type: MonophonicSyncopationVector
 
     @property
     def only_uninterrupted_syncopations(self) -> bool:
@@ -2207,7 +2208,7 @@ __all__ = [
 
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
-    'IOIDifferenceVector', 'OnsetPositionVector', 'SyncopationVector', 'SyncopatedOnsetRatio',
+    'IOIDifferenceVector', 'OnsetPositionVector', 'MonophonicSyncopationVector', 'SyncopatedOnsetRatio',
     'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector', 'MonophonicVariabilityVector',
     'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
 

@@ -1,4 +1,3 @@
-import functools
 import typing as tp
 import numpy.testing as npt
 from unittest import TestCase, main
@@ -19,7 +18,7 @@ from beatsearch.feature_extraction import (
     OnsetPositionVector,
     MonophonicOnsetLikelihoodVector,
     MonophonicVariabilityVector,
-    SyncopationVector,
+    MonophonicSyncopationVector,
     SyncopatedOnsetRatio,
     MeanSyncopationStrength,
     MonophonicMetricalTensionVector,
@@ -330,7 +329,7 @@ def create_note_vector_from_string(note_vector_str: str, note_char: str = "N",
 class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
-        return SyncopationVector
+        return MonophonicSyncopationVector
 
     @staticmethod
     def get_rhythm_str():
@@ -338,11 +337,11 @@ class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMi
         return "---x---x--x-x---"
 
     def test_defaults_to_equal_upbeats_salience_profile_type(self):
-        extractor = self.feature_extractor  # type: SyncopationVector
+        extractor = self.feature_extractor  # type: MonophonicSyncopationVector
         self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
 
     def test_defaults_to_cyclic(self):
-        extractor = self.feature_extractor  # type: SyncopationVector
+        extractor = self.feature_extractor  # type: MonophonicSyncopationVector
         self.assertTrue(extractor.cyclic)
 
     SEMI_QUAVER_NOTE_VECTOR = create_note_vector_from_string("T2 R1 N1 T2 R1 N1 T2 N2 N4")
@@ -351,7 +350,7 @@ class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMi
     @patch.object(NoteVector, "__process__", return_value=SEMI_QUAVER_NOTE_VECTOR)
     @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
     def test_process_cyclic(self, *_):
-        extractor = self.feature_extractor  # type: SyncopationVector
+        extractor = self.feature_extractor  # type: MonophonicSyncopationVector
         extractor.cyclic = True
         expected_sync_vector = [(2, 3, 4), (2, 7, 8), (1, 12, 0)]
         actual_sync_vector = extractor.process(self.rhythm)
@@ -360,7 +359,7 @@ class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMi
     @patch.object(NoteVector, "__process__", return_value=SEMI_QUAVER_NOTE_VECTOR)
     @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
     def test_process_non_cyclic(self, *_):
-        extractor = self.feature_extractor  # type: SyncopationVector
+        extractor = self.feature_extractor  # type: MonophonicSyncopationVector
         extractor.cyclic = False
         expected_sync_vector = [(2, 3, 4), (2, 7, 8)]
         actual_sync_vector = extractor.process(self.rhythm)
@@ -375,7 +374,7 @@ class TestSyncopatedOnsetRatio(TestMonophonicRhythmFeatureExtractorImplementatio
     def test_default_ret_float(self):
         self.assertFalse(self.feature_extractor.ret_fraction, "should return a float by default")
 
-    @patch.object(SyncopationVector, "__process__")
+    @patch.object(MonophonicSyncopationVector, "__process__")
     def test_process_ret_fraction(self, mock_syncopation_vector_process):
         syncopations = "first", "second", "third"
         mock_syncopation_vector_process.return_value = syncopations
@@ -387,7 +386,7 @@ class TestSyncopatedOnsetRatio(TestMonophonicRhythmFeatureExtractorImplementatio
         actual_ratio = extractor.process(self.rhythm)
         self.assertEqual(actual_ratio, expected_ratio)
 
-    @patch.object(SyncopationVector, "__process__")
+    @patch.object(MonophonicSyncopationVector, "__process__")
     def test_process_ret_float(self, mock_syncopation_vector_process):
         syncopations = "first", "second", "third"
         mock_syncopation_vector_process.return_value = syncopations
@@ -405,7 +404,7 @@ class TestMeanSyncopationStrength(TestMonophonicRhythmFeatureExtractorImplementa
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         return MeanSyncopationStrength
 
-    @patch.object(SyncopationVector, "__process__")
+    @patch.object(MonophonicSyncopationVector, "__process__")
     def test_process(self, mock_syncopation_vector_process):
         syncopations = [0, 7], [1, 2], [2, 5]  # total sync strength = 14
         mock_syncopation_vector_process.return_value = syncopations
@@ -1032,4 +1031,3 @@ class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtracto
 
 if __name__ == "__main__":
     main()
-
