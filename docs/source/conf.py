@@ -35,7 +35,7 @@ import beatsearch
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx_autodoc_typehints',
-    'sphinx.ext.doctest',
+    # 'sphinx.ext.doctest',  # Temporarily exclude till we actually use it
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
     'sphinx.ext.imgmath',

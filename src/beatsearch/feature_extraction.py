@@ -573,7 +573,9 @@ class BinaryOnsetVector(MonophonicRhythmFeatureExtractorBase):
     happens is denoted with a 1; otherwise with a 0. The given resolution is the resolution in PPQ (pulses per
     quarter note) of the binary vector.
 
-    This is an independent feature extractor.
+    .. note::
+
+       This is an independent feature extractor.
     """
 
     __tick_based_computation_support__ = True
@@ -621,9 +623,26 @@ class NoteVector(MonophonicRhythmFeatureExtractorBase, QuantizableRhythmFeatureE
 
     Events are expressed as tuples containing three elements:
 
-        - e_type    the type of the event (NOTE, TIED_NOTE or REST)
-        - e_dur     the duration of the event
-        - e_pos     the position of the event
+        - e_type:    the type of the event (NOTE, TIED_NOTE or REST)
+        - e_dur:     the duration of the event
+        - e_pos:     the position of the event
+
+    To iterate over the events in a note vector and print some information about the events, one could do::
+
+        e_type_names = {
+            NoteVector.NOTE: "note",
+            NoteVector.TIED_NOTE: "tied note",
+            NoteVector.REST: "rest
+        }
+
+        for e_type, e_dur, e_pos in note_vector:
+            e_pos_end = e_pos + e_dur
+            e_name = e_type_names[e_type]
+            print("There's a %s from step %i to step %i" % (e_name, e_pos, e_pos_end))
+
+    .. note::
+
+       This is an independent feature extractor.
     """
 
     __tick_based_computation_support__ = False
@@ -733,21 +752,21 @@ class IOIVector(MonophonicRhythmFeatureExtractorBase, QuantizableRhythmFeatureEx
     Computes the time difference between the notes in the given rhythm (Inter Onset Intervals). The elements of the
     vector will depend on this IOIVector extractor's mode property:
 
-    PRE_NOTE
-        Time difference between the current note and the previous note. The first note will return the time
-        difference with the start of the rhythm.
+    **PRE_NOTE** Time difference between the current note and the previous note. The first note will return the time
+    difference with the start of the rhythm. For example, given the Rumba Clave rhythm::
 
-        For example, given the Rumba Clave rhythm:
-          X--X---X--X-X---
-          0  3   4  3 2
+        X--X---X--X-X---
+        0  3   4  3 2
 
-    POST_NOTE
-        Time difference between the current note and the next note. The last note will return the time difference
-        with the end (duration) of the rhythm.
+    **POST_NOTE** Time difference between the current note and the next note. The last note will return the time
+    difference with the end (duration) of the rhythm. For example, given the Rumba Clave rhythm::
 
-        For example, given the Rumba Clave rhythm:
-          X--X---X--X-X---
-          3  4   3  2 4
+        X--X---X--X-X---
+        3  4   3  2 4
+
+    .. note::
+
+       This is an independent feature extractor.
     """
 
     __tick_based_computation_support__ = True
@@ -828,11 +847,12 @@ class IOIHistogram(MonophonicRhythmFeatureExtractorBase):
     Computes the number of occurrences of the inter-onset intervals of the notes of the given rhythm in ascending
     order. The inter onset intervals are computed in POST_NOTE mode.
 
-    For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]:
-        (
+    For example, given the Rumba Clave rhythm, with inter-onset vector [3, 4, 3, 2, 4]::
+
+        [
             [1, 2, 2],  # occurrences
             [2, 3, 4]   # bins (interval durations)
-        )
+        ]
     """
 
     __tick_based_computation_support__ = True
@@ -855,11 +875,13 @@ class BinarySchillingerChain(MonophonicRhythmFeatureExtractorBase):
     """
     Returns the Schillinger notation of this rhythm where each onset is a change of a "binary note".
 
-    For example, given the Rumba Clave rhythm and with values (0, 1):
+    For example, given the Rumba Clave rhythm and with values (0, 1)::
+
       X--X---X--X-X---
       0001111000110000
 
-    However, when given the values (1, 0), the schillinger chain will be the opposite:
+    However, when given the values (1, 0), the schillinger chain will be the opposite::
+
       X--X---X--X-X---
       1110000111001111
     """
@@ -942,12 +964,15 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractorBase, QuantizableRhyth
     interval is compared with the first onset's interval. In this case, the length will be N.
     The inter-onset interval vector is computed in POST_NOTE mode.
 
-    For example, given the POST_NOTE inter-onset interval vector for the Rumba clave:
-      [3, 4, 3, 2, 4]
+    For example, given the POST_NOTE inter-onset interval vector for the Rumba clave::
 
-    The interval difference vector would be:
-       With cyclic set to False: [4/3, 3/4, 2/3, 4/2]
-       With cyclic set to True:  [4/3, 3/4, 2/3, 4/2, 3/4]
+        [3, 4, 3, 2, 4]
+
+    The interval difference vector would be::
+
+        [4/3, 3/4, 2/3, 4/2]        # cyclic = False
+        [4/3, 3/4, 2/3, 4/2, 3/4]   # cyclic = True
+
     """
 
     __tick_based_computation_support__ = True
@@ -983,7 +1008,7 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractorBase, QuantizableRhyth
 
     @property
     def cyclic(self):
-        """Cyclic behaviour, see process documentation"""
+        """Set to True for cyclic behaviour. See :class:`beatsearch.feature_extraction.IOIDifferenceVector`"""
         return self._cyclic
 
     @cyclic.setter
@@ -992,7 +1017,12 @@ class IOIDifferenceVector(MonophonicRhythmFeatureExtractorBase, QuantizableRhyth
 
 
 class OnsetPositionVector(MonophonicRhythmFeatureExtractorBase, QuantizableRhythmFeatureExtractorMixin):
-    """Finds the absolute onset times of the notes in the given rhythm"""
+    """Finds the absolute onset times of the notes in the given rhythm.
+
+    .. note::
+
+       This is an independent feature extractor.
+    """
 
     __tick_based_computation_support__ = True
     __preconditions__ = (Rhythm.Precondition.check_resolution,)
@@ -1201,16 +1231,16 @@ class MonophonicOnsetLikelihoodVector(MonophonicRhythmFeatureExtractorBase):
     that it is very likely that the corresponding step will contain an onset.
 
     The likelihoods are based on predictions made on different levels. Each level has a window size corresponding to a
-    musical unit. For each level, the prediction is that the current group will equal the last group. For example:
+    musical unit. For each level, the prediction is that the current group will equal the last group. For example::
 
-    Rhythm            x o x o x o x o x o x x x o o o
+        Rhythm            x o x o x o x o x o x x x o o o
 
-    Predictions
-                1/16 |?|x|o|x|o|x|o|x|o|x|o|x:x|o|o|o|
-                1/8  |? ?|x o|x o|x o|x o|x o|x x|x o|
-                1/4  |? ? ? ?|x o x o|x o x o|x x x o|
-                1/2  |? ? ? ? ? ? ? ?|x o x o x o x o|
-                1/1  |? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ?|
+        Predictions
+                    1/16 |?|x|o|x|o|x|o|x|o|x|o|x:x|o|o|o|
+                    1/8  |? ?|x o|x o|x o|x o|x o|x x|x o|
+                    1/4  |? ? ? ?|x o x o|x o x o|x x x o|
+                    1/2  |? ? ? ? ? ? ? ?|x o x o x o x o|
+                    1/1  |? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ?|
 
     The groups containing question marks are groups that have no antecedents. The predictions of these uncertain groups
     are handled according to the "priors" property.
@@ -1467,9 +1497,7 @@ class MonophonicMetricalTensionMagnitude(MonophonicRhythmFeatureExtractorBase):
 
     @property
     def normalize(self) -> bool:
-        """When set to True, the magnitude will have a range of [0, sqrt(N)] where N is the step count of the given
-        rhythm with this extractor's unit"""
-
+        """When set to True, the tension magnitude will range from 0 to 1"""
         return self._tension_vec.normalize
 
     @normalize.setter
@@ -1654,7 +1682,7 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
     M. Witek et al in their worked titled "Syncopation, Body-Movement and Pleasure in Groove Music". This method is
     implemented in terms of the monophonic syncopation feature extractor. The monophonic syncopations are found per
     instrument. They are upgraded to polyphonic syncopations by adding an instrumentation weight. The syncopations
-    are then filtered based on the properties 'only_uninterrupted_syncopations' and 'nested_syncopations'.
+    are then filtered based on the properties '`only_uninterrupted_syncopations`' and '`nested_syncopations`'.
     """
 
     __tick_based_computation_support__ = False
@@ -1828,13 +1856,25 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
 
         Nested syncopations can be handled in four different ways:
 
-            - keep_heaviest:  only the syncopation with the highest syncopation strength remains
-            - keep_first:     only the first syncopation remains (the less nested syncopation)
-            - keep_last:      only the last syncopation remains (the most nested syncopation)
-            - keep_all:       all syncopations remain
+            - `keep_heaviest`
+
+              Only the syncopation with the highest syncopation strength remains.
+
+            - `keep_first`
+
+              Only the first (not nested) syncopation remains.
+
+            - `keep_last`
+
+              Only the last (most nested) syncopation remains.
+
+            - `keep_all`
+
+              All syncopations remain.
+
 
         Suppose you have a rhythm with three instruments, instrument A, B and C. Then suppose these three nested
-        syncopations:
+        syncopations::
 
             Instrument A (strength=1): ....:...<|>...
             Instrument B (strength=2): <---:----|>...
@@ -1844,12 +1884,12 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
                 < = syncopated note        - = pending syncopation     > = closing note (end of syncopation)
                 | = crotchet pulse         : = quaver pulse
 
-        From these three syncopations:
+            From these three syncopations:
 
-            - keep_heaviest:  only syncopation C remains
-            - keep_first:     only syncopation B remains
-            - keep_last:      only syncopation A remains
-            - keep_all:       syncopation A, B and C remain
+                - keep_heaviest:  only syncopation C remains
+                - keep_first:     only syncopation B remains
+                - keep_last:      only syncopation A remains
+                - keep_all:       syncopation A, B and C remain
         """
 
         return self._nested_sync_strategy
@@ -1869,9 +1909,14 @@ class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
         The instrumentation weight function is used to compute the instrumentation weights of the syncopations. This
         function receives two positional parameters:
 
-            syncopated_instrument: the name of the instrument that plays the syncopated note as a string
-            closing_instruments:   the names of the instruments which syncopated_instrument is syncopated against (empty
-                                   set if the syncopation is against a rest)
+            - `syncopated_instrument: str`
+
+              The name of the instrument that plays the syncopated note as a string.
+
+            - `closing_instruments: Set[str]`
+
+              The names of the instruments which syncopated_instrument is syncopated against (empty set if the
+              syncopation is against a rest).
 
         The instrumentation weight function must return the weight as an integer. When this property is set to None, the
         instrumentation weight will equal zero for all syncopations.
@@ -2177,7 +2222,7 @@ class PolyphonicMetricalTensionMagnitude(PolyphonicRhythmFeatureExtractorBase, I
 
     @property
     def normalize(self) -> bool:
-        """When set to True, the tension will have a range of [0, 1]"""
+        """When set to True, the tension magnitude will range from 0 to 1"""
         return self._poly_metrical_tension_vec.normalize
 
     @normalize.setter
