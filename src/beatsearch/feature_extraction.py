@@ -1032,13 +1032,17 @@ class SyncopationVector(MonophonicRhythmFeatureExtractorBase):
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (e.unit, e.salience_profile_type)
+    __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.cyclic)
 
-    def __init__(self, unit: UnitType = _DEFAULT_UNIT, salience_profile_type: str = "equal_upbeats", **kw):
+    def __init__(self, unit: UnitType = _DEFAULT_UNIT,
+                 salience_profile_type: str = "equal_upbeats",
+                 cyclic: bool = True, **kw):
         super().__init__(unit, **kw)
-        self._note_vector = NoteVector(aux_to=self)
+        self._note_vector = NoteVector(cyclic=True, aux_to=self)  # NOTE: Not related to SyncopationVector.cyclic
         self._salience_prf_type = ""
+        self._cyclic = None
         self.salience_profile_type = salience_profile_type
+        self.cyclic = cyclic
 
     def __process__(self, rhythm: MonophonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
         note_vector = aux_fts[0]
@@ -1046,7 +1050,16 @@ class SyncopationVector(MonophonicRhythmFeatureExtractorBase):
         metrical_weights = time_signature.get_salience_profile(self.unit, kind=self.salience_profile_type)
 
         for n, [curr_event_type, _, curr_step] in enumerate(note_vector):
-            next_event_type, next_event_duration, next_step = note_vector[(n + 1) % len(note_vector)]
+            try:
+                next_event = note_vector[n + 1]
+            except IndexError:
+                if self.cyclic:
+                    next_event = note_vector[0]
+                else:
+                    break
+
+            # unpack next note vector event
+            next_event_type, next_event_duration, next_step = next_event
 
             # only iterate over [note, rest or tied note] pairs
             if not (curr_event_type == NoteVector.NOTE and next_event_type in (NoteVector.TIED_NOTE, NoteVector.REST)):
@@ -1075,6 +1088,17 @@ class SyncopationVector(MonophonicRhythmFeatureExtractorBase):
     @salience_profile_type.setter
     def salience_profile_type(self, salience_profile_type: str):
         self._salience_prf_type = str(salience_profile_type)
+
+    @property
+    def cyclic(self) -> bool:
+        """When set to True, the extractor assumes that the processed rhythm is a loop, which allows it to find
+        syncopations of notes that are syncopated against events 'earlier' in the rhythm."""
+
+        return self._cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic: bool):
+        self._cyclic = bool(cyclic)
 
 
 class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractorBase):

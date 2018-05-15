@@ -1,5 +1,4 @@
 import functools
-import itertools
 import typing as tp
 import numpy.testing as npt
 from unittest import TestCase, main
@@ -34,6 +33,7 @@ from beatsearch.feature_extraction import (
     MultiTrackMonoFeature,
     PolyphonicMetricalTensionVector,
     PolyphonicMetricalTensionMagnitude,
+    PolyphonicSyncopationVector,
 )
 
 # misc
@@ -151,13 +151,6 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         return NoteVector
 
-    @staticmethod
-    def create_note_vector(note_vec_str: str) -> tp.Sequence[tp.Tuple[str, int, int]]:
-        note_vec_str = note_vec_str.split()
-        get_e_type = lambda char: [NoteVector.NOTE, NoteVector.TIED_NOTE, NoteVector.REST]["NTR".index(char)]
-        positions = functools.reduce(lambda out, x: out + [out[-1] + x], (int(s[1]) for s in note_vec_str), [0])
-        return tuple((get_e_type(s[0]), int(s[1]), p) for s, p in zip(note_vec_str, positions))
-
     def test_defaults_to_tied_notes(self):
         extractor = self.feature_extractor  # type: NoteVector
         self.assertTrue(extractor.tied_notes)
@@ -170,7 +163,7 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
         extractor = self.feature_extractor  # type: NoteVector
         extractor.tied_notes = True
 
-        expected_note_vector = self.create_note_vector("N2 T1 N1 T2 R1 N1 T2 N2 N4")
+        expected_note_vector = create_note_vector_from_string("N2 T1 N1 T2 R1 N1 T2 N2 N4")
         actual_note_vector = extractor.process(self.rhythm)
 
         self.assertSequenceEqual(actual_note_vector, expected_note_vector)
@@ -179,7 +172,7 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
         extractor = self.feature_extractor  # type: NoteVector
         extractor.tied_notes = False
 
-        expected_note_vector = self.create_note_vector("N2 R1 N1 R2 R1 N1 R2 N2 N4")
+        expected_note_vector = create_note_vector_from_string("N2 R1 N1 R2 R1 N1 R2 N2 N4")
         actual_note_vector = extractor.process(self.rhythm)
 
         self.assertSequenceEqual(actual_note_vector, expected_note_vector)
@@ -191,7 +184,7 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
         extractor.tied_notes = True
         extractor.cyclic = True
 
-        self.assertEqual(self.create_note_vector("T2")[0], extractor.process(rhythm)[0])
+        self.assertEqual(create_note_vector_from_string("T2")[0], extractor.process(rhythm)[0])
 
     def test_process_non_cyclic_rhythm_doesnt_count_first_rest_as_tied_note(self):
         rhythm = get_mono_rhythm_mock("--x-x---x--x--x-", 4)  # rumba 23
@@ -200,7 +193,7 @@ class TestNoteVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, Te
         extractor.tied_notes = True
         extractor.cyclic = False
 
-        self.assertEqual(self.create_note_vector("R2")[0], extractor.process(rhythm)[0])
+        self.assertEqual(create_note_vector_from_string("R2")[0], extractor.process(rhythm)[0])
 
 
 class TestIOIVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
@@ -305,12 +298,73 @@ class TestOnsetPositionVector(TestMonophonicRhythmFeatureExtractorImplementation
         self.assertSequenceEqual(actual_vector, expected_vector)
 
 
+def create_note_vector_from_string(note_vector_str: str, note_char: str = "N",
+                                   tied_note_char: str = "T", rest_char: str = "R"):
+    """Creates a note vector from the given string where each space-separated word represents a musical event. The
+    events must be given as (at least) two-character words where the first character is one of the given note_char,
+    tied-note char or rest char. The remaining characters must be interpretable as an integer and specify the duration
+    of the event. The positions of the events are set automatically, cumulatively.
+    """
+
+    event_type_lookup_table = {
+        note_char: NoteVector.NOTE,
+        tied_note_char: NoteVector.TIED_NOTE,
+        rest_char: NoteVector.REST,
+    }
+
+    note_vector = []
+    step = 0
+
+    for event_string in note_vector_str.split():
+        assert len(event_string) >= 2
+        e_type_char, *e_duration_str_chars = event_string
+        e_duration_str = "".join(e_duration_str_chars)
+        e_type = event_type_lookup_table[e_type_char]
+        e_duration = int(e_duration_str)
+        note_vector.append((e_type, e_duration, step))
+        step += e_duration
+
+    return tuple(note_vector)
+
+
 class TestSyncopationVector(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
         return SyncopationVector
 
-    # TODO Add test_process
+    @staticmethod
+    def get_rhythm_str():
+        # Same rhythm as we manually computed the note vector for (see SEMI_QUAVER_NOTE_VECTOR)
+        return "---x---x--x-x---"
+
+    def test_defaults_to_equal_upbeats_salience_profile_type(self):
+        extractor = self.feature_extractor  # type: SyncopationVector
+        self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
+
+    def test_defaults_to_cyclic(self):
+        extractor = self.feature_extractor  # type: SyncopationVector
+        self.assertTrue(extractor.cyclic)
+
+    SEMI_QUAVER_NOTE_VECTOR = create_note_vector_from_string("T2 R1 N1 T2 R1 N1 T2 N2 N4")
+    SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF = [0, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3]
+
+    @patch.object(NoteVector, "__process__", return_value=SEMI_QUAVER_NOTE_VECTOR)
+    @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
+    def test_process_cyclic(self, *_):
+        extractor = self.feature_extractor  # type: SyncopationVector
+        extractor.cyclic = True
+        expected_sync_vector = [(2, 3, 4), (2, 7, 8), (1, 12, 0)]
+        actual_sync_vector = extractor.process(self.rhythm)
+        self.assertSequenceEqual(actual_sync_vector, expected_sync_vector)
+
+    @patch.object(NoteVector, "__process__", return_value=SEMI_QUAVER_NOTE_VECTOR)
+    @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
+    def test_process_non_cyclic(self, *_):
+        extractor = self.feature_extractor  # type: SyncopationVector
+        extractor.cyclic = False
+        expected_sync_vector = [(2, 3, 4), (2, 7, 8)]
+        actual_sync_vector = extractor.process(self.rhythm)
+        self.assertSequenceEqual(actual_sync_vector, expected_sync_vector)
 
 
 class TestSyncopatedOnsetRatio(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
