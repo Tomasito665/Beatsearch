@@ -473,6 +473,13 @@ def mock_onset(tick=0, velocity=0):
     onset_mock.__getitem__ = lambda self, i: self.tick if i == 0 else self.velocity
     return onset_mock
 
+
+def get_mocked_onsets(rhythm_str: str, onset_velocity: int = 100, onset_char: str = "x"):
+    """Returns a tuple of mocked onsets for the given rhythm string (e.g., 'x--x---x--x-x---')"""
+    onset_positions = (i for i, c in enumerate(rhythm_str) if c == onset_char)
+    return tuple(mock_onset(tick, onset_velocity) for tick in onset_positions)
+
+
 def set_rhythm_mock_properties(rhythm_mock, resolution, time_signature, duration_in_ticks):
     # resolution
     rhythm_mock.get_resolution.return_value = resolution
@@ -491,9 +498,7 @@ def get_mono_rhythm_mock(rhythm_str: str, resolution: int,
     # returns rhythm with duration of one measure in 4/4
 
     rhythm_mock = MagicMock(MonophonicRhythm)
-    onset_positions = tuple(int(resolution / 4.0 * i) for i, c in enumerate(rhythm_str) if c == onset_char)
-    mocked_onsets = tuple(mock_onset(tick, onset_velocity) for tick in onset_positions)
-
+    mocked_onsets = get_mocked_onsets(rhythm_str, onset_velocity, onset_char)
     rhythm_mock.get_onsets.return_value = mocked_onsets
     rhythm_mock.onsets = rhythm_mock.get_onsets.return_value
 
@@ -504,55 +509,51 @@ def get_mono_rhythm_mock(rhythm_str: str, resolution: int,
     return rhythm_mock
 
 
-def get_mocked_track(name, onset_positions, resolution, time_signature, duration_in_ticks):
+def get_mocked_track(name: str, rhythm_str: str, resolution: int,
+                     time_signature, onset_velocity: int = 100, onset_char: str = "x"):
     track_mock = MagicMock(Track)
-    mocked_onsets = tuple(mock_onset(tick, 100) for tick in onset_positions)
-
+    mocked_onsets = get_mocked_onsets(rhythm_str, onset_velocity, onset_char)
     track_mock.get_name.return_value = name
     track_mock.name = name
     track_mock.get_onsets.return_value = mocked_onsets
     track_mock.onsets = mocked_onsets
-
-    set_rhythm_mock_properties(track_mock, resolution, time_signature, duration_in_ticks)
+    set_rhythm_mock_properties(track_mock, resolution, time_signature, len(rhythm_str))
     return track_mock
 
 
-def get_poly_rhythm_mock_with_songo_onsets(resolution: int = 4):
-    rhythm_mock = MagicMock(spec=PolyphonicRhythm)
-    assert resolution >= 4, "the songo rhythm is not representable with a resolution smaller than 4"
-    ts = TimeSignature(4, 4)  # TODO Mock time signature
-    duration_in_ticks = 4 * resolution  # one measure 4/4
+def get_poly_rhythm_mock(track_info: tp.Sequence[tp.Tuple[str, str, int]],
+                         resolution: int, onset_char: str = "x"):
+    """Creates a mocked polyphonic rhythm with a time signature of 4/4. Track info must be a sequence of (track_name,
+    rhythm_string, onset_velocity) tuples, each representing one track. Returns both the mocked polyphonic rhythm
+    and its tracks as a tuple."""
 
-    kick_track_mock = get_mocked_track("kick", [
-        int(resolution / 4.0 * 3),
-        int(resolution / 4.0 * 6),
-        int(resolution / 4.0 * 11),
-        int(resolution / 4.0 * 14)
-    ], resolution, ts, duration_in_ticks)
+    poly_rhythm_mock = MagicMock(spec=PolyphonicRhythm)
+    time_sig = TimeSignature(4, 4)  # TODO Mock time signature
+    mocked_tracks = []  # type: tp.List[tp.Union[MagicMock, Track]]
+    duration_in_ticks = -1
 
-    snare_track_mock = get_mocked_track("snare", [
-        int(resolution / 4.0 * 2),
-        int(resolution / 4.0 * 5),
-        int(resolution / 4.0 * 7),
-        int(resolution / 4.0 * 9),
-        int(resolution / 4.0 * 10),
-        int(resolution / 4.0 * 13),
-        int(resolution / 4.0 * 15)
-    ], resolution, ts, duration_in_ticks)
+    for t_name, t_string, t_velocity in track_info:
+        if 0 <= duration_in_ticks != len(t_string):
+            raise ValueError("Track strings should have equal lengths")
+        duration_in_ticks = len(t_string)
+        track = get_mocked_track(t_name, t_string, resolution, time_sig, t_velocity, onset_char)
+        mocked_tracks.append(track)
 
-    hihat_track_mock = get_mocked_track("hihat", [
-        int(resolution / 4.0 * 0),
-        int(resolution / 4.0 * 4),
-        int(resolution / 4.0 * 8),
-        int(resolution / 4.0 * 12)
-    ], resolution, ts, duration_in_ticks)
+    mocked_tracks = tuple(mocked_tracks)
+    poly_rhythm_mock.get_track_iterator.return_value = iter(mocked_tracks)
+    poly_rhythm_mock.get_track_count.return_value = len(mocked_tracks)
+    poly_rhythm_mock.get_track_names.return_value = tuple(t.name for t in mocked_tracks)
+    poly_rhythm_mock.get_track_by_index = lambda i: mocked_tracks[i]
+    set_rhythm_mock_properties(poly_rhythm_mock, resolution, time_sig, duration_in_ticks)
+    return poly_rhythm_mock, mocked_tracks
 
-    tracks = kick_track_mock, snare_track_mock, hihat_track_mock
-    rhythm_mock.get_track_iterator.return_value = iter(tracks)
-    rhythm_mock.get_track_count.return_value = len(tracks)
-    rhythm_mock.get_track_names.return_value = tuple(t.name for t in tracks)
-    set_rhythm_mock_properties(rhythm_mock, resolution, ts, duration_in_ticks)
-    return rhythm_mock
+
+def get_poly_rhythm_mock_with_songo_onsets():
+    return get_poly_rhythm_mock(track_info=[
+        ("kick", "---x--x----x--x-", 100),
+        ("snare", "--x--x-x-xx--x-x", 100),
+        ("hihat", "x---x---x---x---", 100)
+    ], resolution=4, onset_char="x")[0]
 
 
 class TestMonophonicRhythmImpl(TestRhythmBase):
@@ -1522,6 +1523,7 @@ class TestTimeSignature(TestCase):
         expected_salience_profile = [w + root_weight for w in
                                      [0, -2, -1, -2, 0, -2, -1, -2, 0, -2, -1, -2, 0, -2, -1, -2]]
         actual_salience_profile = ts.get_salience_profile(Unit.SIXTEENTH, "equal_beats", root_weight=root_weight)
+        # TODO This test doesn't actually test anything.. ¯\_(ツ)_/¯
 
 
 if __name__ == "__main__":

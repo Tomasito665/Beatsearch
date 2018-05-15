@@ -2009,7 +2009,7 @@ class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, Inst
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
     __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.normalize, e.cyclic,
-                                 e.get_instrument_weights_as_tuple(), e.include_combination_tracks)
+                                 e.get_instrument_weight_items(), e.include_combination_tracks)
 
     # Enable type hinting for MonophonicMetricalTensionVector
     _mt_monophonic_metrical_tension_vec: tp.Union[MultiTrackMonoFeature, MonophonicMetricalTensionVector]
@@ -2031,9 +2031,10 @@ class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, Inst
         n_steps = rhythm.get_duration(self.unit, ceil=True)
         poly_tension_vector = [0] * n_steps
         instrument_names = rhythm.get_track_names()
+        normalize = self.normalize
 
         mono_metrical_tension_vectors = iter(aux_fts[0])
-        individual_instrument_weights = self.get_normalized_weights(instrument_names)
+        individual_instrument_weights = self.get_weights_of_given_instruments(instrument_names, False)
         total_instr_combinations_weight = 0
 
         if not self.include_combination_tracks:
@@ -2044,6 +2045,9 @@ class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, Inst
             for step, tension in enumerate(mono_tension_vec):
                 poly_tension_vector[step] += combo_weight * tension
             total_instr_combinations_weight += combo_weight
+
+        if not normalize:
+            return tuple(poly_tension_vector)
 
         try:
             return tuple(t / total_instr_combinations_weight for t in poly_tension_vector)
@@ -2102,11 +2106,11 @@ class PolyphonicMetricalTensionMagnitude(PolyphonicRhythmFeatureExtractorBase, I
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
     __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.normalize, e.cyclic,
-                                 e.get_instrument_weights_as_tuple(), e.include_combination_tracks)
+                                 e.get_instrument_weight_items(), e.include_combination_tracks)
 
     def __init__(self, unit: UnitType = _DEFAULT_UNIT,
                  salience_profile_type: str = "equal_upbeats",
-                 normalize: bool = False, cyclic: bool = True,
+                 normalize: bool = True, cyclic: bool = True,
                  instrument_weights: tp.Optional[tp.Dict[str, float]] = None,
                  include_combination_tracks: bool = False, **kw):
         super().__init__(unit, **kw)

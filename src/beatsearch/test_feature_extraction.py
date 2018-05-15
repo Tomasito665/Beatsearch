@@ -1,5 +1,7 @@
 import functools
+import itertools
 import typing as tp
+import numpy.testing as npt
 from unittest import TestCase, main
 from unittest.mock import MagicMock, patch, PropertyMock
 from abc import ABCMeta, abstractmethod
@@ -29,13 +31,15 @@ from beatsearch.feature_extraction import (
 )
 
 from beatsearch.feature_extraction import (
-    MultiTrackMonoFeature
+    MultiTrackMonoFeature,
+    PolyphonicMetricalTensionVector,
+    PolyphonicMetricalTensionMagnitude,
 )
 
 # misc
 from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, Unit, TimeSignature
-from beatsearch.test_rhythm import get_mono_rhythm_mock, get_poly_rhythm_mock_with_songo_onsets, get_mocked_track, \
-    set_rhythm_mock_properties
+from beatsearch.test_rhythm import get_mono_rhythm_mock, get_poly_rhythm_mock_with_songo_onsets, \
+    get_poly_rhythm_mock, get_mocked_onsets
 
 
 class TestFeatureExtractor(TestCase):
@@ -454,6 +458,10 @@ class TestMonophonicMetricalTensionVector(TestMonophonicRhythmFeatureExtractorIm
         extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
         self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
 
+    def test_defaults_to_not_normalized(self):
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
+        self.assertFalse(extractor.normalize)
+
     SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF = [0, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3]
 
     @patch.object(TimeSignature, "get_salience_profile", return_value=SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF)
@@ -503,11 +511,22 @@ class TestMonophonicMetricalTensionMagnitude(TestMonophonicRhythmFeatureExtracto
         self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
 
     @patch.object(MonophonicMetricalTensionVector, "__process__")
-    def test_process(self, mock_metrical_tension_vec_process):
+    def test_process_not_normalized(self, mock_metrical_tension_vec_process):
         extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
-        mock_metrical_tension_vec_process.return_value = (0.0, 0.0, 0.0, 3.0, 3.0, 3.0, 2.0, 2.0,
-                                                          2.0, 2.0, 2.0, 2.0, 1.0, 3.0, 3.0, 1.0)
-        expected_vector_magnitude = 8.426149773176359
+        extractor.normalize = False
+        mock_metrical_tension_vec_process.return_value = (0/6, 0/6, 0/6, 6/6, 6/6, 1/6, 2/6, 4/6,
+                                                          4/6, 4/6, 5/6, 1/6, 4/6, 6/6, 0/6, 6/6)
+        expected_vector_magnitude = 2.576604138956718
+        actual_vector_magnitude = extractor.process(self.rhythm)
+        self.assertAlmostEqual(actual_vector_magnitude, expected_vector_magnitude)
+
+    @patch.object(MonophonicMetricalTensionVector, "__process__")
+    def test_process_normalized(self, mock_metrical_tension_vec_process):
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVector
+        extractor.normalize = True
+        mock_metrical_tension_vec_process.return_value = (0/6, 0/6, 0/6, 6/6, 6/6, 1/6, 2/6, 4/6,
+                                                          4/6, 4/6, 5/6, 1/6, 4/6, 6/6, 0/6, 6/6)
+        expected_vector_magnitude = 0.6441510347391795
         actual_vector_magnitude = extractor.process(self.rhythm)
         self.assertAlmostEqual(actual_vector_magnitude, expected_vector_magnitude)
 
@@ -526,7 +545,7 @@ class TestPolyphonicRhythmFeatureExtractorImplementationMixin(TestRhythmFeatureE
     def __init__(self, *args, **kw):
         # noinspection PyArgumentList
         super().__init__(*args, **kw)
-        self.rhythm = get_poly_rhythm_mock_with_songo_onsets(4)  # type: PolyphonicRhythm
+        self.rhythm = get_poly_rhythm_mock_with_songo_onsets()  # type: PolyphonicRhythm
         self.feature_extractor = None  # type: tp.Union[PolyphonicRhythmFeatureExtractor, None]
 
     # noinspection PyPep8Naming
@@ -616,55 +635,38 @@ class TestMultiTrackMonoFeature(TestCase):
         # Let the mono extractor return the raw onsets
         mock_mono_extr_obj.__process__ = lambda fake_track_combi, *_: fake_track_combi.get_onsets()
 
-        resolution = 4
-        duration_in_ticks = 8
-        ts = TimeSignature(4, 4)  # TODO Mock time signature
-        rhythm_mock = MagicMock(spec=PolyphonicRhythm)
+        ###############################
+        # Rhythm mock:                #
+        #   kick:   x---xx--          #
+        #   snare:  --x--xx-          #
+        #                             #
+        # Expected combinations:      #
+        #   [kick]          x---xx--  #
+        #   [snare]         --x--xx-  #
+        #   [kick, snare]   x-x-xxx-  #
+        ###############################
 
-        # Rhythm mock:
-        #   kick:   x---xx--
-        #   snare:  --x--xx-
-        #
-        # Expected combinations:
-        #   [kick]          x---xx--
-        #   [snare]         --x--xx-
-        #   [kick, snare]   x-x-xxx-
+        kck_rhythm_str = "x---xx--"
+        snr_rhythm_str = "--x--xx-"
+        cmb_rhythm_str = "x-x-xxx-"
 
-        kick_track_mock = get_mocked_track("kick", [
-            int(resolution / 4.0 * 0),
-            int(resolution / 4.0 * 4),
-            int(resolution / 4.0 * 5)
-        ], resolution, ts, duration_in_ticks)
+        resolution = 2
+        velocity = 100
 
-        snare_track_mock = get_mocked_track("snare", [
-            int(resolution / 4.0 * 2),
-            int(resolution / 4.0 * 5),
-            int(resolution / 4.0 * 6)
-        ], resolution, ts, duration_in_ticks)
-
-        kick_snare_track_mock = get_mocked_track("kick-snare", [
-            int(resolution / 4.0 * 0),
-            int(resolution / 4.0 * 2),
-            int(resolution / 4.0 * 4),
-            int(resolution / 4.0 * 5),
-            int(resolution / 4.0 * 6)
-        ], resolution, ts, duration_in_ticks)
-
-        tracks = kick_track_mock, snare_track_mock
-        rhythm_mock.get_track_iterator.return_value = iter(tracks)
-        rhythm_mock.get_track_count.return_value = len(tracks)
-        rhythm_mock.get_track_names.return_value = tuple(t.name for t in tracks)
-        rhythm_mock.get_track_by_index = lambda i: kick_track_mock if i == 0 else snare_track_mock
-        set_rhythm_mock_properties(rhythm_mock, resolution, ts, duration_in_ticks)
+        mocked_rhythm, mocked_tracks = get_poly_rhythm_mock(
+            [("kick", kck_rhythm_str, velocity), ("snare", snr_rhythm_str, velocity)], resolution, "x")
+        mocked_kick_track, mocked_snare_track = mocked_tracks
+        assert mocked_kick_track.name == "kick"
+        assert mocked_snare_track.name == "snare"
 
         expected_feature = (
-            ((0,), kick_track_mock.get_onsets()),
-            ((1,), snare_track_mock.get_onsets()),
-            ((0, 1), kick_snare_track_mock.get_onsets())
+            ((0,), mocked_kick_track.get_onsets()),
+            ((1,), mocked_snare_track.get_onsets()),
+            ((0, 1), get_mocked_onsets(cmb_rhythm_str, velocity, "x"))
         )
 
-        actual_feature = mt_mono_feature_extr.process(rhythm_mock)
-        self.assertEqual(actual_feature, expected_feature)
+        actual_feature = mt_mono_feature_extr.process(mocked_rhythm)
+        self.assertSequenceEqual(actual_feature, expected_feature)
 
     def test_mono_extractor_registered_as_auxiliary_extractor(self):
         mock_mono_extr_cls = MagicMock(spec=MonophonicRhythmFeatureExtractor.__class__)
@@ -680,10 +682,298 @@ class TestMultiTrackMonoFeature(TestCase):
         self.assertSequenceEqual(actual_auxiliary_extractors, expected_auxiliary_extractors)
 
 
-# TODO: Add tests for polyphonic syncopation vector
-# TODO: Add tests for polyphonic syncopation vector (Witek)
-# TODO: Add tests for polyphonic tension vector
-# TODO: Add tests for polyphonic tension
+class TestPolyphonicMetricalTensionVector(TestPolyphonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[PolyphonicRhythmFeatureExtractor]:
+        return PolyphonicMetricalTensionVector
+
+    def test_defaults_to_cyclic(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        self.assertTrue(extractor.cyclic)
+
+    def test_defaults_to_equal_upbeats_salience_profile_type(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        self.assertEqual("equal_upbeats", extractor.salience_profile_type)
+
+    def test_defaults_to_not_include_combination_tracks(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        self.assertFalse(extractor.include_combination_tracks)
+
+    def test_defaults_to_not_normalized(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        self.assertFalse(extractor.normalize)
+
+    def test_cyclic_property_propagates_to_mono_extractor(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        with patch("beatsearch.feature_extraction.MonophonicMetricalTensionVector.cyclic",
+                   new_callable=PropertyMock) as prop_mock:
+            extractor.cyclic = "fake-cyclic"
+            prop_mock.assert_called_once_with("fake-cyclic")
+
+    def test_salience_profile_type_property_propagates_to_mono_extractor(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        with patch("beatsearch.feature_extraction.MonophonicMetricalTensionVector.salience_profile_type",
+                   new_callable=PropertyMock) as prop_mock:
+            extractor.salience_profile_type = "fake-salience-profile-type"
+            prop_mock.assert_called_once_with("fake-salience-profile-type")
+
+    def test_normalize_property_propagates_to_mono_extractor(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        with patch("beatsearch.feature_extraction.MonophonicMetricalTensionVector.normalize",
+                   new_callable=PropertyMock) as prop_mock:
+            extractor.normalize = "fake-normalize"
+            prop_mock.assert_called_once_with("fake-normalize")
+
+    N_STEPS = 16
+
+    KCK = "kick"
+    SNR = "snare"
+    HHT = "hht"
+
+    KCK_RHYTHM_STR = ''          'x---x---x---x---'
+    SNR_RHYTHM_STR = ''          '---x---x--x-x---'
+    HHT_RHYTHM_STR = ''          '--x---x---x---x-'
+    KCK_SNR_RHYTHM_STR = ''      'x--xx--xx-x-x---'
+    KCK_HHT_RHYTHM_STR = ''      'x-x-x-x-x-x-x-x-'
+    SNR_HHT_RHYTHM_STR = ''      '--xx--xx--x-x-x-'
+    KCK_SNR_HHT_RHYTHM_STR = ''  'x-xxx-xxx-x-x-x-'
+
+    KCK_TENSION_VEC = (0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    SNR_TENSION_VEC = (1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 2.0, 3.0, 3.0, 3.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0)
+    HHT_TENSION_VEC = (2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0)
+    KCK_SNR_TENSION_VEC = (0.0, 0.0, 0.0, 3.0, 1.0, 1.0, 1.0, 3.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0)
+    KCK_HHT_TENSION_VEC = (0.0, 0.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0)
+    SNR_HHT_TENSION_VEC = (2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 2.0, 3.0, 3.0, 3.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0)
+    KCK_SNR_HHT_TENSION_VEC = (0.0, 0.0, 2.0, 3.0, 1.0, 1.0, 2.0, 3.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0)
+    SEMI_QUAVER_EQUAL_UPBEAT_SALIENCE_PRF = [0, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3, -1, -3, -2, -3]
+
+    def _call_process(self, extractor: PolyphonicMetricalTensionVector):
+        """Calls process on the given polyphonic metrical tension vector extractor, mocking:
+            - :meth:`beatsearch.rhythm.MonophonicRhythm.create.from_monophonic_rhythms`
+            - :meth:`beatsearch.feature_extraction.MonophonicMetricalTensionVector.__process__`
+
+        The former one is mocked so that this test doesn't depend on a well-working rhythm-track merge function. The
+        latter one is mocked so that this test doesn't depend on a well-working monophonic metrical tension vector
+        extractor.
+        """
+
+        res = 4
+        onset_char = "x"
+
+        rhythm, [kck_track, snr_track, hht_track] = get_poly_rhythm_mock([
+            (self.KCK, self.KCK_RHYTHM_STR, 100),
+            (self.SNR, self.SNR_RHYTHM_STR, 100),
+            (self.HHT, self.HHT_RHYTHM_STR, 100)
+        ], res, onset_char)
+
+        kck_snr_track = get_mono_rhythm_mock(self.KCK_SNR_RHYTHM_STR, res, onset_char)
+        kck_hht_track = get_mono_rhythm_mock(self.KCK_HHT_RHYTHM_STR, res, onset_char)
+        snr_hht_track = get_mono_rhythm_mock(self.SNR_HHT_RHYTHM_STR, res, onset_char)
+        kck_snr_hht_track = get_mono_rhythm_mock(self.KCK_SNR_HHT_RHYTHM_STR, res, onset_char)
+
+        tension_vectors_per_track = {
+            kck_track: self.KCK_TENSION_VEC,
+            snr_track: self.SNR_TENSION_VEC,
+            hht_track: self.HHT_TENSION_VEC,
+            kck_hht_track: self.KCK_HHT_TENSION_VEC,
+            kck_snr_track: self.KCK_SNR_TENSION_VEC,
+            snr_hht_track: self.SNR_HHT_TENSION_VEC,
+            kck_snr_hht_track: self.KCK_SNR_HHT_TENSION_VEC
+        }
+
+        # Create fake track-merge function that returns our own manually merged tracks
+        def fake_create_mono_rhythm_from_other_mono_rhythms_func(*other_mono_rhythms):
+            other_mono_rhythms = tuple(other_mono_rhythms)  # type: tp.Tuple[MonophonicRhythm, ...]
+            n_other_mono_rhythms = len(other_mono_rhythms)
+            if n_other_mono_rhythms == 1:
+                return other_mono_rhythms[0]
+            if n_other_mono_rhythms == 3:
+                return kck_snr_hht_track
+            assert n_other_mono_rhythms == 2
+            # noinspection PyTypeChecker
+            return {
+                (kck_track, snr_track): kck_snr_track,
+                (kck_track, hht_track): kck_hht_track,
+                (snr_track, hht_track): snr_hht_track
+            }[other_mono_rhythms]
+
+        # Create fake monophonic metrical tension process function that returns our own manually pre-computed
+        # monophonic metrical tension vectors, given one of the tracks returned by our merge mock function above
+        def fake_mono_tension_process_func(mono_rhythm: MonophonicRhythm, _):  # unused _ is aux_fts
+            onsets = mono_rhythm.get_onsets()
+            try:
+                track = next(t for t in tension_vectors_per_track.keys() if onsets == t.onsets)
+            except StopIteration:
+                assert False, "Unexpected mono rhythm: %s (with onsets: %s)" % (mono_rhythm, str(onsets))
+            return tension_vectors_per_track[track]
+
+        # Actually call process patched with our mock-functions
+        with patch.object(MonophonicMetricalTensionVector, "__process__") as mock_mono_tension_process, \
+                patch.object(MonophonicRhythm.create, "from_monophonic_rhythms") as mock_create_merged_rhythm:
+            mock_create_merged_rhythm.side_effect = fake_create_mono_rhythm_from_other_mono_rhythms_func
+            mock_mono_tension_process.side_effect = fake_mono_tension_process_func
+            process_ret = extractor.process(rhythm)
+
+        return process_ret
+
+    def test_process_not_normalized_without_combination_tracks(self):
+        weights = {self.KCK: 2, self.SNR: 1, self.HHT: 0.5}
+
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        extractor.include_combination_tracks = False
+        extractor.set_instrument_weights(weights)
+        extractor.normalize = False
+        extractor.cyclic = True
+
+        expected_tension_vec = tuple(
+            (weights[self.KCK] * self.KCK_TENSION_VEC[i] +
+             weights[self.SNR] * self.SNR_TENSION_VEC[i] +
+             weights[self.HHT] * self.HHT_TENSION_VEC[i]) for i in range(self.N_STEPS))
+
+        actual_tension_vec = self._call_process(extractor)
+        npt.assert_almost_equal(actual_tension_vec, expected_tension_vec)
+
+    def test_process_normalized_without_combination_tracks(self):
+        weights = {self.KCK: 2, self.SNR: 1, self.HHT: 0.5}
+        weight_normalizer = sum(weights.values())
+
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        extractor.include_combination_tracks = False
+        extractor.set_instrument_weights(weights)
+        extractor.normalize = True
+        extractor.cyclic = True
+
+        expected_tension_vec = tuple(
+            ((weights[self.KCK] * self.KCK_TENSION_VEC[i] / weight_normalizer) +
+             (weights[self.SNR] * self.SNR_TENSION_VEC[i] / weight_normalizer) +
+             (weights[self.HHT] * self.HHT_TENSION_VEC[i]) / weight_normalizer) for i in range(self.N_STEPS))
+
+        actual_tension_vec = self._call_process(extractor)
+        npt.assert_almost_equal(actual_tension_vec, expected_tension_vec)
+
+    def test_process_not_normalized_with_combination_tracks(self):
+        weights = {self.KCK: 2, self.SNR: 1, self.HHT: 0.5}
+
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        extractor.include_combination_tracks = True
+        extractor.set_instrument_weights(weights)
+        extractor.normalize = False
+        extractor.cyclic = True
+
+        expected_tension_vec = tuple(
+            ((weights[self.KCK] * self.KCK_TENSION_VEC[i]) +
+             (weights[self.SNR] * self.SNR_TENSION_VEC[i]) +
+             (weights[self.HHT] * self.HHT_TENSION_VEC[i]) +
+             (weights[self.KCK] * weights[self.SNR] * self.KCK_SNR_TENSION_VEC[i]) +
+             (weights[self.KCK] * weights[self.HHT] * self.KCK_HHT_TENSION_VEC[i]) +
+             (weights[self.SNR] * weights[self.HHT] * self.SNR_HHT_TENSION_VEC[i]) +
+             (weights[self.KCK] * weights[self.SNR] * weights[self.HHT] * self.KCK_SNR_HHT_TENSION_VEC[i]))
+            for i in range(self.N_STEPS))
+
+        actual_tension_vec = self._call_process(extractor)
+        npt.assert_almost_equal(actual_tension_vec, expected_tension_vec)
+
+    def test_process_normalized_with_combination_tracks(self):
+        weights = {self.KCK: 2, self.SNR: 1, self.HHT: 0.5}
+
+        combination_weights = [
+            weights[self.KCK],
+            weights[self.SNR],
+            weights[self.HHT],
+            weights[self.KCK] * weights[self.SNR],
+            weights[self.KCK] * weights[self.HHT],
+            weights[self.SNR] * weights[self.HHT],
+            weights[self.KCK] * weights[self.SNR] * weights[self.HHT]
+        ]
+
+        # Weight normalizer is now the sum of all combination weights
+        w_nrm = sum(combination_weights)
+
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVector
+        extractor.include_combination_tracks = True
+        extractor.set_instrument_weights(weights)
+        extractor.normalize = True
+        extractor.cyclic = True
+
+        expected_tension_vec = tuple(
+            ((weights[self.KCK] * self.KCK_TENSION_VEC[i]) / w_nrm +
+             (weights[self.SNR] * self.SNR_TENSION_VEC[i]) / w_nrm +
+             (weights[self.HHT] * self.HHT_TENSION_VEC[i]) / w_nrm +
+             (weights[self.KCK] * weights[self.SNR] * self.KCK_SNR_TENSION_VEC[i]) / w_nrm +
+             (weights[self.KCK] * weights[self.HHT] * self.KCK_HHT_TENSION_VEC[i]) / w_nrm +
+             (weights[self.SNR] * weights[self.HHT] * self.SNR_HHT_TENSION_VEC[i]) / w_nrm +
+             (weights[self.KCK] * weights[self.SNR] * weights[self.HHT] * self.KCK_SNR_HHT_TENSION_VEC[i]) / w_nrm)
+            for i in range(self.N_STEPS))
+
+        actual_tension_vec = self._call_process(extractor)
+        npt.assert_almost_equal(actual_tension_vec, expected_tension_vec)
+
+
+class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtractorImplementationMixin, TestCase):
+    @staticmethod
+    def get_impl_class() -> tp.Type[PolyphonicRhythmFeatureExtractor]:
+        return PolyphonicMetricalTensionMagnitude
+
+    def test_defaults_to_cyclic(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        self.assertTrue(extractor.cyclic)
+
+    def test_defaults_to_equal_upbeats_salience_profile_type(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        self.assertEqual("equal_upbeats", extractor.salience_profile_type)
+
+    def test_defaults_to_not_include_combination_tracks(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        self.assertFalse(extractor.include_combination_tracks)
+
+    def test_defaults_to_normalized(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        self.assertTrue(extractor.normalize)
+
+    def test_cyclic_property_propagates_to_vector_extractor(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        with patch("beatsearch.feature_extraction.PolyphonicMetricalTensionVector.cyclic",
+                   new_callable=PropertyMock) as prop_mock:
+            extractor.cyclic = "fake-cyclic"
+            prop_mock.assert_called_once_with("fake-cyclic")
+
+    def test_salience_profile_type_property_propagates_to_vector_extractor(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        with patch("beatsearch.feature_extraction.PolyphonicMetricalTensionVector.salience_profile_type",
+                   new_callable=PropertyMock) as prop_mock:
+            extractor.salience_profile_type = "fake-salience-profile-type"
+            prop_mock.assert_called_once_with("fake-salience-profile-type")
+
+    def test_normalize_property_propagates_to_vector_extractor(self):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        with patch("beatsearch.feature_extraction.PolyphonicMetricalTensionVector.normalize",
+                   new_callable=PropertyMock) as prop_mock:
+            extractor.normalize = "fake-normalize"
+            prop_mock.assert_called_once_with("fake-normalize")
+
+    @patch.object(PolyphonicMetricalTensionVector, "__process__")
+    def test_process_not_normalized(self, mock_metrical_tension_vec_process):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor.normalize = False
+        mock_metrical_tension_vec_process.return_value = (0/6, 0/6, 0/6, 6/6, 6/6, 1/6, 2/6, 4/6,
+                                                          4/6, 4/6, 5/6, 1/6, 4/6, 6/6, 0/6, 6/6)
+        expected_vector_magnitude = 2.576604138956718
+        actual_vector_magnitude = extractor.process(self.rhythm)
+        self.assertAlmostEqual(actual_vector_magnitude, expected_vector_magnitude)
+
+    @patch.object(PolyphonicMetricalTensionVector, "__process__")
+    def test_process_normalized(self, mock_metrical_tension_vec_process):
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor.normalize = True
+        mock_metrical_tension_vec_process.return_value = (0/6, 0/6, 0/6, 6/6, 6/6, 1/6, 2/6, 4/6,
+                                                          4/6, 4/6, 5/6, 1/6, 4/6, 6/6, 0/6, 6/6)
+        expected_vector_magnitude = 0.6441510347391795
+        actual_vector_magnitude = extractor.process(self.rhythm)
+        self.assertAlmostEqual(actual_vector_magnitude, expected_vector_magnitude)
+
+
+# TODO: Add tests for PolyphonicSyncopationVector
+# TODO: Add tests for PolyphonicSyncopationVectorWitek
 
 
 if __name__ == "__main__":

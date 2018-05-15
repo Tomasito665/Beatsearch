@@ -575,9 +575,10 @@ class InstrumentWeightedMixin(object):
         except AttributeError:
             return MappingProxyType({})
 
-    def get_instrument_weights_as_tuple(self):
+    def get_instrument_weight_items(self) -> tp.Tuple[tp.Tuple[str, float], ...]:
         """
-        Returns the instrument weights as a tuple containing the instrument/weight information.
+        Returns the instrument weights as a tuple containing instrument/weight items. The instrument weight information
+        returned by this method is immutable and may therefore be used as a feature factor.
 
         :return: tuple containing (instrument, weight) tuples
         """
@@ -585,13 +586,15 @@ class InstrumentWeightedMixin(object):
         instrument_weights = self.get_instrument_weights()
         return tuple(instrument_weights.items())
 
-    def get_normalized_weights(self, instruments: tp.Sequence[str]) -> tp.Tuple[float]:
+    def get_weights_of_given_instruments(self, instruments: tp.Sequence[str], normalize: bool = False) -> tp.Tuple[float]:
         """
-        Returns the weights of the given instruments as a list, normalized, so that the combined weights add up to one.
-        This method will assign default weights to instruments for which no weight is known.
+        Returns the weights of the given instruments as a tuple. Unknown instruments are given default weights. The
+        default weight is the original total weight divided by the number of instruments or 1.0, if there haven't been
+        assigned any instrument weights yet. When normalize is set to True, the weights will sum up to 1.0.
 
         :param instruments: instrument names as a sequence
-        :return: iterator over
+        :param normalize: if set to True, the returned weights will sum up to 1.0
+        :return: tuple containing the weights of the given instruments
         """
 
         n_instruments = len(instruments)
@@ -611,6 +614,9 @@ class InstrumentWeightedMixin(object):
         for instrument in instruments:
             instr_weight = known_weights.get(instrument, default_weight)
             weight_list.append(instr_weight)
+
+        if not normalize:
+            return tuple(weight_list)
 
         summed_weight_out = sum(weight_list)
 
