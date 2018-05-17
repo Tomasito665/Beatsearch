@@ -6,12 +6,12 @@ import logging
 import itertools
 import numpy as np
 import typing as tp
-from collections import defaultdict
+from collections import defaultdict, deque
 from abc import ABCMeta, abstractmethod
 from beatsearch.utils import QuantizableMixin, minimize_term_count, TupleView, iterable_to_str, zip_equal, \
     InstrumentWeightedMixin, sequence_product
 from beatsearch.rhythm import Rhythm, MonophonicRhythm, PolyphonicRhythm, \
-    Unit, UnitType, parse_unit_argument, convert_tick
+    Unit, UnitType, parse_unit_argument, convert_tick, TimeSignature
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1944,83 +1944,93 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
         then the pair (N, Ndi) is said to constitute a polyphonic syncopation.
 
     This definition is used to find the syncopations. Then, the syncopation strengths are computed with this
-    formula:
+    formula::
 
         S = Ndi - N + I
 
-    where S is the degree of syncopation, Ndi is the metrical weight of the note succeeding the syncopated note, N
+    where S is the degree of syncopation, Ndi is the metrical weight of the note(s) succeeding the syncopated note, N
     is the metrical weight of the syncopated note and I is the instrumentation weight. The instrumentation weight
     depends on the relation of the instruments involved in the syncopation. This relation depends on two factors:
 
+        - the type of instrument that is syncopated
         - the number of instruments involved in the syncopation
-        - the type of instruments involved in the syncopation
 
-    As there is no formula given by Witek for how to compute this value, the computation of this value is up to the
-    owner of this feature extractor. The function to compute the weight can be set through the
-    set_instrumentation_weight_function method and should be a callable receiving two arguments:
-
-        - the names of the tracks (instruments) that play a syncopated note
-        - the names of the tracks (instruments) that the note is syncopated against (empty if syncopated against a
-          rest)
+    As there is no formula given by Witek for how to compute this value, the computation of this value is up to the user
+    of this feature extractor. The function to compute the weight is set through the `instrumentation_weight_function`
+    property. It should be a callable receiving two positional arguments: ``instrument`` and ``n_streams``. See :meth:`
+    beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek.instrumentation_weight_function` for more info.
 
     The syncopations are returned as a sequence of three-element tuples containing:
+
         - the degree of syncopation (syncopation strength)
-        - position of the syncopated note(s)
-        - position of the note(s)/rest(s) against which the note(s) are syncopated
+        - position of the syncopated note
+        - position of the note(s)/rest(s) against which the note is syncopated
 
-    The syncopations are returned (position, syncopation strength) tuples.
+    .. note::
 
-    NOTE: the formula in the Witek's work is different: S = N - Ndi + I. I suspect that it is a typo, as examples
-    in the same work show that the formula, S = Ndi - N + I, is used.
+       The formula in Witek's work is different. She uses `S = N - Ndi + I`. I suspect that that is a typo, as examples
+       in the same work show that the formula `S = Ndi - N + I` is used instead. This feature extractor uses the latter
+       one.
     """
 
     __tick_based_computation_support__ = False
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.get_instrumentation_weight_function())
+    __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.instrumentation_weight_function)
 
-    # noinspection PyUnusedLocal
-    @staticmethod
-    def default_instr_weight_function(
-            syncopated_instruments: tp.Set[str],
-            other_instruments: tp.Set[str]
-    ) -> int:
-        """The default instrumentation weight function"""
-        n_other_instruments = len(other_instruments)
-        return min(3 - n_other_instruments, 0)
+    _InstrWFuncType = tp.Callable[[str, int], tp.Union[int, float]]  # Type hinting for instrumentation weight functions
+    _mt_note_vector: tp.Union[NoteVector]  # Enable type hinting for MultiTrackMonoFeature<NoteVector> aux extractor
 
-    InstrumentationWeightFunctionType = tp.Optional[tp.Callable[[tp.Set[str], tp.Set[str]], tp.Union[int, float]]]
-    _mt_note_vector: tp.Union[NoteVector]  # Enable type hinting for MultiTrackMonoFeature<NoteVector>
+    DEFAULT_INSTRUMENTATION_W_FUNC = lambda instrument, n_streams: min(4 - n_streams, 0)  # type: _InstrWFuncType
+    """The default instrumentation weight function ignores the syncopated instrument. It only uses the number of 
+    instruments involved (n_streams). It returns::
+    
+        3 if syncopated against a rest (n_streams=1)
+        2 if syncopated against one other instrument (n_streams=2)
+        1 if syncopated against two other instruments (n_streams=3)
+        0 if syncopated against three or more other instruments (n_streams>=4)
+    
+    """
 
-    def __init__(self, unit: UnitType = _DEFAULT_UNIT, salience_profile_type: str = "equal_upbeats",
-                 instrumentation_weight_function: InstrumentationWeightFunctionType = None, **kw):
+    def __init__(self, unit: UnitType = _DEFAULT_UNIT,
+                 instrumentation_weight_function: _InstrWFuncType = DEFAULT_INSTRUMENTATION_W_FUNC,
+                 salience_profile_type: str = "equal_upbeats", keep_twins: bool = False, **kw):
         super().__init__(unit, **kw)
-        self._mt_note_vector = MultiTrackMonoFeature(NoteVector, aux_to=self)
-        self._f_get_instrumentation_weight = None           # type: tp.Optional[self.InstrumentationWeightFunctionType]
-        self.salience_profile_type = salience_profile_type  # type: str
-        self.set_instrumentation_weight_function(instrumentation_weight_function)
+        self._mt_note_vector = MultiTrackMonoFeature(NoteVector, tied_notes=False, aux_to=self)
+
+        self._f_get_instrumentation_weight = None  # type: tp.Optional[self._InstrWFuncType]
+        self._salience_profile_type = None         # type: str
+        self._keep_twins = None                    # type: bool
+
+        self.salience_profile_type = salience_profile_type
+        self.instrumentation_weight_function = instrumentation_weight_function
+        self.keep_twins = keep_twins
 
     def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
         note_vectors = aux_fts[0]
-
         if not note_vectors:
             return tuple()
 
+        keep_twins = self.keep_twins
+        n_instruments = rhythm.get_track_count()
         instrument_names = rhythm.get_track_names()
         time_signature = rhythm.get_time_signature()
         salience_profile = time_signature.get_salience_profile(self.unit, kind=self.salience_profile_type)
-        get_instrumentation_weight = self._f_get_instrumentation_weight or self.default_instr_weight_function
+        get_instrumentation_weight = self._f_get_instrumentation_weight or (lambda *_: 0)
 
         # A dictionary containing (instrument_index, event) tuples by event position
         instr_event_pairs_by_position = defaultdict(lambda: set())
         for instr_i, events in enumerate(note_vectors):
-            # NoteVector with ret_positions set to True adds event position as 3rd element (= e[2])
-            # NoteVector returns the position
+            # NoteVector returns the event position as the 3rd element (= e[2])
             for e in events:
                 instr_event_pairs_by_position[e[2]].add((instr_i, e))
 
         # Positions that contain an event (either a rest or a note) in ascending order
         dirty_positions = sorted(instr_event_pairs_by_position.keys())
         assert dirty_positions[0] == 0, "first step should always contain an event (either a rest or a note)"
+
+        # We keep the syncopations per position and then return either all or just the heaviest one, depending on
+        # self.keep_twins
+        twin_syncopations = deque(maxlen=n_instruments)
 
         # Iterate over the positions that contain events
         for i_position, curr_step in enumerate(dirty_positions):
@@ -2035,34 +2045,105 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
             curr_instr_event_pairs = instr_event_pairs_by_position[curr_step]
             next_instr_event_pairs = instr_event_pairs_by_position[next_step]
 
-            curr_sounding_instruments = set(inst for inst, evt in curr_instr_event_pairs if evt[0] == NoteVector.NOTE)
-            next_sounding_instruments = set(inst for inst, evt in next_instr_event_pairs if evt[0] == NoteVector.NOTE)
+            curr_sounding_instruments = set(instr for instr, evt in curr_instr_event_pairs if evt[0] == NoteVector.NOTE)
+            next_sounding_instruments = set(instr for instr, evt in next_instr_event_pairs if evt[0] == NoteVector.NOTE)
 
-            if len(curr_sounding_instruments) < 0:
+            if len(curr_sounding_instruments) == 0:
                 continue
 
-            # Detect a syncopation if there is at least one instrument that plays a sounding note on the current
-            # position and a rest (or a tied note) on the next position
-            if any(inst not in next_sounding_instruments for inst in curr_sounding_instruments):
-                curr_sounding_instrument_names = set(instrument_names[i] for i in curr_sounding_instruments)
-                next_sounding_instrument_names = set(instrument_names[i] for i in next_sounding_instruments)
-                instrumentation_weight = get_instrumentation_weight(
-                    curr_sounding_instrument_names, next_sounding_instrument_names)
+            for curr_instr, curr_instr_name in ((i, instrument_names[i]) for i in curr_sounding_instruments):
+                # If the current instrument also plays at the next position, it is not considered a syncopation
+                if curr_instr in next_sounding_instruments:
+                    continue
+
+                # The number of streams is the number of instruments involved in the syncopation, which is the
+                # syncopated instrument plus the closing instruments
+                n_streams = 1 + len(next_sounding_instruments)
+
+                instrumentation_weight = get_instrumentation_weight(curr_instr_name, n_streams)
                 syncopation_degree = next_metrical_weight - curr_metrical_weight + instrumentation_weight
-                yield syncopation_degree, curr_step, next_step
+                syncopation = (syncopation_degree, curr_step, next_step)
+                twin_syncopations.append(syncopation)
+
+            if keep_twins:
+                while len(twin_syncopations) > 0:
+                    # Yield twins in FIFO order (because we append using append, not appendleft)
+                    yield twin_syncopations.popleft()
+            elif len(twin_syncopations) != 0:
+                # Yield the heaviest syncopation (sync[0] = syncopation degree) if not keeping twins
+                yield max(twin_syncopations, key=lambda sync: sync[0])
+                twin_syncopations.clear()
 
     ##############
     # Properties #
     ##############
 
-    def set_instrumentation_weight_function(self, func: tp.Union[InstrumentationWeightFunctionType, None]):
-        if func and not callable(func):
-            raise TypeError
+    @property
+    def instrumentation_weight_function(self) -> tp.Optional[_InstrWFuncType]:
+        """The function used to determine the instrumentation weight of a particular syncopation. This function
+        receives two positional parameters.
 
-        self._f_get_instrumentation_weight = func or None
+            - ``instrument`` The name of the syncopated instrument, which is defined as the name of the
+              track. See :meth:`beatsearch.rhythm.Track.get_name`.
 
-    def get_instrumentation_weight_function(self) -> tp.Union[InstrumentationWeightFunctionType, None]:
+            - ``n_streams`` The number of instruments involved in the syncopation. If ``N`` is the number of
+              instruments in a particular rhythm, ``n_streams`` will range from 1 (syncopation against a rest) up to
+              ``N`` (syncopation against all other instruments).
+
+        """
+
         return self._f_get_instrumentation_weight
+
+    @instrumentation_weight_function.setter
+    def instrumentation_weight_function(self, func: tp.Optional[_InstrWFuncType]):
+        if not func:
+            self._f_get_instrumentation_weight = None
+            return
+        if not callable(func):
+            raise TypeError("Expected a callable but got a '%s' instead" % type(func))
+        self._f_get_instrumentation_weight = func
+
+    @property
+    def salience_profile_type(self) -> str:
+        """The kind of salience profile used to determine the weights of the notes/rests. This must be one of:
+        `['hierarchical', 'equal_upbeats' (=default), 'equal_beats'].`. See :meth:`beatsearch.rhythm.TimeSignature.
+        get_salience_profile` for more info.
+        """
+
+        return self._salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        salience_profile_type = str(salience_profile_type)
+        TimeSignature.check_salience_profile_type(salience_profile_type)
+        self._salience_profile_type = salience_profile_type
+
+    @property
+    def keep_twins(self) -> bool:
+        """
+        Twin-syncopations are syncopations which start at the same time (or position). When this property is set to
+        True, twin-syncopations will be kept, instead of just the heaviest one. As a result, the extractor will yield
+        multiple syncopations on the same position, which is not the case if keep_twins is set to False.
+
+        Given a sequence of syncopations, the next statement will:
+
+            - If ``keep_twins = True``, sometimes evaluate to True, sometimes to False.
+            - If ``keep_twins = False``, always evaluate to True.
+
+        ::
+
+            all(s[1] != other_s[1]
+                for s in syncopations
+                for other_s in syncopations
+                if s is not other_s)
+
+        """
+
+        return self._keep_twins
+
+    @keep_twins.setter
+    def keep_twins(self, keep_twins: bool):
+        self._keep_twins = bool(keep_twins)
 
 
 class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):

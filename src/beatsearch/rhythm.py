@@ -357,6 +357,23 @@ class TimeSignature(object):
         divisions.extend(itertools.repeat(2, n_beat_divisions))
         return tuple(divisions)
 
+    @staticmethod
+    def check_salience_profile_type(salience_profile_type: str):
+        """
+        Checks if the given salience profile type exists. If it does, it returns True. Otherwise, a ValueError is raised
+        with a message telling that the given salience profile type is unknown and listing the available types.
+
+        :param salience_profile_type: salience profile type to check
+        :return: True, always
+        :raises: ValueError if given salience profile type is unknown
+        """
+
+        available_salience_types = ("hierarchical", "equal_upbeats", "equal_beats")
+        if salience_profile_type not in available_salience_types:
+            raise ValueError("Unknown salience profile type: %s, choose between %s" %
+                             (salience_profile_type, list(available_salience_types)))
+        return True
+
     @parse_unit_argument
     def get_salience_profile(self, unit: UnitType = Unit.EIGHTH, kind: str = "hierarchical", root_weight: int = 0):
         """Returns the metrical weights for a full measure of this time signature
