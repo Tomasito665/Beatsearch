@@ -51,7 +51,7 @@ Monophonic Feature Extractors
    :members:
 .. autoclass:: beatsearch.feature_extraction.SyncopatedOnsetRatio
    :members:
-.. autoclass:: beatsearch.feature_extraction.MeanSyncopationStrength
+.. autoclass:: beatsearch.feature_extraction.MeanMonophonicSyncopationStrength
    :members:
 .. autoclass:: beatsearch.feature_extraction.MonophonicMetricalTensionVector
    :members:
@@ -77,6 +77,10 @@ Polyphonic Feature Extractors
 .. autoclass:: beatsearch.feature_extraction.PolyphonicSyncopationVector
    :members:
 .. autoclass:: beatsearch.feature_extraction.DistantPolyphonicSyncopationVector
+   :members:
+.. autoclass:: beatsearch.feature_extraction.MeanPolyphonicSyncopationStrength
+   :members:
+.. autoclass:: beatsearch.feature_extraction.MeanDistantPolyphonicSyncopationStrength
    :members:
 
 

@@ -1178,7 +1178,7 @@ class SyncopatedOnsetRatio(MonophonicRhythmFeatureExtractorBase):
         self._ret_fraction = bool(ret_fraction)
 
 
-class MeanSyncopationStrength(MonophonicRhythmFeatureExtractorBase):
+class MeanMonophonicSyncopationStrength(MonophonicRhythmFeatureExtractorBase):
     """
     Computes the average syncopation strength per step. The step size depends on the unit (see set_unit). The
     syncopations are computed with MonophonicSyncopationVector.
@@ -2168,6 +2168,31 @@ class DistantPolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
         self._only_uninterrupted_sync = only_uninterrupted_sync
 
 
+# TODO Implement not as a subclass of PolyphonicSyncopationVector
+class MeanPolyphonicSyncopationStrength(PolyphonicSyncopationVector):
+    """Returns the quotient of the sum of all the weights of all the polyphonic syncopations and the number of steps.
+    The polyphonic syncopations are computed with :class:`beatsearch.feature_extraction.PolyphonicSyncopationVector`."""
+
+    def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
+        poly_sync_vector = super().__process__(rhythm, aux_fts)
+        total_poly_sync = sum(s[0] for s in poly_sync_vector)
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+        return total_poly_sync / float(n_steps)
+
+
+# TODO Implement not as a subclass of DistantPolyphonicSyncopationVector
+class MeanDistantPolyphonicSyncopationStrength(DistantPolyphonicSyncopationVector):
+    """Returns the quotient of the sum of all the weights of all the polyphonic syncopations and the number of steps.
+    The polyphonic syncopations are computed with :class:`beatsearch.feature_extraction.
+    DistantPolyphonicSyncopationVector`."""
+
+    def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
+        poly_sync_vector = super().__process__(rhythm, aux_fts)
+        total_poly_sync = sum(s[0] for s in poly_sync_vector)
+        n_steps = rhythm.get_duration(self.unit, ceil=True)
+        return total_poly_sync / float(n_steps)
+
+
 class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):
     """
     Computes the weighted monophonic metrical tension vector for each track (or each track combination if
@@ -2357,10 +2382,11 @@ __all__ = [
     # Monophonic rhythm feature extractor implementations
     'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'MonophonicSyncopationVector', 'SyncopatedOnsetRatio',
-    'MeanSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector', 'MonophonicVariabilityVector',
-    'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
+    'MeanMonophonicSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector',
+    'MonophonicVariabilityVector', 'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
 
     # Polyphonic rhythm feature extractor implementations
-    'MultiTrackMonoFeature', 'DistantPolyphonicSyncopationVector', 'PolyphonicSyncopationVector',
-    'PolyphonicMetricalTensionVector', 'PolyphonicMetricalTensionMagnitude'
+    'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'DistantPolyphonicSyncopationVector',
+    'MeanPolyphonicSyncopationStrength', 'MeanDistantPolyphonicSyncopationStrength', 'PolyphonicMetricalTensionVector',
+    'PolyphonicMetricalTensionMagnitude'
 ]

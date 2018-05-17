@@ -20,7 +20,7 @@ from beatsearch.feature_extraction import (
     MonophonicVariabilityVector,
     MonophonicSyncopationVector,
     SyncopatedOnsetRatio,
-    MeanSyncopationStrength,
+    MeanMonophonicSyncopationStrength,
     MonophonicMetricalTensionVector,
     MonophonicMetricalTensionMagnitude,
     IOIVector,
@@ -399,10 +399,10 @@ class TestSyncopatedOnsetRatio(TestMonophonicRhythmFeatureExtractorImplementatio
         self.assertAlmostEqual(actual_ratio, expected_ratio)
 
 
-class TestMeanSyncopationStrength(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+class TestMeanMonophonicSyncopationStrength(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
-        return MeanSyncopationStrength
+        return MeanMonophonicSyncopationStrength
 
     @patch.object(MonophonicSyncopationVector, "__process__")
     def test_process(self, mock_syncopation_vector_process):
@@ -1027,6 +1027,8 @@ class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtracto
 
 # TODO: Add tests for DistantPolyphonicSyncopationVector
 # TODO: Add tests for PolyphonicSyncopationVector
+# TODO: Add tests for MeanPolyphonicSyncopationStrength
+# TODO: Add tests for MeanDistantPolyphonicSyncopationStrength
 
 
 if __name__ == "__main__":
