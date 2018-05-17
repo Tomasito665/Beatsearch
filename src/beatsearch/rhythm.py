@@ -916,7 +916,7 @@ class RhythmFactory(object, metaclass=ABCMeta):
 
     @staticmethod
     @parse_unit_argument
-    def __check_and_return_resolution__(unit: UnitType):
+    def __unit2res__(unit: UnitType):
         resolution = Unit.QUARTER.convert(1, unit, True)
         if resolution <= 0:
             raise ValueError("Unit must be equal or smaller than %s" % str(Unit.QUARTER))
@@ -1168,9 +1168,9 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         def from_string(
                 cls,
                 onset_string: str,
+                unit: UnitType = Unit.SIXTEENTH,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                unit: UnitType = Unit.SIXTEENTH,
                 onset_character="x",
                 **kwargs):  # type: () -> MonophonicRhythmImpl
             """
@@ -1179,10 +1179,10 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
             The length of the onset string will determine the duration of the rhythm.
 
             :param onset_string:   onset string where each onset character will result in an onset
-            :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
-            :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
             :param unit:           step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or "eighth")
                                    one character will represent one eighth note)
+            :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
+            :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
             :param onset_character: onset character (see onset_string)
             :param kwargs:         unused
 
@@ -1200,25 +1200,25 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
         def from_binary_vector(
                 cls,
                 binary_vector: tp.Sequence[tp.Any],
+                unit: UnitType = Unit.SIXTEENTH,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                unit: UnitType = Unit.SIXTEENTH,
                 **kwargs):  # type: () -> MonophonicRhythmImpl
             """
             Creates a new monophonic rhythm, given a binary chain (iterable). Each element in the iterable represents
             one tick. If the element is True, that will result in an onset, e.g. [1, 0, 1, 0, 1, 1, 1, 0].
 
             :param binary_vector:  sequence where each true-evaluated element will result in an onset
-            :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
-            :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
             :param unit:           step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or "eighth")
                                    one element in the binary vector will represent one eighth note)
+            :param time_signature: time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature obj
+            :param velocity:       the velocity of the onsets as an integer, which will be the same for all onsets
             :param kwargs:         unused
 
             :return: monophonic rhythm object
             """
 
-            resolution = cls.__check_and_return_resolution__(unit)
+            resolution = cls.__unit2res__(unit)
             return MonophonicRhythmImpl(
                 onsets=cls.__binary_vector_to_onsets__(binary_vector, velocity),
                 duration_in_ticks=len(binary_vector), resolution=resolution,
@@ -1657,9 +1657,9 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         def from_string(
                 cls,
                 input_string: str,
+                unit: UnitType = Unit.SIXTEENTH,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                unit: UnitType = Unit.SIXTEENTH,
                 onset_character: str = "x",
                 *_,
                 track_separator_char: str = "\n",
@@ -1685,11 +1685,11 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
                                          the binary onset vector with the given name separator character. The binary
                                          onset vector is a string whose length determines the duration of the rhythm.
                                          Each onset character in the binary onset vector will result in an onset.
+            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
+                                         "eighth") one element in the binary vector will represent one eighth note)
             :param time_signature:       time signature of the rhythm as a (numerator, denominator) tuple or a
                                          TimeSignature object
             :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
-            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
-                                         "eighth") one element in the binary vector will represent one eighth note)
             :param onset_character:      onset character (see onset_string)
             :param track_separator_char: see input_string
             :param name_separator_char:  see input_string
@@ -1718,9 +1718,9 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
         def from_binary_vector(
                 cls,
                 binary_vector_tracks: tp.Sequence[tp.Sequence[tp.Any]],
+                unit: UnitType = Unit.SIXTEENTH,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                unit: UnitType = Unit.SIXTEENTH,
                 *_, track_names: tp.Sequence[str] = None,
                 **kwargs):  # type: () -> PolyphonicRhythmImpl
             """
@@ -1728,16 +1728,16 @@ class PolyphonicRhythm(Rhythm, metaclass=ABCMeta):
             are optional and are given to the track_names parameter.
 
             :param binary_vector_tracks: sequence holding one binary onset vector per track
-            :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
-            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
             :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
                                          "eighth") one character will represent one eighth note)
+            :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
+            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
             :param track_names:          names of the tracks
             :param kwargs:               unused
             :return: polyphonic rhythm object
             """
 
-            resolution = cls.__check_and_return_resolution__(unit)
+            resolution = cls.__unit2res__(unit)
             n_tracks = len(binary_vector_tracks)
             track_names = track_names or cls.__track_name_generator(n_tracks)
 
@@ -2428,9 +2428,9 @@ class RhythmLoop(PolyphonicRhythmImpl):
         def from_string(
                 cls,
                 input_string: str,
+                unit: UnitType = Unit.SIXTEENTH,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = (4, 4),
                 velocity: int = 100,
-                unit: UnitType = Unit.SIXTEENTH,
                 onset_character: str = "x",
                 *_,
                 title_underline_character: str = "=",
@@ -2467,11 +2467,11 @@ class RhythmLoop(PolyphonicRhythmImpl):
                                          determines the duration of the rhythm. Each onset character in the binary onset
                                          will result in an onset. Drum loops must have a duration of a multiple of one
                                          measure.
+            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
+                                         "eighth") one element in the binary vector will represent one eighth note)
             :param time_signature:       time signature of the rhythm as a (numerator, denominator) tuple or a
                                          TimeSignature object, defaults to (4, 4)
             :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
-            :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
-                                         "eighth") one element in the binary vector will represent one eighth note)
             :param onset_character:      onset character (see onset_string)
             :param title_underline_character: the title must be underlined with this character (defaults to '=')
             :param newline_character:    newline character (defaults to '\n')
@@ -2509,9 +2509,9 @@ class RhythmLoop(PolyphonicRhythmImpl):
         def from_binary_vector(
                 cls,
                 binary_vector_tracks: tp.Sequence[tp.Sequence[tp.Any]],
+                unit: UnitType = Unit.SIXTEENTH,
                 time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
                 velocity: int = 100,
-                unit: UnitType = Unit.SIXTEENTH,
                 *_, track_names: tp.Sequence[str] = None, title: str = "untitled",
                 **kwargs):  # type: () -> PolyphonicRhythmImpl
             """
@@ -2519,10 +2519,10 @@ class RhythmLoop(PolyphonicRhythmImpl):
             are optional and are given to the track_names parameter.
 
             :param binary_vector_tracks: sequence holding one binary onset vector per track
-            :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
-            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
             :param unit:                 step size as a musical unit (e.g., if unit is set to Unit.EIGHTH (or 1/8 or
                                          "eighth") one character will represent one eighth note)
+            :param time_signature:       time signature of the rhythm as a (num, den) tuple or TimeSignature object
+            :param velocity:             the velocity of the onsets as an integer, which will be the same for all onsets
             :param track_names:          names of the tracks
             :param title:                rhythm loop title
             :param kwargs:               unused

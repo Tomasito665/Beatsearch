@@ -1338,7 +1338,8 @@ class TestMonophonicRhythmFactory(TestCase):
 
     @patch.object(MonophonicRhythm.create, "from_binary_vector")
     def test_from_string(self, mock_from_binary_chain):
-        MonophonicRhythm.create.from_string("O..O..OO", (7, 8), onset_character="O", velocity=20, unit="eighth")
+        MonophonicRhythm.create.from_string("O..O..OO", "eighth", time_signature=(7, 8),
+                                            onset_character="O", velocity=20)
         mock_from_binary_chain.assert_called_once_with(
             binary_vector=(True, False, False, True, False, False, True, True),
             time_signature=(7, 8),
@@ -1441,15 +1442,18 @@ class TestPolyphonicRhythmFactory(TestCase):
 
     @patch.object(PolyphonicRhythm.create, "from_binary_vector")
     def test_from_string(self, mock_from_binary_chain):
-        kwargs = dict(time_signature=(4, 4), velocity=123, unit="eighth",
-                      onset_character="O", track_separator_char="\n", name_separator_char="=")
-
-        PolyphonicRhythm.create.from_string(textwrap.dedent("""
+        args = (textwrap.dedent("""
             kick   =  O---O-O-
             snare  =  -OO--O-O
             hi-hat =  OO-OO-OO
-        """), **kwargs)
+        """), "quaver")
 
+        kwargs = dict(
+            time_signature=(4, 4), velocity=123, onset_character="O",
+            track_separator_char="\n", name_separator_char="="
+        )
+
+        PolyphonicRhythm.create.from_string(*args, **kwargs)
         track_names = ["kick", "snare", "hi-hat"]
 
         binary_vectors = [
@@ -1460,7 +1464,7 @@ class TestPolyphonicRhythmFactory(TestCase):
 
         mock_from_binary_chain.assert_called_once_with(
             binary_vector_tracks=binary_vectors, track_names=track_names,
-            time_signature=(4, 4), velocity=123, unit="eighth")
+            time_signature=(4, 4), velocity=123, unit="quaver")
 
 
 # TODO Add test for rhythm loop factory
