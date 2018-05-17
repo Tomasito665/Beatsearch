@@ -75,4 +75,4 @@ Polyphonic rhythm features are based on polyphonic rhythm properties and are imp
 * :class:`beatsearch.feature_extraction.PolyphonicMetricalTensionVector`
 * :class:`beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude`
 * :class:`beatsearch.feature_extraction.PolyphonicSyncopationVector`
-* :class:`beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek`
+* :class:`beatsearch.feature_extraction.DistantPolyphonicSyncopationVector`

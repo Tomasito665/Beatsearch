@@ -12,8 +12,8 @@ from abc import ABCMeta, abstractmethod
 from itertools import cycle, repeat
 from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
-    RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, PolyphonicSyncopationVector, \
-    PolyphonicSyncopationVectorWitek, MonophonicMetricalTensionVector, PolyphonicTensionVector, MonophonicVariabilityVector
+    RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, DistantPolyphonicSyncopationVector, \
+    PolyphonicSyncopationVector, MonophonicMetricalTensionVector, PolyphonicTensionVector, MonophonicVariabilityVector
 from beatsearch.utils import QuantizableMixin, generate_abbreviations, Rectangle2D, Point2D, find_all_concrete_subclasses
 
 # make room for the labels
@@ -864,7 +864,7 @@ class PolyphonicSyncopationVectorWitekGraph(PolyphonicSyncopationVectorGraphBase
     PLOT_TYPE_NAME = "Syncopation graph (Witek)"
 
     def __init__(self, unit: UnitType = Unit.EIGHTH):
-        self._extractor = PolyphonicSyncopationVectorWitek(unit)
+        self._extractor = PolyphonicSyncopationVector(unit)
         super().__init__(unit)
 
     @property
@@ -875,7 +875,7 @@ class PolyphonicSyncopationVectorWitekGraph(PolyphonicSyncopationVectorGraphBase
     def salience_profile_type(self, salience_profile_type: str):
         self._extractor.salience_profile_type = salience_profile_type
 
-    def __get_sync_extractor__(self) -> PolyphonicSyncopationVectorWitek:
+    def __get_sync_extractor__(self) -> PolyphonicSyncopationVector:
         return self._extractor
 
     @classmethod
@@ -887,7 +887,7 @@ class PolyphonicSyncopationVectorGraph(PolyphonicSyncopationVectorGraphBase):
     PLOT_TYPE_NAME = "Syncopation graph"
 
     def __init__(self, unit: UnitType = Unit.EIGHTH):
-        self._extractor = PolyphonicSyncopationVector(unit)
+        self._extractor = DistantPolyphonicSyncopationVector(unit)
         super().__init__(unit)
 
     @property
@@ -922,7 +922,7 @@ class PolyphonicSyncopationVectorGraph(PolyphonicSyncopationVectorGraphBase):
     def only_uninterrupted_syncopations(self, only_uninterrupted_syncopations: bool):
         self._extractor.only_uninterrupted_syncopations = only_uninterrupted_syncopations
 
-    def __get_sync_extractor__(self) -> PolyphonicSyncopationVector:
+    def __get_sync_extractor__(self) -> DistantPolyphonicSyncopationVector:
         return self._extractor
 
     @classmethod

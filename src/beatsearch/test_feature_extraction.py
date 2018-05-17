@@ -32,7 +32,7 @@ from beatsearch.feature_extraction import (
     MultiTrackMonoFeature,
     PolyphonicMetricalTensionVector,
     PolyphonicMetricalTensionMagnitude,
-    PolyphonicSyncopationVector,
+    DistantPolyphonicSyncopationVector,
 )
 
 # misc
@@ -1025,8 +1025,8 @@ class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtracto
         self.assertAlmostEqual(actual_vector_magnitude, expected_vector_magnitude)
 
 
+# TODO: Add tests for DistantPolyphonicSyncopationVector
 # TODO: Add tests for PolyphonicSyncopationVector
-# TODO: Add tests for PolyphonicSyncopationVectorWitek
 
 
 if __name__ == "__main__":

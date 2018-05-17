@@ -1678,260 +1678,6 @@ class MultiTrackMonoFeature(PolyphonicRhythmFeatureExtractor):
 
 class PolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
     """
-    Finds the polyphonic syncopations and their syncopation strengths. This is an adaption to the method proposed by
-    M. Witek et al in their worked titled "Syncopation, Body-Movement and Pleasure in Groove Music". This method is
-    implemented in terms of the monophonic syncopation feature extractor. The monophonic syncopations are found per
-    instrument. They are upgraded to polyphonic syncopations by adding an instrumentation weight. The syncopations
-    are then filtered based on the properties '`only_uninterrupted_syncopations`' and '`nested_syncopations`'.
-    """
-
-    __tick_based_computation_support__ = False
-    __preconditions__ = (Rhythm.Precondition.check_time_signature,)
-    __get_factors__ = lambda e: (
-        e.unit, e.instrumentation_weight_function, e.salience_profile_type,
-        e.only_uninterrupted_syncopations, e.nested_syncopations
-    )
-
-    KEEP_HEAVIEST = "keep_heaviest"
-    KEEP_FIRST = "keep_first"
-    KEEP_LAST = "keep_last"
-    KEEP_ALL = "keep_all"
-
-    _NESTED_SYNCOPATION_FILTERS = {
-        KEEP_HEAVIEST: lambda nested_syncopations: [max(nested_syncopations, key=lambda s: s[0])],
-        KEEP_FIRST: lambda nested_syncopations: [min(nested_syncopations, key=lambda s: s[1])],
-        KEEP_LAST: lambda nested_syncopations: [max(nested_syncopations, key=lambda s: s[1])],
-        KEEP_ALL: lambda nested_syncopations: nested_syncopations
-    }
-
-    def __init__(
-            self,
-            unit: UnitType = _DEFAULT_UNIT,
-            instr_weighting_function: tp.Callable[[str, tp.Set[str]], int] = lambda *_: 0,
-            salience_profile_type: str = "equal_upbeats",
-            interrupted_syncopations: bool = True,
-            nested_syncopations: str = KEEP_HEAVIEST, **kw
-    ):
-        super().__init__(unit, **kw)
-        self._mt_bin_onset_vec_extr = MultiTrackMonoFeature(BinaryOnsetVector, aux_to=self)
-        self._mt_sync_vec_extr = MultiTrackMonoFeature(MonophonicSyncopationVector, aux_to=self)
-
-        self._instr_weighting_f = None  # type: tp.Callable[[str, tp.Set[str]], int]
-        self._only_uninterrupted_sync = None  # type: bool
-        self._nested_sync_strategy = ""  # type: str
-
-        self.instrumentation_weight_function = instr_weighting_function
-        self.salience_profile_type = salience_profile_type
-        self.only_uninterrupted_syncopations = interrupted_syncopations
-        self.nested_syncopations = nested_syncopations
-
-    def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
-        binary_onset_vectors = aux_fts[0]  # type: tp.Tuple[tp.Tuple[int, ...]]
-        mono_sync_vectors = aux_fts[1]     # type: tp.Tuple[tp.Tuple[_SyncType, ...]]
-        n_instruments = rhythm.get_track_count()
-        instrument_names = rhythm.get_track_names()
-
-        # If the rhythm doesn't contain any monophonic syncopations, it won't contain any polyphonic syncopations either
-        if all(len(sync_vector) == 0 for sync_vector in mono_sync_vectors):
-            return tuple()
-
-        syncopations = []  # type: tp.List[_SyncType]
-        only_uninterrupted = self.only_uninterrupted_syncopations
-        get_instr_weight = self.instrumentation_weight_function or (lambda *_: 0)
-
-        for curr_instr, [curr_instr_name, sync_vector] in enumerate(zip(instrument_names, mono_sync_vectors)):
-            other_instruments = set(instr for instr in range(n_instruments) if instr != curr_instr)
-
-            # Iterate over all monophonic syncopations played by the current instrument "upgrade" these to polyphonic
-            # syncopations by adding instrumentation weights
-            for mono_syncopation in sync_vector:
-                mono_sync_strength, note_position, rest_position = mono_syncopation
-
-                # Instruments that play a note on the rest position of the monophonic syncopation, hence "close" the
-                # syncopation. Whatever instrument is syncopated is said to be syncopated against these instruments
-                sync_closing_instrument_names = set(
-                    instrument_names[other_instr] for other_instr in other_instruments
-                    if binary_onset_vectors[other_instr][rest_position]
-                )
-
-                # Compute the instrumentation weight, given the syncopated instrument and the closing instruments
-                instrumentation_weight = get_instr_weight(curr_instr_name, sync_closing_instrument_names)
-                sync_strength = mono_sync_strength + instrumentation_weight
-                polyphonic_syncopation = sync_strength, note_position, rest_position
-
-                # No need to check if this syncopation is interrupted if we aren't doing anything with it anyway
-                if not only_uninterrupted:
-                    syncopations.append(polyphonic_syncopation)
-                    continue
-
-                # Check if this syncopation is interrupted by any onset (on any other instrument)
-                for other_instr in other_instruments:
-                    other_instr_bin_vec = binary_onset_vectors[other_instr]
-                    # Window of binary onset vector of the other instrument during the syncopations
-                    binary_window = (other_instr_bin_vec[i] for i in range(note_position + 1, rest_position))
-                    if any(onset for onset in binary_window):
-                        is_interrupted = True
-                        break
-                else:  # yes, you see that right, that is a for-else block right there ;-)
-                    is_interrupted = False
-
-                # Add the syncopation only if it is uninterrupted
-                if not is_interrupted:
-                    syncopations.append(polyphonic_syncopation)
-
-        # Sort the syncopations on position for the retrieval of nested syncopation groups
-        syncopations = sorted(syncopations, key=lambda sync: sync[1])
-        n_syncopations = len(syncopations)
-
-        # Retrieve the filter for nested syncopation groups depending on the current nested sync strategy
-        nested_sync_strat = self._nested_sync_strategy
-        nested_sync_filter = self._NESTED_SYNCOPATION_FILTERS[nested_sync_strat]
-
-        # Keep track of the indices of the heading and tailing syncopation of the groups
-        group_head_sync_i = 0
-        group_tail_sync_i = 0
-
-        # Iterate over "syncopation groups", which are sets of nested syncopations (one starting during another one)
-        while group_head_sync_i < n_syncopations:
-            group_tail_pos = syncopations[group_head_sync_i][2]
-
-            # Stretch the tail of the group so that it includes all nested syncopations
-            # NOTE: This assumes that the syncopations are sorted by their note positions
-            for curr_sync_i in range(group_head_sync_i, n_syncopations):
-                note_pos, rest_pos = syncopations[curr_sync_i][1:]
-                if note_pos > group_tail_pos:
-                    break
-                group_tail_pos = max(group_tail_pos, rest_pos)
-                group_tail_sync_i = curr_sync_i
-
-            # Create a view of the syncopations in this group
-            nested_sync_group = TupleView.range_view(syncopations, group_head_sync_i, group_tail_sync_i + 1)
-
-            # Handle the nested syncopations and yield the ones which survive the filter
-            for syncopation in nested_sync_filter(nested_sync_group):
-                yield syncopation
-
-            # Update the syncopation group bounds
-            group_head_sync_i = group_tail_sync_i + 1
-            group_tail_sync_i = group_head_sync_i
-
-    ##############
-    # Properties #
-    ##############
-
-    @property
-    def salience_profile_type(self) -> str:
-        """
-        The type of salience profile to be used for syncopation detection. This must be one of: ['hierarchical',
-        'equal_upbeats', 'equal_beats']. See :meth:`beatsearch.rhythm.TimeSignature.get_salience_profile` for more info.
-        """
-
-        return self._mt_sync_vec_extr.salience_profile_type
-
-    @salience_profile_type.setter
-    def salience_profile_type(self, salience_profile_type: str):
-        self._mt_sync_vec_extr.salience_profile_type = salience_profile_type  # type: MonophonicSyncopationVector
-
-    @property
-    def only_uninterrupted_syncopations(self) -> bool:
-        """
-        Setting this property to True causes this feature extractor to only find uninterrupted syncopations. A
-        syncopation is said to be interrupted if an other instrument plays a note during the syncopation. Note that
-        setting this property to True will make syncopations containing nested syncopations undetectable, effectively
-        ignoring the nested_syncopations property.
-        """
-
-        return self._only_uninterrupted_sync
-
-    @only_uninterrupted_syncopations.setter
-    def only_uninterrupted_syncopations(self, only_uninterrupted_sync: bool):
-        self._only_uninterrupted_sync = only_uninterrupted_sync
-
-    @property
-    def nested_syncopations(self) -> str:
-        """
-        This property determines the way in which nested syncopations are handled. Two syncopations are said to be
-        nested if one syncopation starts during the other. Note that if only_uninterrupted_syncopations is set to True,
-        there won't be any nested syncopations detected, effectively ignoring this property.
-
-        Nested syncopations can be handled in four different ways:
-
-            - `keep_heaviest`
-
-              Only the syncopation with the highest syncopation strength remains.
-
-            - `keep_first`
-
-              Only the first (not nested) syncopation remains.
-
-            - `keep_last`
-
-              Only the last (most nested) syncopation remains.
-
-            - `keep_all`
-
-              All syncopations remain.
-
-
-        Suppose you have a rhythm with three instruments, instrument A, B and C. Then suppose these three nested
-        syncopations::
-
-            Instrument A (strength=1): ....:...<|>...
-            Instrument B (strength=2): <---:----|>...
-            Instrument C (strength=5): ....:<---|>...
-
-            Legend:
-                < = syncopated note        - = pending syncopation     > = closing note (end of syncopation)
-                | = crotchet pulse         : = quaver pulse
-
-            From these three syncopations:
-
-                - keep_heaviest:  only syncopation C remains
-                - keep_first:     only syncopation B remains
-                - keep_last:      only syncopation A remains
-                - keep_all:       syncopation A, B and C remain
-        """
-
-        return self._nested_sync_strategy
-
-    @nested_syncopations.setter
-    def nested_syncopations(self, nested_syncopations: str):
-        if nested_syncopations not in self._NESTED_SYNCOPATION_FILTERS:
-            legal_opts = list(self._NESTED_SYNCOPATION_FILTERS.keys())
-            raise ValueError("Unknown nested_syncopations option: %s. "
-                             "Please choose between: %s" % (nested_syncopations, legal_opts))
-
-        self._nested_sync_strategy = nested_syncopations
-
-    @property
-    def instrumentation_weight_function(self) -> tp.Callable[[str, tp.Set[str]], int]:
-        """
-        The instrumentation weight function is used to compute the instrumentation weights of the syncopations. This
-        function receives two positional parameters:
-
-            - `syncopated_instrument: str`
-
-              The name of the instrument that plays the syncopated note as a string.
-
-            - `closing_instruments: Set[str]`
-
-              The names of the instruments which syncopated_instrument is syncopated against (empty set if the
-              syncopation is against a rest).
-
-        The instrumentation weight function must return the weight as an integer. When this property is set to None, the
-        instrumentation weight will equal zero for all syncopations.
-        """
-
-        return self._instr_weighting_f
-
-    @instrumentation_weight_function.setter
-    def instrumentation_weight_function(self, instr_weighting_function: tp.Callable[[str, tp.Set[str]], int]):
-        assert callable(instr_weighting_function)
-        self._instr_weighting_f = instr_weighting_function
-
-
-class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
-    """
     Finds the polyphonic syncopations and their syncopation strengths. This is an implementation of the method
     proposed by Maria A.G. Witek et al in their work titled "Syncopation, Body-Movement and Pleasure in Groove
     Music".
@@ -1958,7 +1704,7 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
     As there is no formula given by Witek for how to compute this value, the computation of this value is up to the user
     of this feature extractor. The function to compute the weight is set through the `instrumentation_weight_function`
     property. It should be a callable receiving two positional arguments: ``instrument`` and ``n_streams``. See :meth:`
-    beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek.instrumentation_weight_function` for more info.
+    beatsearch.feature_extraction.PolyphonicSyncopationVector.instrumentation_weight_function` for more info.
 
     The syncopations are returned as a sequence of three-element tuples containing:
 
@@ -1977,10 +1723,10 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
     __preconditions__ = (Rhythm.Precondition.check_time_signature,)
     __get_factors__ = lambda e: (e.unit, e.salience_profile_type, e.instrumentation_weight_function)
 
-    _InstrWFuncType = tp.Callable[[str, int], tp.Union[int, float]]  # Type hinting for instrumentation weight functions
+    InstrWFuncType = tp.Callable[[str, int], tp.Union[int, float]]  # Type hinting for instrumentation weight functions
     _mt_note_vector: tp.Union[NoteVector]  # Enable type hinting for MultiTrackMonoFeature<NoteVector> aux extractor
 
-    DEFAULT_INSTRUMENTATION_W_FUNC = lambda instrument, n_streams: min(4 - n_streams, 0)  # type: _InstrWFuncType
+    DEFAULT_INSTRUMENTATION_W_FUNC = lambda instrument, n_streams: min(4 - n_streams, 0)  # type: InstrWFuncType
     """The default instrumentation weight function ignores the syncopated instrument. It only uses the number of 
     instruments involved (n_streams). It returns::
     
@@ -1992,12 +1738,12 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
     """
 
     def __init__(self, unit: UnitType = _DEFAULT_UNIT,
-                 instrumentation_weight_function: _InstrWFuncType = DEFAULT_INSTRUMENTATION_W_FUNC,
+                 instrumentation_weight_function: InstrWFuncType = DEFAULT_INSTRUMENTATION_W_FUNC,
                  salience_profile_type: str = "equal_upbeats", keep_twins: bool = False, **kw):
         super().__init__(unit, **kw)
         self._mt_note_vector = MultiTrackMonoFeature(NoteVector, tied_notes=False, aux_to=self)
 
-        self._f_get_instrumentation_weight = None  # type: tp.Optional[self._InstrWFuncType]
+        self._f_get_instrumentation_weight = None  # type: tp.Optional[self.InstrWFuncType]
         self._salience_profile_type = None         # type: str
         self._keep_twins = None                    # type: bool
 
@@ -2015,7 +1761,7 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
         instrument_names = rhythm.get_track_names()
         time_signature = rhythm.get_time_signature()
         salience_profile = time_signature.get_salience_profile(self.unit, kind=self.salience_profile_type)
-        get_instrumentation_weight = self._f_get_instrumentation_weight or (lambda *_: 0)
+        get_instrumentation_weight = self.instrumentation_weight_function or (lambda *_: 0)
 
         # A dictionary containing (instrument_index, event) tuples by event position
         instr_event_pairs_by_position = defaultdict(lambda: set())
@@ -2079,7 +1825,7 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
     ##############
 
     @property
-    def instrumentation_weight_function(self) -> tp.Optional[_InstrWFuncType]:
+    def instrumentation_weight_function(self) -> tp.Optional[InstrWFuncType]:
         """The function used to determine the instrumentation weight of a particular syncopation. This function
         receives two positional parameters.
 
@@ -2095,7 +1841,7 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
         return self._f_get_instrumentation_weight
 
     @instrumentation_weight_function.setter
-    def instrumentation_weight_function(self, func: tp.Optional[_InstrWFuncType]):
+    def instrumentation_weight_function(self, func: tp.Optional[InstrWFuncType]):
         if not func:
             self._f_get_instrumentation_weight = None
             return
@@ -2144,6 +1890,282 @@ class PolyphonicSyncopationVectorWitek(PolyphonicRhythmFeatureExtractorBase):
     @keep_twins.setter
     def keep_twins(self, keep_twins: bool):
         self._keep_twins = bool(keep_twins)
+
+
+class DistantPolyphonicSyncopationVector(PolyphonicRhythmFeatureExtractorBase):
+    """
+    Finds the polyphonic syncopations and their syncopations strengths. This is an adaption of the method proposed by
+    M. Witek and colleagues in their work titled "Syncopation, Body-Movement and Pleasure in Groove Music". In addition
+    to adjacent syncopations, this extractor also finds non-adjacent (distant) syncopations; syncopations that may be
+    interrupted by an (either syncopated or non-syncopated) other instrument. A syncopation is said to be interrupted if
+    an other instrument plays a note during the syncopation; after the syncopated note (or at the same time) and before
+    it closes.
+
+    Interrupted syncopations are divided in two sub-categories:
+
+        - Syncopated interruptions
+
+          This is the case when a syncopation is interrupted by an instrument playing a note, which in itself is
+          syncopated.
+
+        - Non-syncopated interruptions
+
+          This is the case when a syncopation is interrupted by an instrument playing a note, which in itself is not
+          syncopated.
+
+    This feature extractor is implemented in terms of :class:`beatsearch.feature_extraction.SyncopationVector`. The
+    monophonic syncopations are found per track and are then upgraded to polyphonic syncopations adding an
+    instrumentation weight. The instrumentation weight computed with the instrumentation weight function, which can be
+    set through the :meth:`beatsearch.feature_extraction.DistantPolyphonicSyncopationVector.
+    instrumentation_weight_function` property.
+    """
+
+    __tick_based_computation_support__ = False
+    __preconditions__ = (Rhythm.Precondition.check_time_signature,)
+    __get_factors__ = lambda e: (
+        e.unit, e.instrumentation_weight_function, e.salience_profile_type,
+        e.only_uninterrupted_syncopations, e.nested_syncopations
+    )
+
+    KEEP_HEAVIEST = "keep_heaviest"
+    KEEP_FIRST = "keep_first"
+    KEEP_LAST = "keep_last"
+    KEEP_ALL = "keep_all"
+
+    _NESTED_SYNCOPATION_FILTERS = {
+        KEEP_HEAVIEST: lambda nested_syncopations: [max(nested_syncopations, key=lambda s: s[0])],
+        KEEP_FIRST: lambda nested_syncopations: [min(nested_syncopations, key=lambda s: s[1])],
+        KEEP_LAST: lambda nested_syncopations: [max(nested_syncopations, key=lambda s: s[1])],
+        KEEP_ALL: lambda nested_syncopations: nested_syncopations
+    }
+
+    InstrWFuncType = PolyphonicSyncopationVector.InstrWFuncType
+    DEFAULT_INSTRUMENTATION_W_FUNC = PolyphonicSyncopationVector.DEFAULT_INSTRUMENTATION_W_FUNC
+
+    def __init__(
+            self, unit: UnitType = _DEFAULT_UNIT,
+            instr_weighting_function: tp.Optional[InstrWFuncType] = DEFAULT_INSTRUMENTATION_W_FUNC,
+            salience_profile_type: str = "equal_upbeats", nested_syncopations: str = KEEP_HEAVIEST,
+            only_uninterrupted_syncopations: bool = False, **kw
+    ):
+        super().__init__(unit, **kw)
+        self._mt_bin_onset_vec_extr = MultiTrackMonoFeature(BinaryOnsetVector, aux_to=self)
+        self._mt_sync_vec_extr = MultiTrackMonoFeature(MonophonicSyncopationVector, aux_to=self)
+
+        self._f_get_instrumentation_weight = None   # type: tp.Optional[self.InstrWFuncType]
+        self._only_uninterrupted_sync = None        # type: bool
+        self._nested_sync_strategy = ""             # type: str
+
+        self.instrumentation_weight_function = instr_weighting_function
+        self.salience_profile_type = salience_profile_type
+        self.only_uninterrupted_syncopations = only_uninterrupted_syncopations
+        self.nested_syncopations = nested_syncopations
+
+    def __process__(self, rhythm: PolyphonicRhythm, aux_fts: tp.Tuple[_FeatureType, ...]) -> _FtrExtrProcessRetType:
+        binary_onset_vectors = aux_fts[0]  # type: tp.Tuple[tp.Tuple[int, ...]]
+        mono_sync_vectors = aux_fts[1]     # type: tp.Tuple[tp.Tuple[_SyncType, ...]]
+        n_instruments = rhythm.get_track_count()
+        instrument_names = rhythm.get_track_names()
+
+        # If the rhythm doesn't contain any monophonic syncopations, it won't contain any polyphonic syncopations either
+        if all(len(sync_vector) == 0 for sync_vector in mono_sync_vectors):
+            return tuple()
+
+        syncopations = []  # type: tp.List[_SyncType]
+        only_uninterrupted = self.only_uninterrupted_syncopations
+        get_instr_weight = self.instrumentation_weight_function or (lambda *_: 0)
+
+        for curr_instr, [curr_instr_name, sync_vector] in enumerate(zip(instrument_names, mono_sync_vectors)):
+            other_instruments = set(instr for instr in range(n_instruments) if instr != curr_instr)
+
+            # Iterate over all monophonic syncopations played by the current instrument "upgrade" these to polyphonic
+            # syncopations by adding instrumentation weights
+            for mono_syncopation in sync_vector:
+                mono_sync_strength, note_position, rest_position = mono_syncopation
+
+                # Instruments that play a note on the rest position of the monophonic syncopation, hence "close" the
+                # syncopation. Whatever instrument is syncopated is said to be syncopated against these instruments
+                sync_closing_instruments = set(
+                    other_instr for other_instr in other_instruments
+                    if binary_onset_vectors[other_instr][rest_position]
+                )
+
+                # Number of streams is the number of closing instruments plus one (the syncopated instrument itself)
+                n_streams = 1 + len(sync_closing_instruments)
+
+                # Compute the instrumentation weight, given the syncopated instrument and the closing instruments
+                instrumentation_weight = get_instr_weight(curr_instr_name, n_streams)
+                sync_strength = mono_sync_strength + instrumentation_weight
+                polyphonic_syncopation = sync_strength, note_position, rest_position
+
+                # No need to check if this syncopation is interrupted if we aren't doing anything with it anyway
+                if not only_uninterrupted:
+                    syncopations.append(polyphonic_syncopation)
+                    continue
+
+                # Check if this syncopation is interrupted by any onset (on any other instrument)
+                for other_instr in other_instruments:
+                    other_instr_bin_vec = binary_onset_vectors[other_instr]
+                    # Window of binary onset vector of the other instrument during the syncopations
+                    binary_window = (other_instr_bin_vec[i] for i in range(note_position + 1, rest_position))
+                    if any(onset for onset in binary_window):
+                        is_interrupted = True
+                        break
+                else:  # yes, you see that right, that is a for-else block right there ;-)
+                    is_interrupted = False
+
+                # Add the syncopation only if it is uninterrupted
+                if not is_interrupted:
+                    syncopations.append(polyphonic_syncopation)
+
+        # Sort the syncopations on position for the retrieval of nested syncopation groups
+        syncopations = sorted(syncopations, key=lambda sync: sync[1])
+        n_syncopations = len(syncopations)
+
+        # Retrieve the filter for nested syncopation groups depending on the current nested sync strategy
+        nested_sync_strat = self._nested_sync_strategy
+        nested_sync_filter = self._NESTED_SYNCOPATION_FILTERS[nested_sync_strat]
+
+        # Keep track of the indices of the heading and tailing syncopation of the groups
+        group_head_sync_i = 0
+        group_tail_sync_i = 0
+
+        # Iterate over "syncopation groups", which are sets of nested syncopations (one starting during another one)
+        while group_head_sync_i < n_syncopations:
+            group_tail_pos = syncopations[group_head_sync_i][2]
+
+            # Stretch the tail of the group so that it includes all nested syncopations
+            # NOTE: This assumes that the syncopations are sorted by their note positions
+            for curr_sync_i in range(group_head_sync_i, n_syncopations):
+                note_pos, rest_pos = syncopations[curr_sync_i][1:]
+                if note_pos >= group_tail_pos:
+                    break
+                group_tail_pos = max(group_tail_pos, rest_pos)
+                group_tail_sync_i = curr_sync_i
+
+            # Create a view of the syncopations in this group
+            nested_sync_group = TupleView.range_view(syncopations, group_head_sync_i, group_tail_sync_i + 1)
+
+            # Handle the nested syncopations and yield the ones which survive the filter
+            for syncopation in nested_sync_filter(nested_sync_group):
+                yield syncopation
+
+            # Update the syncopation group bounds
+            group_head_sync_i = group_tail_sync_i + 1
+            group_tail_sync_i = group_head_sync_i
+
+    ##############
+    # Properties #
+    ##############
+
+    @property
+    def instrumentation_weight_function(self) -> tp.Optional[InstrWFuncType]:
+        """The function used to determine the instrumentation weight of a particular syncopation. This function
+        receives two positional parameters.
+
+            - ``instrument`` The name of the syncopated instrument, which is defined as the name of the
+              track. See :meth:`beatsearch.rhythm.Track.get_name`.
+
+            - ``n_streams`` The number of instruments involved in the syncopation. If ``N`` is the number of
+              instruments in a particular rhythm, ``n_streams`` will range from 1 (syncopation against a rest) up to
+              ``N`` (syncopation against all other instruments).
+
+        """
+
+        return self._f_get_instrumentation_weight
+
+    @instrumentation_weight_function.setter
+    def instrumentation_weight_function(self, func: tp.Optional[InstrWFuncType]):
+        if not func:
+            self._f_get_instrumentation_weight = None
+            return
+        if not callable(func):
+            raise TypeError("Expected a callable but got a '%s' instead" % type(func))
+        self._f_get_instrumentation_weight = func
+
+    @property
+    def salience_profile_type(self) -> str:
+        """
+        The type of salience profile to be used for syncopation detection. This must be one of: ['hierarchical',
+        'equal_upbeats', 'equal_beats']. See :meth:`beatsearch.rhythm.TimeSignature.get_salience_profile` for more info.
+        """
+
+        return self._mt_sync_vec_extr.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._mt_sync_vec_extr.salience_profile_type = salience_profile_type  # type: MonophonicSyncopationVector
+
+    @property
+    def nested_syncopations(self) -> str:
+        """
+        This property determines the way in which nested syncopations are handled. Two syncopations are said to be
+        nested if one syncopation starts during the other. Note that if only_uninterrupted_syncopations is set to True,
+        there won't be any nested syncopations detected, effectively ignoring this property.
+
+        Nested syncopations can be handled in four different ways:
+
+            - `keep_heaviest`
+
+              Only the syncopation with the highest syncopation strength remains.
+
+            - `keep_first`
+
+              Only the first (not nested) syncopation remains.
+
+            - `keep_last`
+
+              Only the last (most nested) syncopation remains.
+
+            - `keep_all`
+
+              All syncopations remain.
+
+
+        Suppose you have a rhythm with three instruments, instrument A, B and C. Then suppose these three nested
+        syncopations::
+
+            Instrument A (strength=1): ....:...<|>...
+            Instrument B (strength=2): <---:----|>...
+            Instrument C (strength=5): ....:<---|>...
+
+            Legend:
+                < = syncopated note        - = pending syncopation     > = closing note (end of syncopation)
+                | = crotchet pulse         : = quaver pulse
+
+            From these three syncopations:
+
+                - keep_heaviest:  only syncopation C remains
+                - keep_first:     only syncopation B remains
+                - keep_last:      only syncopation A remains
+                - keep_all:       syncopation A, B and C remain
+        """
+
+        return self._nested_sync_strategy
+
+    @nested_syncopations.setter
+    def nested_syncopations(self, nested_syncopations: str):
+        if nested_syncopations not in self._NESTED_SYNCOPATION_FILTERS:
+            legal_opts = list(self._NESTED_SYNCOPATION_FILTERS.keys())
+            raise ValueError("Unknown nested_syncopations option: %s. "
+                             "Please choose between: %s" % (nested_syncopations, legal_opts))
+
+        self._nested_sync_strategy = nested_syncopations
+
+    @property
+    def only_uninterrupted_syncopations(self) -> bool:
+        """
+        Setting this property to True causes this feature extractor to only find uninterrupted syncopations. A
+        syncopation is said to be interrupted if an other instrument plays a note during the syncopation. Note that
+        setting this property to True will make syncopations containing nested syncopations undetectable, effectively
+        ignoring the nested_syncopations property.
+        """
+
+        return self._only_uninterrupted_sync
+
+    @only_uninterrupted_syncopations.setter
+    def only_uninterrupted_syncopations(self, only_uninterrupted_sync: bool):
+        self._only_uninterrupted_sync = only_uninterrupted_sync
 
 
 class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):
@@ -2339,6 +2361,6 @@ __all__ = [
     'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
 
     # Polyphonic rhythm feature extractor implementations
-    'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'PolyphonicSyncopationVectorWitek',
+    'MultiTrackMonoFeature', 'DistantPolyphonicSyncopationVector', 'PolyphonicSyncopationVector',
     'PolyphonicMetricalTensionVector', 'PolyphonicMetricalTensionMagnitude'
 ]

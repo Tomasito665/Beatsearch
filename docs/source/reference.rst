@@ -76,7 +76,7 @@ Polyphonic Feature Extractors
    :members:
 .. autoclass:: beatsearch.feature_extraction.PolyphonicSyncopationVector
    :members:
-.. autoclass:: beatsearch.feature_extraction.PolyphonicSyncopationVectorWitek
+.. autoclass:: beatsearch.feature_extraction.DistantPolyphonicSyncopationVector
    :members:
 
 
