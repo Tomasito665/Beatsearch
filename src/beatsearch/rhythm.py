@@ -2271,6 +2271,21 @@ class FrequencyBandMidiDrumMappingReducer(MidiDrumMappingReducer):
         return midi_key.frequency_band.name
 
 
+@friendly_named_class("Kick-snare-hihat mapping reducer")
+class KSHMappingReducer(MidiDrumMappingReducer):
+    KICK_DRUM = "Kick"
+    SNARE_DRUM = "Snare"
+    HIHAT = "Hihat"
+
+    @staticmethod
+    def get_group_name(midi_key: MidiDrumKey) -> str:
+        return {
+            FrequencyBand.LOW: KSHMappingReducer.KICK_DRUM,
+            FrequencyBand.MID: KSHMappingReducer.SNARE_DRUM,
+            FrequencyBand.HIGH: KSHMappingReducer.HIHAT
+        }[midi_key.frequency_band]
+
+
 @friendly_named_class("Decay-time mapping reducer")
 class DecayTimeMidiDrumMappingReducer(MidiDrumMappingReducer):
     @staticmethod
@@ -3294,7 +3309,7 @@ __all__ = [
 
     # MIDI drum mapping
     'MidiDrumMapping', 'GMDrumMapping', 'create_drum_mapping', 'MidiDrumKey', 'FrequencyBand', 'DecayTime',
-    'MidiDrumMappingReducer', 'FrequencyBandMidiDrumMappingReducer',
+    'MidiDrumMappingReducer', 'FrequencyBandMidiDrumMappingReducer', 'KSHMappingReducer',
     'DecayTimeMidiDrumMappingReducer', 'UniquePropertyComboMidiDrumMappingReducer',
     'get_drum_mapping_reducer_implementation_names',
     'get_drum_mapping_reducer_implementation_friendly_names',
