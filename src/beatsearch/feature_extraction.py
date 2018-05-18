@@ -1464,7 +1464,7 @@ class MonophonicMetricalTensionVector(MonophonicRhythmFeatureExtractorBase):
         self._note_vec.cyclic = cyclic
 
 
-class MonophonicMetricalTensionMagnitude(MonophonicRhythmFeatureExtractorBase):
+class MonophonicMetricalTensionVectorMagnitude(MonophonicRhythmFeatureExtractorBase):
     """Computes the magnitude of the monophonic metrical tension vector (the euclidean distance to the zero vector)"""
 
     __tick_based_computation_support__ = False
@@ -1497,7 +1497,7 @@ class MonophonicMetricalTensionMagnitude(MonophonicRhythmFeatureExtractorBase):
 
     @property
     def normalize(self) -> bool:
-        """When set to True, the tension magnitude will range from 0 to 1"""
+        """When set to True, the tension vector magnitude will range from 0 to 1"""
         return self._tension_vec.normalize
 
     @normalize.setter
@@ -2298,7 +2298,7 @@ class PolyphonicMetricalTensionVector(PolyphonicRhythmFeatureExtractorBase, Inst
         self._mt_monophonic_metrical_tension_vec.multi_track_mode = multi_track_mode
 
 
-class PolyphonicMetricalTensionMagnitude(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):
+class PolyphonicMetricalTensionVectorMagnitude(PolyphonicRhythmFeatureExtractorBase, InstrumentWeightedMixin):
     """Computes the magnitude of the polyphonic metrical tension vector (euclidean distance to the zero vector)"""
 
     __tick_based_computation_support__ = False
@@ -2350,7 +2350,7 @@ class PolyphonicMetricalTensionMagnitude(PolyphonicRhythmFeatureExtractorBase, I
 
     @property
     def normalize(self) -> bool:
-        """When set to True, the tension magnitude will range from 0 to 1"""
+        """When set to True, the tension vector magnitude will range from 0 to 1"""
         return self._poly_metrical_tension_vec.normalize
 
     @normalize.setter
@@ -2383,10 +2383,10 @@ __all__ = [
     'BinaryOnsetVector', 'NoteVector', 'IOIVector', 'IOIHistogram', 'BinarySchillingerChain', 'ChronotonicChain',
     'IOIDifferenceVector', 'OnsetPositionVector', 'MonophonicSyncopationVector', 'SyncopatedOnsetRatio',
     'MeanMonophonicSyncopationStrength', 'OnsetDensity', 'MonophonicOnsetLikelihoodVector',
-    'MonophonicVariabilityVector', 'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionMagnitude',
+    'MonophonicVariabilityVector', 'MonophonicMetricalTensionVector', 'MonophonicMetricalTensionVectorMagnitude',
 
     # Polyphonic rhythm feature extractor implementations
     'MultiTrackMonoFeature', 'PolyphonicSyncopationVector', 'DistantPolyphonicSyncopationVector',
     'MeanPolyphonicSyncopationStrength', 'MeanDistantPolyphonicSyncopationStrength', 'PolyphonicMetricalTensionVector',
-    'PolyphonicMetricalTensionMagnitude'
+    'PolyphonicMetricalTensionVectorMagnitude'
 ]

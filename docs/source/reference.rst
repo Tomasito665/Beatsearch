@@ -55,7 +55,7 @@ Monophonic Feature Extractors
    :members:
 .. autoclass:: beatsearch.feature_extraction.MonophonicMetricalTensionVector
    :members:
-.. autoclass:: beatsearch.feature_extraction.MonophonicMetricalTensionMagnitude
+.. autoclass:: beatsearch.feature_extraction.MonophonicMetricalTensionVectorMagnitude
    :members:
 .. autoclass:: beatsearch.feature_extraction.IOIVector
    :members:
@@ -72,7 +72,7 @@ Polyphonic Feature Extractors
    :members:
 .. autoclass:: beatsearch.feature_extraction.PolyphonicMetricalTensionVector
    :members:
-.. autoclass:: beatsearch.feature_extraction.PolyphonicMetricalTensionMagnitude
+.. autoclass:: beatsearch.feature_extraction.PolyphonicMetricalTensionVectorMagnitude
    :members:
 .. autoclass:: beatsearch.feature_extraction.PolyphonicSyncopationVector
    :members:

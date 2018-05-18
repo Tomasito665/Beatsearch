@@ -22,7 +22,7 @@ from beatsearch.feature_extraction import (
     SyncopatedOnsetRatio,
     MeanMonophonicSyncopationStrength,
     MonophonicMetricalTensionVector,
-    MonophonicMetricalTensionMagnitude,
+    MonophonicMetricalTensionVectorMagnitude,
     IOIVector,
     IOIDifferenceVector,
     IOIHistogram
@@ -31,7 +31,7 @@ from beatsearch.feature_extraction import (
 from beatsearch.feature_extraction import (
     MultiTrackMonoFeature,
     PolyphonicMetricalTensionVector,
-    PolyphonicMetricalTensionMagnitude,
+    PolyphonicMetricalTensionVectorMagnitude,
     DistantPolyphonicSyncopationVector,
 )
 
@@ -546,21 +546,21 @@ class TestMonophonicMetricalTensionVector(TestMonophonicRhythmFeatureExtractorIm
         self.assertSequenceEqual(tension_vector[0:4], [0] * 4)
 
 
-class TestMonophonicMetricalTensionMagnitude(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
+class TestMonophonicMetricalTensionVectorMagnitude(TestMonophonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[MonophonicRhythmFeatureExtractor]:
-        return MonophonicMetricalTensionMagnitude
+        return MonophonicMetricalTensionVectorMagnitude
 
     @staticmethod
     def get_rhythm_str():
         return "x--x--x------x--"
 
     def test_defaults_to_cyclic(self):
-        extractor = self.feature_extractor  # type: MonophonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVectorMagnitude
         self.assertTrue(extractor.cyclic)
 
     def test_defaults_to_equal_upbeats_salience_prf(self):
-        extractor = self.feature_extractor  # type: MonophonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: MonophonicMetricalTensionVectorMagnitude
         self.assertEqual(extractor.salience_profile_type, "equal_upbeats")
 
     @patch.object(MonophonicMetricalTensionVector, "__process__")
@@ -962,43 +962,43 @@ class TestPolyphonicMetricalTensionVector(TestPolyphonicRhythmFeatureExtractorIm
         npt.assert_almost_equal(actual_tension_vec, expected_tension_vec)
 
 
-class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtractorImplementationMixin, TestCase):
+class TestPolyphonicMetricalTensionVectorMagnitude(TestPolyphonicRhythmFeatureExtractorImplementationMixin, TestCase):
     @staticmethod
     def get_impl_class() -> tp.Type[PolyphonicRhythmFeatureExtractor]:
-        return PolyphonicMetricalTensionMagnitude
+        return PolyphonicMetricalTensionVectorMagnitude
 
     def test_defaults_to_cyclic(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         self.assertTrue(extractor.cyclic)
 
     def test_defaults_to_equal_upbeats_salience_profile_type(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         self.assertEqual("equal_upbeats", extractor.salience_profile_type)
 
     def test_defaults_to_not_include_combination_tracks(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         self.assertFalse(extractor.include_combination_tracks)
 
     def test_defaults_to_normalized(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         self.assertTrue(extractor.normalize)
 
     def test_cyclic_property_propagates_to_vector_extractor(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         with patch("beatsearch.feature_extraction.PolyphonicMetricalTensionVector.cyclic",
                    new_callable=PropertyMock) as prop_mock:
             extractor.cyclic = "fake-cyclic"
             prop_mock.assert_called_once_with("fake-cyclic")
 
     def test_salience_profile_type_property_propagates_to_vector_extractor(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         with patch("beatsearch.feature_extraction.PolyphonicMetricalTensionVector.salience_profile_type",
                    new_callable=PropertyMock) as prop_mock:
             extractor.salience_profile_type = "fake-salience-profile-type"
             prop_mock.assert_called_once_with("fake-salience-profile-type")
 
     def test_normalize_property_propagates_to_vector_extractor(self):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         with patch("beatsearch.feature_extraction.PolyphonicMetricalTensionVector.normalize",
                    new_callable=PropertyMock) as prop_mock:
             extractor.normalize = "fake-normalize"
@@ -1006,7 +1006,7 @@ class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtracto
 
     @patch.object(PolyphonicMetricalTensionVector, "__process__")
     def test_process_not_normalized(self, mock_metrical_tension_vec_process):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         extractor.normalize = False
         mock_metrical_tension_vec_process.return_value = (0/6, 0/6, 0/6, 6/6, 6/6, 1/6, 2/6, 4/6,
                                                           4/6, 4/6, 5/6, 1/6, 4/6, 6/6, 0/6, 6/6)
@@ -1016,7 +1016,7 @@ class TestPolyphonicMetricalTensionMagnitude(TestPolyphonicRhythmFeatureExtracto
 
     @patch.object(PolyphonicMetricalTensionVector, "__process__")
     def test_process_normalized(self, mock_metrical_tension_vec_process):
-        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionMagnitude
+        extractor = self.feature_extractor  # type: PolyphonicMetricalTensionVectorMagnitude
         extractor.normalize = True
         mock_metrical_tension_vec_process.return_value = (0/6, 0/6, 0/6, 6/6, 6/6, 1/6, 2/6, 4/6,
                                                           4/6, 4/6, 5/6, 1/6, 4/6, 6/6, 0/6, 6/6)
