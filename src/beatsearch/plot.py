@@ -5,7 +5,6 @@ import typing as tp
 import matplotlib.artist
 import matplotlib.pyplot as plt
 from fractions import Fraction
-from matplotlib import colors
 from matplotlib.colors import to_rgba
 from matplotlib.patches import Wedge
 from abc import ABCMeta, abstractmethod
@@ -238,10 +237,11 @@ class StackedSubplotLayout(SubplotLayout):
             raise ValueError("Unknown orientation: %s" % str(orientation))
 
 
-class RhythmLoopPlotter(object, metaclass=ABCMeta):
-    # http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
-    COLORS = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
+# http://colorbrewer2.org/#type=diverging&scheme=Spectral&n=6
+DEFAULT_TRACK_COLORS = ['#d53e4f', '#fc8d59', '#fee08b', '#e6f598', '#99d594', '#3288bd']
 
+
+class RhythmLoopPlotter(object, metaclass=ABCMeta):
     def __init__(
             self, unit: UnitType,
             subplot_layout: SubplotLayout,
@@ -249,6 +249,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             snap_to_grid_policy: SnapsToGridPolicy = SnapsToGridPolicy.NOT_APPLICABLE,
             snaps_to_grid: bool = None,
             draws_own_legend: bool = False,
+            track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS
     ):
         self._subplot_layout = subplot_layout            # type: SubplotLayout
         self._feature_extractors = feature_extractors or dict()  # type: tp.Dict[str, RhythmFeatureExtractor]
@@ -256,6 +257,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
         self._snaps_to_grid = None                       # type: bool
         self._draws_own_legend = draws_own_legend        # type: bool
         self._snap_to_grid_policy = snap_to_grid_policy  # type: SnapsToGridPolicy
+        self._track_colors = None                        # type: tp.Tuple[str, ...]
 
         if snaps_to_grid is None:
             if snap_to_grid_policy in [SnapsToGridPolicy.NEVER, SnapsToGridPolicy.ADJUSTABLE]:
@@ -263,7 +265,9 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             elif snap_to_grid_policy == SnapsToGridPolicy.ALWAYS:
                 snaps_to_grid = True
 
-        self.snaps_to_grid = snaps_to_grid  # call setter
+        # call setters
+        self.snaps_to_grid = snaps_to_grid
+        self.track_colors = track_colors
         self.set_unit(unit)
 
     @parse_unit_argument
@@ -315,6 +319,20 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
                                       if isinstance(ext, QuantizableMixin)):
             quantizable_extractor.quantize = snaps_to_grid
 
+    @property
+    def track_colors(self):
+        return self._track_colors
+
+    @track_colors.setter
+    def track_colors(self, track_colors: tp.Iterable[str]):
+        track_colors = tuple(track_colors)
+        for color in track_colors:
+            try:
+                to_rgba(color)
+            except ValueError:
+                raise ValueError("Invalid track color: '%s'" % str(color))
+        self._track_colors = track_colors
+
     def draw(
             self,
             rhythm_loop: RhythmLoop,
@@ -346,7 +364,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
 
         # add subplots to figure
         subplots = iter(self._subplot_layout.inflate(figure, n_tracks, subplot_kwargs or dict()))
-        color_pool = cycle(self.COLORS)
+        color_pool = cycle(self.track_colors)
         prev_subplot, subplot_setup_ret = None, None
 
         # named arguments given both to __setup_subplot__ and __draw_track__
@@ -423,12 +441,13 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
 class SchillingerRhythmNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Schillinger rhythm notation"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_,
+                 track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={'schillinger': BinarySchillingerChain()},
-            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS, track_colors=track_colors
         )
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
@@ -456,12 +475,13 @@ class SchillingerRhythmNotation(RhythmLoopPlotter):
 class ChronotonicNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Chronotonic notation"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={'chronotonic': ChronotonicChain()},
-            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
+            track_colors=track_colors
         )
 
     @classmethod
@@ -479,12 +499,13 @@ class ChronotonicNotation(RhythmLoopPlotter):
 class PolygonNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Polygon notation"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={'onset_positions': OnsetPositionVector()},
-            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
+            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE,
+            track_colors=track_colors
         )
 
     @classmethod
@@ -569,12 +590,13 @@ class PolygonNotation(RhythmLoopPlotter):
 class SpectralNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Spectral notation"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
             feature_extractors={'ioi_vector': IOIVector()},
-            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
+            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE,
+            track_colors=track_colors
         )
 
     @classmethod
@@ -594,7 +616,7 @@ class SpectralNotation(RhythmLoopPlotter):
 class TEDASNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "TEDAS Notation"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=StackedSubplotLayout(Orientation.VERTICAL),
@@ -602,7 +624,8 @@ class TEDASNotation(RhythmLoopPlotter):
                 'onset_positions': OnsetPositionVector(quantize=True),
                 'ioi_vector': IOIVector(quantize=True)
             },
-            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE
+            snap_to_grid_policy=SnapsToGridPolicy.ADJUSTABLE,
+            track_colors=track_colors
         )
 
     @classmethod
@@ -619,7 +642,7 @@ class TEDASNotation(RhythmLoopPlotter):
         # noinspection SpellCheckingInspection
         styles = {
             'edgecolor': kw['color'],
-            'facecolor': colors.to_rgba(kw['color'], 0.18),
+            'facecolor': to_rgba(kw['color'], 0.18),
             'linewidth': 2.0
         }
 
@@ -629,12 +652,13 @@ class TEDASNotation(RhythmLoopPlotter):
 class IOIHistogramPlot(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Inter-onset interval histogram"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={'ioi_histogram': IOIHistogram()},
-            snap_to_grid_policy=SnapsToGridPolicy.NOT_APPLICABLE
+            snap_to_grid_policy=SnapsToGridPolicy.NOT_APPLICABLE,
+            track_colors=track_colors
         )
 
     @classmethod
@@ -653,9 +677,9 @@ class BoxNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Box notation"
 
     def __init__(
-            self,
-            unit: UnitType = Unit.EIGHTH,
-            extra_feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractor]] = None
+            self, unit: UnitType = Unit.EIGHTH,
+            extra_feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractor]] = None,
+            symbols: str = "squares", *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS
     ):
         super().__init__(
             unit=unit,
@@ -665,7 +689,8 @@ class BoxNotation(RhythmLoopPlotter):
                 **(extra_feature_extractors or dict())
             },
             snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
-            draws_own_legend=True
+            draws_own_legend=True,
+            track_colors=track_colors
         )
 
         self.line_width = 1
@@ -673,6 +698,7 @@ class BoxNotation(RhythmLoopPlotter):
         self.text_box_width = 2
         self.rel_pad_x = 0.15
         self.position = Point2D(0, 0)
+        self.symbols = symbols
 
     @classmethod
     def get_plot_type_name(cls):
@@ -713,25 +739,36 @@ class BoxNotation(RhythmLoopPlotter):
         n_steps = rhythm_track.get_duration(self.unit)
         track_ix = kw['track_ix']
 
-        # filter out onsets whose position might have been pushed out of the grid (due to
-        # a low rhythm plotter unit)
-        for onset_pos in filter(lambda pos: pos < n_steps, onset_positions):
-            axes.add_artist(plt.Rectangle(
+        if self.symbols == "squares":
+            get_artist = lambda pos: plt.Rectangle(
                 [grid_box.x + onset_pos, grid_box.y + track_ix],
                 width=1, height=1, facecolor=kw['color'],
                 edgecolor="black", linewidth=0.75, joinstyle="miter"
-            ))
+            )
+        elif self.symbols == "circles":
+            get_artist = lambda pos: plt.Circle(
+                [grid_box.x + onset_pos + 0.5, grid_box.y + track_ix + 0.5],
+                radius=0.25, facecolor=kw['color'], fill=True, edgecolor='none'
+            )
+        else:
+            raise ValueError("Unknown symbol type: '%s'" % self.symbols)
+
+        # filter out onsets whose position might have been pushed out of the grid (due to
+        # a low rhythm plotter unit)
+        for onset_pos in filter(lambda pos: pos < n_steps, onset_positions):
+            axes.add_artist(get_artist(onset_pos))
 
         return plt.Rectangle([0, 0], 1, 1)
 
 
 class PolyphonicSyncopationVectorGraphBase(BoxNotation, metaclass=ABCMeta):
 
-    def __init__(
-            self,
-            unit: UnitType
-    ):
-        super().__init__(unit=unit, extra_feature_extractors={'poly_sync_vector': self.__get_sync_extractor__()})
+    def __init__(self, unit: UnitType, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
+        super().__init__(
+            unit=unit,
+            extra_feature_extractors={'poly_sync_vector': self.__get_sync_extractor__()},
+            track_colors=track_colors
+        )
 
         self.spacing = 1
         self.text_box_width = 3
@@ -866,9 +903,9 @@ class PolyphonicSyncopationVectorGraphBase(BoxNotation, metaclass=ABCMeta):
 class PolyphonicSyncopationVectorWitekGraph(PolyphonicSyncopationVectorGraphBase):
     PLOT_TYPE_NAME = "Syncopation graph (Witek)"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         self._extractor = PolyphonicSyncopationVector(unit)
-        super().__init__(unit)
+        super().__init__(unit, track_colors=track_colors)
 
     @property
     def salience_profile_type(self) -> str:
@@ -889,9 +926,9 @@ class PolyphonicSyncopationVectorWitekGraph(PolyphonicSyncopationVectorGraphBase
 class PolyphonicSyncopationVectorGraph(PolyphonicSyncopationVectorGraphBase):
     PLOT_TYPE_NAME = "Syncopation graph"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         self._extractor = DistantPolyphonicSyncopationVector(unit)
-        super().__init__(unit)
+        super().__init__(unit, track_colors=track_colors)
 
     @property
     def salience_profile_type(self) -> str:
@@ -940,12 +977,14 @@ class MonophonicMTVGraph(RhythmLoopPlotter):
     def get_plot_type_name(cls):
         return cls.PLOT_TYPE_NAME
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats",
+                 *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={'mtv': MonophonicMetricalTensionVector(unit, salience_profile_type, normalize=True)},
-            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
+            track_colors=track_colors
         )
 
     @property
@@ -974,7 +1013,8 @@ class PolyphonicMTVGraph(RhythmLoopPlotter):
     def get_plot_type_name(cls):
         return cls.PLOT_TYPE_NAME
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats"):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats",
+                 *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
@@ -982,7 +1022,8 @@ class PolyphonicMTVGraph(RhythmLoopPlotter):
                 'mono_mtv': MonophonicMetricalTensionVector(unit, salience_profile_type, normalize=True),
                 'poly_mtv': PolyphonicMetricalTensionVector(unit, salience_profile_type, normalize=True)
             },
-            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
+            track_colors=track_colors
         )
 
     @property
@@ -1041,12 +1082,13 @@ class MonophonicVariationGraph(RhythmLoopPlotter):
     def get_plot_type_name(cls):
         return cls.PLOT_TYPE_NAME
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
             feature_extractors={'variation': MonophonicVariabilityVector(unit, cyclic=True)},
-            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS
+            snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
+            track_colors=track_colors
         )
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
