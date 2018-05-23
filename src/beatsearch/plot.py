@@ -13,7 +13,7 @@ from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, R
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, DistantPolyphonicSyncopationVector, \
     PolyphonicSyncopationVector, MonophonicMetricalTensionVector, PolyphonicMetricalTensionVector, \
-    MonophonicVariabilityVector
+    MonophonicVariabilityVector, MultiTrackMonoFeature
 from beatsearch.utils import QuantizableMixin, generate_abbreviations, Rectangle2D, Point2D, \
     find_all_concrete_subclasses
 
@@ -36,7 +36,7 @@ def get_coordinates_on_circle(circle_position, circle_radius, x):
     return p_x, p_y
 
 
-def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis='x'):  # TODO fix axis option
+def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis="x"):
     duration = rhythm.get_duration(unit, ceil=True)
     measure_duration = rhythm.get_measure_duration(unit)
     beat_duration = rhythm.get_beat_duration(unit)
@@ -47,10 +47,12 @@ def plot_rhythm_grid(axes: plt.Axes, rhythm: Rhythm, unit: Unit, axis='x'):  # T
     if len(axis) > 2:
         raise ValueError("Illegal axis: %s" % axis)
 
-    axes.set_xticks(measure_grid_ticks)
-    axes.set_xticks(beat_grid_ticks, minor=True)
-    axes.set_yticks(measure_grid_ticks)
-    axes.set_yticks(beat_grid_ticks, minor=True)
+    if axis in ("x", "both"):
+        axes.set_xticks(measure_grid_ticks)
+        axes.set_xticks(beat_grid_ticks, minor=True)
+    elif axis in ("y", "both"):
+        axes.set_yticks(measure_grid_ticks)
+        axes.set_yticks(beat_grid_ticks, minor=True)
 
     axes.set_axisbelow(True)
     axes.grid(which='minor', alpha=0.2, axis=axis)
@@ -337,6 +339,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             self,
             rhythm_loop: RhythmLoop,
             figure: tp.Optional[plt.Figure] = None,
+            legend: bool = True,
             figure_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
             legend_kwargs: tp.Dict[str, tp.Any] = None,
             subplot_kwargs: tp.Optional[tp.Dict[str, tp.Any]] = None,
@@ -347,6 +350,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
 
         :param rhythm_loop: the rhythm loop to plot
         :param figure: figure to draw the loop
+        :param legend: set to False to hide the legend
         :param figure_kwargs: keyword arguments for the creation of the figure. This argument is ignored if a custom
                               figure has been provided
         :param subplot_kwargs: keyword arguments for the call to Figure.add_subplot
@@ -407,7 +411,7 @@ class RhythmLoopPlotter(object, metaclass=ABCMeta):
             **self.get_legend_kwargs()
         }
 
-        if not self._draws_own_legend:
+        if legend and not self._draws_own_legend:
             figure.legend(artist_handles, track_names, **legend_kwargs)
 
         if show:
@@ -479,7 +483,7 @@ class ChronotonicNotation(RhythmLoopPlotter):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
-            feature_extractors={'chronotonic': ChronotonicChain()},
+            feature_extractors={'chronotonic': ChronotonicChain(), 'mt_ioi': MultiTrackMonoFeature(IOIVector)},
             snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
             track_colors=track_colors
         )
@@ -490,10 +494,17 @@ class ChronotonicNotation(RhythmLoopPlotter):
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         plot_rhythm_grid(axes, rhythm_loop, self.get_unit())
+        mt_ioi_vec = self.get_feature_extractor("mt_ioi").process(rhythm_loop)
+        max_duration = max(ioi for ioi_vec in mt_ioi_vec for ioi in ioi_vec)
+        axes.set_ylabel("chronotonic value")
+        axes.set_xlabel("atomic beat")
+        axes.set_yticks([*range(1, max_duration + 1)])
+        axes.grid(which="major", alpha=0.2, axis="y")
+        axes.set_ylim(0, max_duration + 1)
 
     def __draw_track__(self, rhythm_track: Track, axes: plt.Axes, **kw):
         chronotonic_chain = self.get_feature_extractor("chronotonic").process(rhythm_track)
-        return axes.plot(chronotonic_chain, "--.", color=kw['color'])
+        return axes.plot(chronotonic_chain, "-o", color=kw['color'])
 
 
 class PolygonNotation(RhythmLoopPlotter):
