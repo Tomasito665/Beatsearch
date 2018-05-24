@@ -1176,7 +1176,7 @@ class MonophonicVariationGraph(RhythmLoopPlotter):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
-            feature_extractors={'variation': MonophonicVariabilityVector(unit, cyclic=True)},
+            feature_extractors={'variation': MonophonicVariabilityVector(unit)},
             snap_to_grid_policy=SnapsToGridPolicy.ALWAYS,
             track_colors=track_colors
         )

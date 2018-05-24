@@ -2971,9 +2971,10 @@ def create_rumba_rhythm(resolution=240, polyphonic=True):
             kick:   ---x--x----x--x-
             snare:  --x-x---x--x---x
             hi-hat: x-x-xxxx-xxxx-xx
-        """), TimeSignature(4, 4))
+        """), 'semiquaver', TimeSignature(4, 4))
     else:
-        rhythm = MonophonicRhythm.create.from_string("--x-x---x--x---x", TimeSignature(4, 4))
+        rhythm = MonophonicRhythm.create.from_string(
+            "--x-x---x--x---x", 'semiquaver', TimeSignature(4, 4))
 
     rhythm.set_resolution(resolution)
     return rhythm
