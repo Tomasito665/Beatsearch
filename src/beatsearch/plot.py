@@ -510,7 +510,8 @@ class ChronotonicNotation(RhythmLoopPlotter):
 class PolygonNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Polygon notation"
 
-    def __init__(self, unit: UnitType = Unit.EIGHTH, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
+    def __init__(self, unit: UnitType = Unit.EIGHTH, show_step_wedges: bool = True,
+                 show_step_numbers: bool = False, *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS):
         super().__init__(
             unit=unit,
             subplot_layout=CombinedSubplotLayout(),
@@ -519,9 +520,33 @@ class PolygonNotation(RhythmLoopPlotter):
             track_colors=track_colors
         )
 
+        self._show_step_wedges = None
+        self._show_step_numbers = None
+
+        self.show_step_wedges = show_step_wedges
+        self.show_step_numbers = show_step_numbers
+
     @classmethod
     def get_plot_type_name(cls):
         return cls.PLOT_TYPE_NAME
+
+    @property
+    def show_step_wedges(self) -> bool:
+        """Set to False to hide step markings"""
+        return self._show_step_wedges
+
+    @show_step_wedges.setter
+    def show_step_wedges(self, show_step_wedges: bool):
+        self._show_step_wedges = bool(show_step_wedges)
+
+    @property
+    def show_step_numbers(self):
+        """Set to False to hide step numbering"""
+        return self._show_step_numbers
+
+    @show_step_numbers.setter
+    def show_step_numbers(self, show_step_labels: bool):
+        self._show_step_numbers = bool(show_step_labels)
 
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         # avoid stretching the aspect ratio
@@ -530,8 +555,9 @@ class PolygonNotation(RhythmLoopPlotter):
         axes.axis([0, 1, 0, 1])
 
         # add base rhythm circle
-        main_radius = 0.3
+        main_radius = 0.27 if self.show_step_numbers else 0.3
         main_center = 0.5, 0.5
+        background_colors = "white", "#dfdfdf"
 
         # draws a wedge from the given start pulse to the given end pulse
         def draw_wedge(pulse_start, pulse_end, center=main_center, radius=main_radius, **kw_):
@@ -551,15 +577,26 @@ class PolygonNotation(RhythmLoopPlotter):
         for i_measure in range(0, n_measures, 2):
             from_pulse = i_measure * n_pulses_per_measure
             to_pulse = (i_measure + 1) * n_pulses_per_measure
-            draw_wedge(from_pulse, to_pulse, radius=1.0, fc=to_rgba("gray", 0.25))
+            draw_wedge(from_pulse, to_pulse, radius=1.0, fc=background_colors[1])
 
         # main circle
         circle = plt.Circle(main_center, main_radius, fc="white")
         axes.add_artist(circle)
 
         # draw the pulse wedges
-        for i_pulse in range(0, n_pulses, 2):
-            draw_wedge(i_pulse, i_pulse + 1, fc=to_rgba("gray", 0.25))
+        if self.show_step_wedges:
+            for i_pulse in range(0, n_pulses, 2):
+                draw_wedge(i_pulse, i_pulse + 1, fc=background_colors[1])
+
+        # draw pulse numbers
+        if self.show_step_numbers:
+            for i_pulse in range(n_pulses):
+                i_measure = int(i_pulse / n_pulses_per_measure)
+                axes.text(
+                    *get_coordinates_on_circle(main_center, main_radius * 1.18, float(i_pulse) / n_pulses),
+                    i_pulse + 1, horizontalalignment="center", verticalalignment="center", fontsize="smaller",
+                    bbox={'boxstyle': "circle", 'fc': background_colors[i_measure % 2], 'ec': "none", 'pad': 0.5}
+                )
 
         return circle
 
