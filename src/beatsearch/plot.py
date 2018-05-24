@@ -139,13 +139,13 @@ def plot_box_notation_grid(
     text_x = text_box.x + (text_box.width / 2)
 
     # draw track name ids
-    for track_ix, [track_name, track_id] in enumerate(zip(track_names, track_ids)):
-        axes.text(
-            text_x, text_box.y + track_ix + 0.5, track_id,
-            verticalalignment="center", horizontalalignment="center"
-        )
-
-        track_y_positions[track_name] = track_ix
+    if text_box.width > 0:
+        for track_ix, [track_name, track_id] in enumerate(zip(track_names, track_ids)):
+            axes.text(
+                text_x, text_box.y + track_ix + 0.5, track_id,
+                verticalalignment="center", horizontalalignment="center"
+            )
+            track_y_positions[track_name] = track_ix
 
     return {
         'grid_box': grid_box,
@@ -687,10 +687,14 @@ class IOIHistogramPlot(RhythmLoopPlotter):
 class BoxNotation(RhythmLoopPlotter):
     PLOT_TYPE_NAME = "Box notation"
 
+    DEFAULT_BACKGROUND = (to_rgba("black", 0.21), to_rgba("black", 0.09))
+    SQUARE, CIRCLE = "square", "circle"
+
     def __init__(
-            self, unit: UnitType = Unit.EIGHTH,
-            extra_feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractor]] = None,
-            symbols: str = "squares", *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS
+            self, unit: UnitType = Unit.EIGHTH, onset_symbol: str = CIRCLE, track_ids: bool = True,
+            background: tp.Union[tp.Any, tp.Tuple[tp.Any, tp.Any]] = DEFAULT_BACKGROUND, line_color: tp.Any = "black",
+            line_width: int = 1, extra_feature_extractors: tp.Optional[tp.Dict[str, RhythmFeatureExtractor]] = None,
+            *_, track_colors: tp.Iterable[str] = DEFAULT_TRACK_COLORS
     ):
         super().__init__(
             unit=unit,
@@ -704,21 +708,96 @@ class BoxNotation(RhythmLoopPlotter):
             track_colors=track_colors
         )
 
-        self.line_width = 1
-        self.line_color = "black"
-        self.text_box_width = 2
+        self._onset_symbol = None       # type: str
+        self._show_track_labels = None  # type: bool
+        self._relative_padding = None   # type: float
+        self._background = None         # type: tp.Tuple[tp.Any, tp.Any]
+        self._line_color = None         # type: tp.Any
+        self._line_width = None         # type: int
+
         self.rel_pad_x = 0.15
-        self.position = Point2D(0, 0)
-        self.symbols = symbols
+        self.onset_symbol = onset_symbol
+        self.track_ids = track_ids
+        self.background = background
+        self.line_color = line_color
+        self.line_width = line_width
 
     @classmethod
     def get_plot_type_name(cls):
         return cls.PLOT_TYPE_NAME
 
+    @property
+    def onset_symbol(self) -> str:
+        """Onset symbol, must be one of ['circle', 'square']"""
+        return self._onset_symbol
+
+    @onset_symbol.setter
+    def onset_symbol(self, onset_symbol: str):
+        options = (self.SQUARE, self.CIRCLE)
+        if onset_symbol not in options:
+            raise ValueError("Unknown onset symbol: '%s'. Choose between: %s" % (onset_symbol, str(options)))
+        self._onset_symbol = onset_symbol
+
+    @property
+    def track_ids(self) -> bool:
+        """Set to False to hide the track id labels"""
+        return self._show_track_labels
+
+    @track_ids.setter
+    def track_ids(self, text_box: bool):
+        self._show_track_labels = bool(text_box)
+
+    @property
+    def relative_padding(self) -> float:
+        """Relative horizontal padding"""
+        return self._relative_padding
+
+    @relative_padding.setter
+    def relative_padding(self, relative_padding: float):
+        self._relative_padding = float(relative_padding)
+
+    @property
+    def background(self) -> tp.Union[tp.Any, tp.Tuple[tp.Any, tp.Any]]:
+        return self._background
+
+    @background.setter
+    def background(self, background: tp.Union[tp.Any, tp.Tuple[tp.Any, tp.Any]]):
+        try:
+            _ = to_rgba(background)
+            self._background = (background, background)
+        except (TypeError, ValueError) as err_to_rgba:
+            try:
+                color_a, color_b = background
+            except (TypeError, ValueError):
+                raise err_to_rgba
+
+            _ = to_rgba(color_a)
+            _ = to_rgba(color_b)
+
+            self._background = color_a, color_b
+
+    @property
+    def line_color(self) -> tp.Any:
+        return self._line_color
+
+    @line_color.setter
+    def line_color(self, line_color: tp.Any):
+        _ = to_rgba(line_color)
+        self._line_color = line_color
+
+    @property
+    def line_width(self) -> int:
+        return self._line_width
+
+    @line_width.setter
+    def line_width(self, line_width: int):
+        self._line_width = int(line_width)
+
     def __setup_subplot__(self, rhythm_loop: RhythmLoop, axes: plt.Axes, **kw):
         box_notation_grid_info = plot_box_notation_grid(
-            axes, rhythm_loop, self.unit, self.position, self.text_box_width,
-            self.line_width, self.line_color)
+            axes, rhythm_loop, self.unit, Point2D(0, 0),
+            2 if self.track_ids else 0, 1, "black", beat_colors=self._background
+        )
 
         container = box_notation_grid_info['container']  # type: Rectangle2D
 
@@ -750,19 +829,19 @@ class BoxNotation(RhythmLoopPlotter):
         n_steps = rhythm_track.get_duration(self.unit)
         track_ix = kw['track_ix']
 
-        if self.symbols == "squares":
+        if self.onset_symbol == self.SQUARE:
             get_artist = lambda pos: plt.Rectangle(
                 [grid_box.x + onset_pos, grid_box.y + track_ix],
                 width=1, height=1, facecolor=kw['color'],
                 edgecolor="black", linewidth=0.75, joinstyle="miter"
             )
-        elif self.symbols == "circles":
+        elif self.onset_symbol == self.CIRCLE:
             get_artist = lambda pos: plt.Circle(
                 [grid_box.x + onset_pos + 0.5, grid_box.y + track_ix + 0.5],
                 radius=0.25, facecolor=kw['color'], fill=True, edgecolor='none'
             )
         else:
-            raise ValueError("Unknown symbol type: '%s'" % self.symbols)
+            raise ValueError("Unknown symbol type: '%s'" % self.onset_symbol)
 
         # filter out onsets whose position might have been pushed out of the grid (due to
         # a low rhythm plotter unit)
