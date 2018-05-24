@@ -1,5 +1,6 @@
 import math
 import enum
+import anytree
 import numpy as np
 import typing as tp
 import matplotlib.artist
@@ -9,7 +10,7 @@ from matplotlib.colors import to_rgba
 from matplotlib.patches import Wedge
 from abc import ABCMeta, abstractmethod
 from itertools import cycle, repeat
-from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track
+from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track, MeterTreeNode
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, DistantPolyphonicSyncopationVector, \
     PolyphonicSyncopationVector, MonophonicMetricalTensionVector, PolyphonicMetricalTensionVector, \
@@ -1242,7 +1243,7 @@ def plot_salience_profile(
         bottom: tp.Optional[int] = None,
         axes: tp.Optional[plt.Axes] = None,
         **kwargs: tp.Dict[str, tp.Any]
-):
+) -> plt.Axes:
     """Utility function to plot a metrical salience profile
 
     This function plots the given salience profile and returns the matplotlib axes object on which the salience profile
@@ -1266,6 +1267,63 @@ def plot_salience_profile(
     return axes
 
 
+def plot_meter_tree(root: MeterTreeNode, axes: tp.Optional[plt.Axes] = None, center: bool = False) -> plt.Axes:
+    """
+    Utility function to plot a hierarchical meter tree, given its root.
+
+    :param root: root of the hierarchical meter tree returned by :meth:`beatsearch.rhythm.TimeSignature.get_meter_tree`
+    :param axes: matplotlib axes object, when given, the tree be drawn on these axes
+    :param center: when set to True, the nodes will be centered horizontally
+    :return: the matplotlib axes object on which the hierarchical meter tree was drawn
+    """
+
+    if not axes:
+        figure = plt.figure("Meter tree")
+        axes = figure.add_subplot(111)
+
+    max_depth = 0
+    width = root.duration
+
+    axes.set_xlim(-1, width + 1)
+    axes.set_xticks([])
+    axes.set_yticks([])
+
+    text_kwargs = dict(
+        horizontalalignment="center", verticalalignment="center",
+        color="black", bbox={'boxstyle': "circle", 'fc': "white", 'ec': "black", 'pad': 0.5, 'lw': 1.5}
+    )
+
+    for nodes_curr_depth in anytree.LevelOrderGroupIter(root):
+        if len(nodes_curr_depth) == 0:
+            continue
+
+        curr_depth = nodes_curr_depth[0].depth
+        curr_node_width = nodes_curr_depth[0].duration
+        max_depth = max(curr_depth, max_depth)
+        x_offset = width * 0.5 / len(nodes_curr_depth) if center else 0
+
+        for node_i, node in enumerate(nodes_curr_depth):
+            node.xy = node_i * curr_node_width + x_offset, curr_depth
+            if not node.is_root:
+                axes.add_artist(plt.Line2D(
+                    [node.xy[0], node.parent.xy[0]],
+                    [node.xy[1], node.parent.xy[1]],
+                    color="black", lw=text_kwargs['bbox']['lw']
+                ))
+
+            # Background textbox just for double-edge effect to make the main text circle 'float' from the line :)
+            axes.text(*node.xy, curr_node_width, {**text_kwargs, 'bbox': {
+                **text_kwargs['bbox'],
+                'pad': text_kwargs['bbox']['pad'] + 0.2,
+                'fc': "white", 'ec': "white"
+            }})
+
+            axes.text(*node.xy, curr_node_width, **text_kwargs)
+
+    axes.set_ylim(max_depth + 1, -1)
+    return axes
+
+
 __all__ = [
     # Rhythm plotters
     'RhythmLoopPlotter', 'get_rhythm_loop_plotter_classes',
@@ -1279,5 +1337,5 @@ __all__ = [
     'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
 
     # Misc
-    'SnapsToGridPolicy', 'plot_rhythm_grid', 'plot_salience_profile'
+    'SnapsToGridPolicy', 'plot_rhythm_grid', 'plot_salience_profile', 'plot_meter_tree'
 ]

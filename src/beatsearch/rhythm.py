@@ -4,10 +4,12 @@ import math
 import enum
 import uuid
 import pickle
+import anytree
 import logging
 import inspect
 import textwrap
 import itertools
+import collections
 import numpy as np
 import typing as tp
 from io import IOBase
@@ -269,6 +271,66 @@ def convert_tick(tick: int, old_res: int, target: tp.Union[UnitType, int, None],
     return Unit.get(target).from_ticks(tick, old_res, quantize)
 
 
+class MeterTreeNode(anytree.NodeMixin):
+    _unit: tp.Optional[Unit]
+    _time_sig: tp.Optional[tp.Any]
+
+    def __init__(self, parent=None, **kwargs):
+        # type: (tp.Optional[MeterTreeNode]) -> None
+        self.parent = parent
+        if "unit" in kwargs:
+            self.unit = kwargs['unit']
+        if "time_signature" in kwargs:
+            self.time_signature = kwargs['time_signature']
+
+    @property
+    def time_signature(self):  # type: () -> tp.Optional[TimeSignature]
+        try:
+            return self._time_sig
+        except AttributeError:
+            parent = self.parent
+            return parent.time_signature if parent else None
+
+    @time_signature.setter
+    def time_signature(self, time_signature):  # type: (TimeSignature) -> None
+        parent = self.parent
+        if parent:
+            parent.time_signature = time_signature
+        else:
+            self._time_sig = time_signature
+
+    @property
+    def unit(self) -> tp.Optional[Unit]:
+        try:
+            return self._unit
+        except AttributeError:
+            parent = self.parent
+            return parent.unit if parent else None
+
+    @unit.setter
+    def unit(self, unit: UnitType):
+        parent = self.parent
+        unit = Unit.get(unit)
+        if parent:
+            parent.unit = unit
+        else:
+            self._unit = unit
+
+    @property
+    def duration(self):
+        return sum(node.is_leaf for node in self.descendants) or 1
+
+    def __repr__(self):
+        n = self.duration
+        unit = self.unit
+        time_sig = self.time_signature
+        if self.is_root and unit is not None:
+            if time_sig is not None:
+                return "%i <%s, unit=%s>" % (n, str(time_sig), unit.name)
+            return "%i <unit=%s>" % (n, unit.name)
+        return str(n)
+
+
 class TimeSignature(object):
     """
     This class represents a musical time signature, consisting of a numerator and a denominator.
@@ -305,7 +367,7 @@ class TimeSignature(object):
         )
 
     @parse_unit_argument
-    def get_meter_tree(self, unit: UnitType = Unit.EIGHTH):
+    def get_meter_tree_subdivisions(self, unit: UnitType = Unit.EIGHTH):
         """Returns a vector containing subdivision counts needed to construct a hierarchical meter tree structure
 
         A meter is representable as a tree structure, e.g. time signature 6/8 is represented by this tree:
@@ -357,6 +419,36 @@ class TimeSignature(object):
         divisions.extend(itertools.repeat(2, n_beat_divisions))
         return tuple(divisions)
 
+    def get_meter_tree(self, unit: UnitType = Unit.EIGHTH) -> MeterTreeNode:
+        """Constructs a hierarchical meter tree structure and returns the root
+
+        See :meth:`beatsearch.rhythm.TimeSignature.get_meter_tree_subdivisions` for more info.
+
+        :param unit: unit of leaf nodes
+        :return: root node of tree
+        """
+
+        subdivisions_tuple = self.get_meter_tree_subdivisions(unit)
+        subdivisions_deque = collections.deque(subdivisions_tuple, maxlen=len(subdivisions_tuple))
+        n_nodes = sequence_product(subdivisions_tuple)
+
+        root = MeterTreeNode(unit=unit, time_signature=self)
+        prev_leaf_nodes = collections.deque([root], maxlen=n_nodes)  # type: tp.Deque[MeterTreeNode]
+        curr_leaf_nodes = collections.deque([], maxlen=n_nodes)      # type: tp.Deque[MeterTreeNode]
+
+        while len(subdivisions_deque) > 0:
+            curr_leaf_nodes.clear()
+            curr_subdivision = subdivisions_deque.popleft()
+            while len(prev_leaf_nodes) > 0:
+                leaf_node = prev_leaf_nodes.pop()
+                curr_leaf_nodes.extend(
+                    MeterTreeNode(parent=leaf_node)
+                    for _ in range(curr_subdivision)
+                )
+            prev_leaf_nodes.extend(curr_leaf_nodes)
+
+        return root
+
     @staticmethod
     def check_salience_profile_type(salience_profile_type: str):
         """
@@ -383,11 +475,11 @@ class TimeSignature(object):
         meter. Otherwise, if equal_upbeats is true, all beat weights will be equal except for the downbeat, which will
         have a greater weight.
 
-        This method constructs a hierarchical meter tree structure (see get_meter_tree) and assigns a weight to each
-        node. Then it flattens the tree and returns it as a list. The weight of a node is the weight of its parent node
-        minus one. The weight of the root node is specified with the root_weight argument of this method. This way of
-        computing the salience profile corresponds to the method proposed by H.C. Longuet-Higgins & C.S. Lee in their
-        work titled "The Rhythmic Interpretation of Monophonic Music".
+        This method constructs a hierarchical meter tree structure (see get_meter_tree_subdivisions) and assigns a
+        weight to each node. Then it flattens the tree and returns it as a list. The weight of a node is the weight of
+        its parent node minus one. The weight of the root node is specified with the root_weight argument of this method.
+        This way of computing the salience profile corresponds to the method proposed by H.C. Longuet-Higgins & C.S. Lee
+        in their work titled "The Rhythmic Interpretation of Monophonic Music".
 
         This method can create three kinds of salience profiles, depending on the given "kind" parameter.
 
@@ -464,7 +556,7 @@ class TimeSignature(object):
         assert unit <= self.get_beat_unit(), "can't represent this time signature in %s" % str(unit)
 
         n_steps = self.get_beat_unit().convert(self.numerator, unit, True)
-        subdivisions = self.get_meter_tree(unit)
+        subdivisions = self.get_meter_tree_subdivisions(unit)
 
         if not subdivisions:
             assert self.get_beat_unit().convert(self.numerator, unit, True) == 1
@@ -3303,7 +3395,7 @@ __all__ = [
     'RhythmLoop', 'MidiRhythm',
 
     # Time unit
-    'Unit', 'UnitType', 'UnitError', 'parse_unit_argument', 'rescale_tick', 'convert_tick',
+    'Unit', 'UnitType', 'UnitError', 'parse_unit_argument', 'rescale_tick', 'convert_tick', 'MeterTreeNode',
 
     # Misc
     'Onset', 'Track', 'TimeSignature', 'GMDrumMapping', 'create_rumba_rhythm', 'MidiRhythmCorpus',
