@@ -40,15 +40,15 @@ class UnitError(Exception):
 @total_ordering  # enable <, > <= and >= operators
 class Unit(enum.Enum):
     OCTUPLE_WHOLE = Fraction(8, 1), ("octuple whole", "octuple", "large", "duplex longa", "maxima")
-    QUADRUPLE_WHOLE = Fraction(4, 1), ("long", "longa")
-    DOUBLE_WHOLE = Fraction(2, 1), ("double", "breve")
-    WHOLE = Fraction(1, 1), ("whole", "semibreve")
-    HALF = Fraction(1, 2), ("half", "minim")
-    QUARTER = Fraction(1, 4), ("quarter", "crotchet")
-    EIGHTH = Fraction(1, 8), ("eighth", "quaver")
-    SIXTEENTH = Fraction(1, 16), ("sixteenth", "semiquaver")
-    THIRTY_SECOND = Fraction(1, 32), ("thirty-second", "demisemiquaver")
-    SIXTY_FOURTH = Fraction(1, 64), ("sixty-fourth", "hemidemisemiquaver")
+    QUADRUPLE_WHOLE = Fraction(4, 1), ("longa", "long")
+    DOUBLE_WHOLE = Fraction(2, 1), ("breve", "double")
+    WHOLE = Fraction(1, 1), ("semibreve", "whole")
+    HALF = Fraction(1, 2), ("minim", "half")
+    QUARTER = Fraction(1, 4), ("crotchet", "quarter")
+    EIGHTH = Fraction(1, 8), ("quaver", "eighth")
+    SIXTEENTH = Fraction(1, 16), ("semiquaver", "sixteenth")
+    THIRTY_SECOND = Fraction(1, 32), ("demisemiquaver", "thirty-second")
+    SIXTY_FOURTH = Fraction(1, 64), ("hemidemisemiquaver", "sixty-fourth")
 
     __by_note_names__ = dict()    # type: tp.Dict[str, Unit]
     __by_note_values__ = dict()   # type: tp.Dict[float, Unit]

@@ -10,7 +10,8 @@ from matplotlib.colors import to_rgba
 from matplotlib.patches import Wedge
 from abc import ABCMeta, abstractmethod
 from itertools import cycle, repeat
-from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track, MeterTreeNode
+from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track, MeterTreeNode, \
+    TimeSignature
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, DistantPolyphonicSyncopationVector, \
     PolyphonicSyncopationVector, MonophonicMetricalTensionVector, PolyphonicMetricalTensionVector, \
@@ -1242,6 +1243,7 @@ def plot_salience_profile(
         salience_profile: tp.Sequence[int],
         bottom: tp.Optional[int] = None,
         axes: tp.Optional[plt.Axes] = None,
+        show: bool = False,
         **kwargs: tp.Dict[str, tp.Any]
 ) -> plt.Axes:
     """Utility function to plot a metrical salience profile
@@ -1252,6 +1254,7 @@ def plot_salience_profile(
     :param salience_profile: salience profile returned by :meth:`beatsearch.rhythm.TimeSignature.get_salience_profile`
     :param bottom: the metrical salience value from which to draw the lines (defaults to min(salience_profile) - 1)
     :param axes: matplotlib axes object, when given, the salience profile will be drawn on these axes
+    :param show: when set to True, :meth:`matplotlib.pyplot.show` will be called at the end of this function's execution
     :param: kwargs: keyword arguments passed to :meth:`matplotlib.pyplot.Axes.stem`
     :return: the matplotlib axes object on which the salience profile was drawn
     """
@@ -1264,16 +1267,137 @@ def plot_salience_profile(
         bottom = min(salience_profile) - 1
 
     axes.stem(salience_profile, bottom=bottom, **kwargs)
+    if show:
+        plt.show()
     return axes
 
 
-def plot_meter_tree(root: MeterTreeNode, axes: tp.Optional[plt.Axes] = None, center: bool = False) -> plt.Axes:
+@parse_unit_argument
+def plot_metrical_grid(
+        time_signature: TimeSignature,
+        unit: UnitType = Unit.EIGHTH,
+        salience_profile_type: str = "hierarchical",
+        n_measures: int = 2,
+        beat_num_row_span: int = 3,
+        info_col_span: int = 2,
+        print_unit_name: bool = False,
+        rel_pad_x: float = 0.15,
+        axes: tp.Optional[plt.Axes] = None,
+        show: bool = False,
+) -> plt.Axes:
+    """
+    This is a utility function to plot a metrical grid as described by Lehrdahl & Jackendoff in chapter 2.2 of their
+    work called "A Generative Theory of Tonal Music".
+
+    :param time_signature:          time signature, this will be used to obtain the salience profile
+    :param unit:                    musical unit of fastest metrical level
+    :param salience_profile_type:   salience profile type
+    :param n_measures:              number of measures to plot
+    :param beat_num_row_span:       height of beat numbering container in rows (1 equals one level of the metrical grid)
+    :param info_col_span:           width of left info column displaying fastest unit name and "Beats" (1 equals one
+                                    step of the metrical grid)
+    :param print_unit_name:         if set to True, the fastest unit label will display its corresponding note name
+                                    instead of its note value as a fraction (e.g., "semiquaver" instead of "1/16")
+    :param rel_pad_x:               relative horizontal padding (vertical padding is automatically adjusted accordingly)
+    :param axes:                    matplotlib axes object, the metrical grid will be drawn onto these axes
+    :param show:                    when set to True, :meth:`matplotlib.pyplot.show` will be called at the end of this
+                                    function's execution
+
+    :return: the matplotlib axes object on which the metrical grid was plotted
+    """
+
+    if not axes:
+        figure = plt.figure("Metrical grid (%s, unit=%s)" % (
+            str(time_signature).replace("/", "_"), unit.name
+        ))
+
+        axes = figure.add_subplot(111)
+
+    if not TimeSignature.check_salience_profile_type(salience_profile_type):
+        raise ValueError(salience_profile_type)
+
+    salience_profile = time_signature.get_salience_profile(unit, salience_profile_type, 0)
+    n_pulses_per_beat = time_signature.get_beat_unit().convert(1, unit, True)
+    n_pulses_per_measure = len(salience_profile)
+    min_salience_strength = min(salience_profile)
+    n_pulses = n_pulses_per_measure * n_measures
+
+    grid_box = Rectangle2D(0, 0, n_pulses, abs(min_salience_strength))
+    beat_box = Rectangle2D(grid_box.x, grid_box.y - beat_num_row_span, grid_box.width, beat_num_row_span)
+    info_box = Rectangle2D(grid_box.x - info_col_span, grid_box.y, info_col_span, 1)
+
+    container = Rectangle2D(
+        info_box.x, beat_box.y,
+        grid_box.width + info_box.width,
+        grid_box.height + beat_box.height
+    )
+
+    # get viewport dimensions
+    x_padding = (rel_pad_x * container.width) / 2
+    x_bounds = [container.x_bounds[0] - x_padding, container.x_bounds[1] + x_padding]
+    y_padding = (abs(x_bounds[0] - x_bounds[1]) - container.height) / 2
+    y_bounds = [container.y_bounds[0] - y_padding, container.y_bounds[1] + y_padding]
+
+    # setup viewport
+    axes.axis("equal")  # equal axis for perfect circles
+    axes.set_xlim(*x_bounds)
+    axes.set_ylim(*reversed(y_bounds))  # reversed to have (0, 0) in upper-left position
+
+    # disable axis labels
+    axes.set_xticks([])
+    axes.set_yticks([])
+
+    # show fastest pulse text
+    if print_unit_name:
+        unit_info_str = unit.get_note_names()[0]
+    else:
+        unit_info_str = str(unit.get_note_value())
+
+    info_str_spacing = "  "
+
+    # add "Beats" text
+    axes.text(
+        info_box.x + info_box.width, beat_box.y + beat_box.height / 2.0, "Beats" + info_str_spacing,
+        size="smaller", horizontalalignment="right", verticalalignment="center"
+    )
+
+    # add legend for fastest unit
+    axes.text(
+        info_box.x + info_box.width, grid_box.y, "(= %s)%s" % (unit_info_str, info_str_spacing),
+        size="smaller", style="italic", horizontalalignment="right", verticalalignment="center"
+    )
+
+    for pulse_ix in range(n_pulses):
+        pulse_salience = salience_profile[pulse_ix % n_pulses_per_measure]
+        pulse_strength = abs(min_salience_strength - pulse_salience)
+        beat_ix = int(pulse_ix / n_pulses_per_beat) % time_signature.numerator
+        pos_x = pulse_ix + 0.5
+
+        if pulse_ix % n_pulses_per_beat == 0:
+            axes.text(
+                pos_x, beat_box.y + (beat_box.height / 2.0), str(beat_ix + 1), horizontalalignment="center",
+                verticalalignment="center", color="black", size="smaller"
+            )
+
+        for level in range(pulse_strength + 1):
+            axes.add_artist(plt.Circle([pos_x, level], 0.1, color="black"))
+
+    if show:
+        plt.show()
+
+    return axes
+
+
+def plot_meter_tree(root: MeterTreeNode, axes: tp.Optional[plt.Axes] = None,
+                    center: bool = False, show: bool = False) -> plt.Axes:
     """
     Utility function to plot a hierarchical meter tree, given its root.
 
     :param root: root of the hierarchical meter tree returned by :meth:`beatsearch.rhythm.TimeSignature.get_meter_tree`
     :param axes: matplotlib axes object, when given, the tree be drawn on these axes
     :param center: when set to True, the nodes will be centered horizontally
+    :param show: when set to True, :meth:`matplotlib.pyplot.show` will be called at the end of this function's execution
+
     :return: the matplotlib axes object on which the hierarchical meter tree was drawn
     """
 
@@ -1321,6 +1445,8 @@ def plot_meter_tree(root: MeterTreeNode, axes: tp.Optional[plt.Axes] = None, cen
             axes.text(*node.xy, curr_node_width, **text_kwargs)
 
     axes.set_ylim(max_depth + 1, -1)
+    if show:
+        plt.show()
     return axes
 
 
@@ -1337,5 +1463,5 @@ __all__ = [
     'SubplotLayout', 'CombinedSubplotLayout', 'StackedSubplotLayout', 'Orientation',
 
     # Misc
-    'SnapsToGridPolicy', 'plot_rhythm_grid', 'plot_salience_profile', 'plot_meter_tree'
+    'SnapsToGridPolicy', 'plot_rhythm_grid', 'plot_salience_profile', 'plot_metrical_grid', 'plot_meter_tree'
 ]
