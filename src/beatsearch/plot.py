@@ -1,6 +1,7 @@
 import math
 import enum
 import anytree
+import itertools
 import numpy as np
 import typing as tp
 import matplotlib.artist
@@ -10,14 +11,14 @@ from matplotlib.colors import to_rgba
 from matplotlib.patches import Wedge
 from abc import ABCMeta, abstractmethod
 from itertools import cycle, repeat
-from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, Track, MeterTreeNode, \
-    TimeSignature
+from beatsearch.rhythm import Unit, UnitType, parse_unit_argument, RhythmLoop, Rhythm, MonophonicRhythm, Track, \
+    MeterTreeNode, TimeSignature
 from beatsearch.feature_extraction import IOIVector, BinarySchillingerChain, \
     RhythmFeatureExtractor, ChronotonicChain, OnsetPositionVector, IOIHistogram, DistantPolyphonicSyncopationVector, \
     PolyphonicSyncopationVector, MonophonicMetricalTensionVector, PolyphonicMetricalTensionVector, \
-    MonophonicVariabilityVector, MultiTrackMonoFeature
+    MonophonicVariabilityVector, MultiTrackMonoFeature, BinaryOnsetVector, NoteVector
 from beatsearch.utils import QuantizableMixin, generate_abbreviations, Rectangle2D, Point2D, \
-    find_all_concrete_subclasses
+    find_all_concrete_subclasses, TupleView
 
 # make room for the labels
 from matplotlib import rcParams
@@ -1388,65 +1389,159 @@ def plot_metrical_grid(
     return axes
 
 
-def plot_meter_tree(root: MeterTreeNode, axes: tp.Optional[plt.Axes] = None,
-                    center: bool = False, show: bool = False) -> plt.Axes:
+def plot_meter_tree(
+        meter_tree_root_node: MeterTreeNode,
+        rhythm: tp.Optional[MonophonicRhythm] = None,
+        tie_notes: str = "tie_first",
+        center: bool = True,
+        empty_node_char: str = "-",
+        tie_y_margin: float = 0.05,
+        axes: tp.Optional[plt.Axes] = None,
+        show: bool = False
+) -> plt.Axes:
     """
-    Utility function to plot a hierarchical meter tree, given its root.
+    Utility function to plot a metrical tree structure as described by H. Longuet-Higgins and C. Lee in the chapter
+    called "The Theory of Metrical Rhythms" of the article titled "The Rhythmic Interpretation of Monophonic Music".
 
-    :param root: root of the hierarchical meter tree returned by :meth:`beatsearch.rhythm.TimeSignature.get_meter_tree`
-    :param axes: matplotlib axes object, when given, the tree be drawn on these axes
-    :param center: when set to True, the nodes will be centered horizontally
-    :param show: when set to True, :meth:`matplotlib.pyplot.show` will be called at the end of this function's execution
+    :param meter_tree_root_node:  Root node of the meter tree returned by :meth:`beatsearch.rhythm.TimeSignature.
+                                  get_meter_tree`.
+    :param rhythm:                Monophonic rhythm with a duration of one measure of the time signature that was used
+                                  to obtain the meter tree. When given, only the nodes that result in a note will be
+                                  drawn. Set this parameter to None for a full meter tree.
+    :param tie_notes:             One of 'tie_first', 'tie_all' and 'none'. If given no rhythm, the full tree is drawn,
+                                  which doesn't have any tied notes, effectively ignoring this parameter.
+    :param center:                Set to True to horizontally center the nodes.
+    :param empty_node_char:       Character to display in rest nodes.
+    :param tie_y_margin:          Margin between leaf nodes and ties (curved lines) connecting tied nodes.
+    :param axes:                  Matplotlib axes object on which to draw the tree.
+    :param show:                  When set to True this function will automatically call :meth:`matplotlib.pyplot.show`.
 
-    :return: the matplotlib axes object on which the hierarchical meter tree was drawn
+    :return: the matplotlib axes object on which the tree was drawn
     """
 
     if not axes:
         figure = plt.figure("Meter tree")
         axes = figure.add_subplot(111)
 
-    max_depth = 0
-    width = root.duration
+    time_signature = meter_tree_root_node.time_signature
+    unit = meter_tree_root_node.unit
+    assert time_signature is not None
+    assert unit is not None
 
-    axes.set_xlim(-1, width + 1)
+    n_steps = int(time_signature.get_measure_duration(unit))
+
+    if rhythm:
+        rhythm_step_count = rhythm.get_duration(unit, ceil=True)
+        if rhythm_step_count != n_steps:
+            raise ValueError("Expected a rhythm with step count %i, "
+                             "given rhythm has %i steps" % (n_steps, rhythm_step_count))
+        if rhythm.get_time_signature() is None:
+            rhythm.set_time_signature(time_signature)
+    else:
+        rhythm = MonophonicRhythm.create.from_binary_vector([1] * n_steps, unit, time_signature)
+        assert rhythm.get_duration(unit, ceil=True) == n_steps
+
+    note_vector = NoteVector(unit, True, False).process(rhythm)
+    metrical_tree_root_node = time_signature.get_meter_tree(unit)
+    metrical_tree_depth_group_nodes = tuple(anytree.LevelOrderGroupIter(metrical_tree_root_node))
+    metrical_tree_leaf_nodes = metrical_tree_depth_group_nodes[-1]
+
+    tree_height = len(metrical_tree_depth_group_nodes) - 1
+    tree_width = metrical_tree_root_node.duration
+    assert metrical_tree_root_node.duration == n_steps
+
+    axes.set_xlabel("1 = %s (%s)" % (unit.get_note_names()[0], unit.get_note_value()))
+    axes.set_xlim(-1, tree_width + 1)
+    axes.set_ylim(tree_height + 1, -1)
     axes.set_xticks([])
     axes.set_yticks([])
 
+    # Assign coordinates to each node
+    for node_group in metrical_tree_depth_group_nodes:
+        assert len(node_group) > 0
+        node_depth = node_group[0].depth
+        node_duration = node_group[0].duration
+        # Compute horizontal offset for centered notes if necessary
+        x_offset = tree_width * 0.5 / len(node_group) if center else 0
+        for node_index, node in enumerate(node_group):
+            node.xy = Point2D(node_index * node_duration + x_offset, node_depth)
+
     text_kwargs = dict(
-        horizontalalignment="center", verticalalignment="center",
-        color="black", bbox={'boxstyle': "circle", 'fc': "white", 'ec': "black", 'pad': 0.5, 'lw': 1.5}
+        horizontalalignment="center", verticalalignment="center", color="black",
+        bbox={'boxstyle': "circle", 'fc': "white", 'ec': "black", 'pad': 0.5, 'lw': 1.5}
     )
 
-    for nodes_curr_depth in anytree.LevelOrderGroupIter(root):
-        if len(nodes_curr_depth) == 0:
-            continue
+    # Draws the given node and connects it to its parent with a line (if it has a parent), assuming that the coordinates
+    # of the given node are already set to its "xy" attribute
+    def draw_node(_node: tp.Union[MeterTreeNode, tp.Any], _is_dummy_node: bool = False, _show_text: bool = True):
+        if not _node.is_root:
+            axes.add_artist(plt.Line2D(
+                (_node.xy[0], _node.parent.xy[0]),
+                (_node.xy[1], _node.parent.xy[1]),
+                color="black", linewidth=1
+            ))
 
-        curr_depth = nodes_curr_depth[0].depth
-        curr_node_width = nodes_curr_depth[0].duration
-        max_depth = max(curr_depth, max_depth)
-        x_offset = width * 0.5 / len(nodes_curr_depth) if center else 0
+        _node_str = _node.duration if _show_text else empty_node_char
 
-        for node_i, node in enumerate(nodes_curr_depth):
-            node.xy = node_i * curr_node_width + x_offset, curr_depth
-            if not node.is_root:
-                axes.add_artist(plt.Line2D(
-                    [node.xy[0], node.parent.xy[0]],
-                    [node.xy[1], node.parent.xy[1]],
-                    color="black", lw=text_kwargs['bbox']['lw']
-                ))
+        # Background textbox just for double-edge effect to make the main text circle 'float' from the line :)
+        axes.text(*_node.xy, _node_str, {**text_kwargs, 'bbox': {
+            **text_kwargs['bbox'],
+            'pad': text_kwargs['bbox']['pad'] + 0.2,
+            'fc': "white", 'ec': "white"
+        }})
 
-            # Background textbox just for double-edge effect to make the main text circle 'float' from the line :)
-            axes.text(*node.xy, curr_node_width, {**text_kwargs, 'bbox': {
-                **text_kwargs['bbox'],
-                'pad': text_kwargs['bbox']['pad'] + 0.2,
-                'fc': "white", 'ec': "white"
-            }})
+        axes.text(*_node.xy, _node_str, {**text_kwargs, 'bbox': {
+            **text_kwargs['bbox'], 'ls': "dotted" if _is_dummy_node else "solid"
+        }})
 
-            axes.text(*node.xy, curr_node_width, **text_kwargs)
+    try:
+        should_draw_tie = {
+            'tie_first': lambda et: et == NoteVector.TIED_NOTE,
+            'tie_all': lambda et: et != NoteVector.NOTE,
+            'none': lambda et: False
+        }[tie_notes]
+    except AttributeError:
+        raise ValueError("Given unknown tie option '%s', choose between "
+                         "'tie_first', 'tie_all' or 'none'" % tie_notes)
 
-    axes.set_ylim(max_depth + 1, -1)
+    # Keep track of already drawn ancestor nodes
+    drawn_ancestor_nodes = set()
+    prev_e_node = None
+
+    # For every note in the note vector, find and draw its corresponding node and its ancestors
+    for e_type, e_dur, e_pos in note_vector:
+        step_node = metrical_tree_leaf_nodes[e_pos]
+        e_node = next((node for node in itertools.chain(
+            [step_node], step_node.ancestors) if node.duration == e_dur), None)
+        assert e_node is not None
+
+        # Check if this node should be tied to the previous node
+        tie_to_prev_node = should_draw_tie(e_type)
+
+        # Update the vertical position of the event node and draw it
+        e_node.xy = e_node.xy[0], tree_height
+        draw_node(e_node, e_type != NoteVector.NOTE, e_type == NoteVector.NOTE or tie_to_prev_node)
+
+        # Draw tie in case of tied note
+        if tie_to_prev_node:
+            assert prev_e_node is not None, "note vector shouldn't start with a tied node in non-cyclic mode"
+            tie_width = e_node.xy[0] - prev_e_node.xy[0]
+            tie_height = 0.25
+            axes.add_patch(matplotlib.patches.Arc(
+                [prev_e_node.xy[0] + tie_width / 2.0, tree_height + tie_height + tie_y_margin],
+                tie_width, tie_height, 0.0, 0 + 1.5, 180 - 1.5
+            ))
+
+        for a_node in e_node.ancestors:
+            if a_node in drawn_ancestor_nodes:
+                continue
+            draw_node(a_node)
+
+        prev_e_node = e_node
+
     if show:
         plt.show()
+
     return axes
 
 
