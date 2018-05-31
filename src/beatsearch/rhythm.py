@@ -363,6 +363,11 @@ class TimeSignature(object):
         beat_unit = self.get_beat_unit()
         return beat_unit.convert(self.numerator, unit, False)
 
+    @parse_unit_argument
+    def get_beat_duration(self, unit: UnitType):
+        beat_unit = self.get_beat_unit()
+        return beat_unit.convert(1, unit, False)
+
     def to_midi_event(self, metronome=24, thirty_seconds=8):
         return midi.TimeSignatureEvent(
             numerator=self.numerator,

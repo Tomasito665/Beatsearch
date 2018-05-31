@@ -1309,7 +1309,7 @@ def plot_metrical_grid(
 
     if not axes:
         figure = plt.figure("Metrical grid (%s, unit=%s)" % (
-            str(time_signature).replace("/", "_"), unit.name
+            str(time_signature).replace("/", "-"), unit.name
         ))
 
         axes = figure.add_subplot(111)
@@ -1396,6 +1396,11 @@ def plot_meter_tree(
         center: bool = True,
         empty_node_char: str = "-",
         tie_y_margin: float = 0.05,
+        tie_x_offset: float = 0.07,
+        salience_profile_type: tp.Optional[str] = None,
+        salience_text_margin: float = 0.7,
+        viewport_x_padding: float = 0.5,
+        viewport_y_padding: float = 1.0,
         axes: tp.Optional[plt.Axes] = None,
         show: bool = False
 ) -> plt.Axes:
@@ -1403,30 +1408,45 @@ def plot_meter_tree(
     Utility function to plot a metrical tree structure as described by H. Longuet-Higgins and C. Lee in the chapter
     called "The Theory of Metrical Rhythms" of the article titled "The Rhythmic Interpretation of Monophonic Music".
 
-    :param meter_tree_root_node:  Root node of the meter tree returned by :meth:`beatsearch.rhythm.TimeSignature.
-                                  get_meter_tree`.
-    :param rhythm:                Monophonic rhythm with a duration of one measure of the time signature that was used
-                                  to obtain the meter tree. When given, only the nodes that result in a note will be
-                                  drawn. Set this parameter to None for a full meter tree.
-    :param tie_notes:             One of 'tie_first', 'tie_all' and 'none'. If given no rhythm, the full tree is drawn,
-                                  which doesn't have any tied notes, effectively ignoring this parameter.
-    :param center:                Set to True to horizontally center the nodes.
-    :param empty_node_char:       Character to display in rest nodes.
-    :param tie_y_margin:          Margin between leaf nodes and ties (curved lines) connecting tied nodes.
-    :param axes:                  Matplotlib axes object on which to draw the tree.
-    :param show:                  When set to True this function will automatically call :meth:`matplotlib.pyplot.show`.
+    :param meter_tree_root_node:   Root node of the meter tree returned by :meth:`beatsearch.rhythm.TimeSignature.
+                                   get_meter_tree`.
+    :param rhythm:                 Monophonic rhythm with a duration of one measure of the time signature that was used
+                                   to obtain the meter tree. When given, only the nodes that result in a note will be
+                                   drawn. Set this parameter to None for a full meter tree.
+    :param tie_notes:              One of 'tie_first', 'tie_all' and 'none'. If given no rhythm, the full tree is drawn,
+                                   which doesn't have any tied notes, effectively ignoring this parameter.
+    :param center:                 Set to True to horizontally center the nodes.
+    :param empty_node_char:        Character to display in rest nodes.
+    :param tie_y_margin:           Margin between leaf nodes and ties (curved lines) connecting tied nodes.
+    :param tie_x_offset:           Horizontal offset of tie start and endings from the center of the node. When set to
+                                   zero, ties will start and end exactly at the horizontal center of the node. This may
+                                   not be desired in case of multiple ties in series, in which case the ties will get
+                                   connected with each other.
+    :param salience_profile_type:  Set to one of 'hierarchical', 'equal_upbeats' or 'equal_beats' to display its
+                                   corresponding salience profile values under the leaf nodes.
+    :param salience_text_margin:   Margin between leaf nodes and the salience profile labels. The text is vertically
+                                   top-aligned to the bottom of the tree plus this margin. If no salience profile is
+                                   given, there is no salience profile to display the values of and this parameter is
+                                   effectively ignored.
+    :param viewport_x_padding      Horizontal viewport padding.
+    :param viewport_y_padding      Vertical viewport padding.
+    :param axes:                   Matplotlib axes object on which to draw the tree.
+    :param show:                   When set to True this function will automatically call :meth:`matplotlib.pyplot.show`.
 
     :return: the matplotlib axes object on which the tree was drawn
     """
-
-    if not axes:
-        figure = plt.figure("Meter tree")
-        axes = figure.add_subplot(111)
 
     time_signature = meter_tree_root_node.time_signature
     unit = meter_tree_root_node.unit
     assert time_signature is not None
     assert unit is not None
+    assert unit < Unit.WHOLE
+
+    if not axes:
+        figure = plt.figure("Meter tree (%s, unit=%s)" % (
+            str(time_signature).replace("/", "-"), unit.name
+        ))
+        axes = figure.add_subplot(111)
 
     n_steps = int(time_signature.get_measure_duration(unit))
 
@@ -1450,21 +1470,38 @@ def plot_meter_tree(
     tree_width = metrical_tree_root_node.duration
     assert metrical_tree_root_node.duration == n_steps
 
-    axes.set_xlabel("1 = %s (%s)" % (unit.get_note_names()[0], unit.get_note_value()))
-    axes.set_xlim(-1, tree_width + 1)
-    axes.set_ylim(tree_height + 1, -1)
-    axes.set_xticks([])
-    axes.set_yticks([])
+    # Assign coordinates to each node and store positions of leaf nodes, which represent the steps. Also, get "nice"
+    # fraction representations of node durations for Y axis labeling
+    n_steps_per_whole_note = Unit.WHOLE.convert(1, unit, True)
+    step_x_positions = []
+    depth_fractions = []
 
-    # Assign coordinates to each node
     for node_group in metrical_tree_depth_group_nodes:
         assert len(node_group) > 0
         node_depth = node_group[0].depth
         node_duration = node_group[0].duration
+        depth_fractions.append(Fraction(node_duration, n_steps_per_whole_note).limit_denominator(64))
         # Compute horizontal offset for centered notes if necessary
-        x_offset = tree_width * 0.5 / len(node_group) if center else 0
+        x_offset = tree_width * 0.5 / len(node_group) if center else 0.5
         for node_index, node in enumerate(node_group):
-            node.xy = Point2D(node_index * node_duration + x_offset, node_depth)
+            node_x = node_index * node_duration + x_offset
+            if node.is_leaf:
+                step_x_positions.append(node_x)
+            node.xy = Point2D(node_x, node_depth)
+
+    # Setup viewport
+    viewport_lower_y = tree_height
+    if salience_profile_type:
+        viewport_lower_y += salience_text_margin / 2.0
+    viewport_lower_y += viewport_y_padding
+    axes.set_xlabel("%s step (= %s)" % (unit.get_note_names()[0], unit.get_note_value()))
+    axes.set_ylabel("note value per depth")
+    axes.set_xlim(0 - viewport_x_padding, n_steps + viewport_x_padding)
+    axes.set_xticks(step_x_positions)
+    axes.set_xticklabels([*range(1, n_steps + 1)])
+    axes.set_ylim(viewport_lower_y, 0 - viewport_y_padding)
+    axes.set_yticks([*range(tree_height + 1)])
+    axes.set_yticklabels([str(fraction) for fraction in depth_fractions])
 
     text_kwargs = dict(
         horizontalalignment="center", verticalalignment="center", color="black",
@@ -1504,6 +1541,15 @@ def plot_meter_tree(
         raise ValueError("Given unknown tie option '%s', choose between "
                          "'tie_first', 'tie_all' or 'none'" % tie_notes)
 
+    if salience_profile_type:
+        if not TimeSignature.check_salience_profile_type(salience_profile_type):
+            raise ValueError(salience_profile_type)
+        salience_profile = time_signature.get_salience_profile(unit, salience_profile_type, 0)
+    else:
+        salience_profile = None
+
+    salience_text_y_pos = tree_height + salience_text_margin
+
     # Keep track of already drawn ancestor nodes
     drawn_ancestor_nodes = set()
     prev_e_node = None
@@ -1525,13 +1571,23 @@ def plot_meter_tree(
         # Draw tie in case of tied note
         if tie_to_prev_node:
             assert prev_e_node is not None, "note vector shouldn't start with a tied node in non-cyclic mode"
-            tie_width = e_node.xy[0] - prev_e_node.xy[0]
+            tie_width = (e_node.xy[0] - prev_e_node.xy[0]) - tie_x_offset * 2
             tie_height = 0.25
             axes.add_patch(matplotlib.patches.Arc(
                 [prev_e_node.xy[0] + tie_width / 2.0, tree_height + tie_height + tie_y_margin],
-                tie_width, tie_height, 0.0, 0 + 1.5, 180 - 1.5
+                tie_width, tie_height, 0.0, 0 + 1.3, 180 - 1.3
             ))
 
+        # Add salience profile value
+        if salience_profile is not None:
+            salience = salience_profile[e_pos]
+            salience_str = str(salience) if e_type == NoteVector.NOTE else "(%s)" % salience
+            axes.text(
+                *Point2D(x=e_node.xy[0], y=salience_text_y_pos), salience_str, size="smaller",
+                verticalalignment="top", horizontalalignment="center"
+            )
+
+        # Complete the hierarchy up to the root
         for a_node in e_node.ancestors:
             if a_node in drawn_ancestor_nodes:
                 continue
