@@ -1397,10 +1397,13 @@ def plot_meter_tree(
         empty_node_char: str = "-",
         tie_y_margin: float = 0.05,
         tie_x_offset: float = 0.07,
-        salience_profile_type: tp.Optional[str] = None,
-        salience_text_margin: float = 0.7,
+        text_size: tp.Union[int, str] = "medium",
+        metrical_root_level: tp.Optional[int] = 0,
+        show_weights: bool = False,
+        weight_labels_margin: float = 0.7,
         viewport_x_padding: float = 0.5,
         viewport_y_padding: float = 1.0,
+        show_y_grid: tp.Union[str, bool] = "auto",
         axes: tp.Optional[plt.Axes] = None,
         show: bool = False
 ) -> plt.Axes:
@@ -1422,14 +1425,20 @@ def plot_meter_tree(
                                    zero, ties will start and end exactly at the horizontal center of the node. This may
                                    not be desired in case of multiple ties in series, in which case the ties will get
                                    connected with each other.
-    :param salience_profile_type:  Set to one of 'hierarchical', 'equal_upbeats' or 'equal_beats' to display its
-                                   corresponding salience profile values under the leaf nodes.
-    :param salience_text_margin:   Margin between leaf nodes and the salience profile labels. The text is vertically
-                                   top-aligned to the bottom of the tree plus this margin. If no salience profile is
-                                   given, there is no salience profile to display the values of and this parameter is
-                                   effectively ignored.
+    :param text_size:              Text size of node and weight labels (either an absolute size as an integer or a
+                                   relative size as a string, one of: ‘xx-small’, ‘x-small’, ‘small’, ‘medium’, ‘large’,
+                                   ‘x-large’, ‘xx-large'.
+    :param metrical_root_level:    Specifies the value of the topmost metrical level. Set this parameter to None to hide
+                                   the metrical unit level labels at the right of the graph.
+    :param show_weights:           Set to True to display the weights of the musical events, which will be shown as
+                                   labels below the leaf nodes.
+    :param weight_labels_margin    Space between the leaf nodes and the event weight labels. The labels are vertically
+                                   top-aligned to the bottom of the tree plus the value given to this margin. If
+                                   show_weights is set to False, this parameter is ignored.
     :param viewport_x_padding      Horizontal viewport padding.
     :param viewport_y_padding      Vertical viewport padding.
+    :param show_y_grid             Specifies whether the horizontal grid lines are drawn. When set to "auto", the grid
+                                   will only show up if metrical unit levels labels are drawn.
     :param axes:                   Matplotlib axes object on which to draw the tree.
     :param show:                   When set to True this function will automatically call :meth:`matplotlib.pyplot.show`.
 
@@ -1489,13 +1498,13 @@ def plot_meter_tree(
                 step_x_positions.append(node_x)
             node.xy = Point2D(node_x, node_depth)
 
-    # Setup viewport
+    # Setup main axes
     viewport_lower_y = tree_height
-    if salience_profile_type:
-        viewport_lower_y += salience_text_margin / 2.0
+    if show_weights:
+        viewport_lower_y += weight_labels_margin / 2.0
     viewport_lower_y += viewport_y_padding
     axes.set_xlabel("%s step (= %s)" % (unit.get_note_names()[0], unit.get_note_value()))
-    axes.set_ylabel("note value per depth")
+    axes.set_ylabel("metrical units")
     axes.set_xlim(0 - viewport_x_padding, n_steps + viewport_x_padding)
     axes.set_xticks(step_x_positions)
     axes.set_xticklabels([*range(1, n_steps + 1)])
@@ -1503,8 +1512,20 @@ def plot_meter_tree(
     axes.set_yticks([*range(tree_height + 1)])
     axes.set_yticklabels([str(fraction) for fraction in depth_fractions])
 
+    if (show_y_grid == "auto" and metrical_root_level is not None) or show_y_grid:
+        axes.grid(axis="y")
+
+    # Setup unit level axes (for level unit level labels in the right)
+    if metrical_root_level is not None:
+        metrical_root_level = int(metrical_root_level)
+        unit_level_axes = axes.twinx()  # type: plt.Axes
+        unit_level_axes.set_ylim(*axes.get_ylim())
+        unit_level_axes.set_yticks(axes.get_yticks())
+        unit_level_axes.set_yticklabels([*range(metrical_root_level, metrical_root_level - tree_height - 1, -1)])
+        unit_level_axes.set_ylabel("metrical unit levels (root = %i)" % metrical_root_level)
+
     text_kwargs = dict(
-        horizontalalignment="center", verticalalignment="center", color="black",
+        horizontalalignment="center", verticalalignment="center", color="black", size=text_size,
         bbox={'boxstyle': "circle", 'fc': "white", 'ec': "black", 'pad': 0.5, 'lw': 1.5}
     )
 
@@ -1541,14 +1562,12 @@ def plot_meter_tree(
         raise ValueError("Given unknown tie option '%s', choose between "
                          "'tie_first', 'tie_all' or 'none'" % tie_notes)
 
-    if salience_profile_type:
-        if not TimeSignature.check_salience_profile_type(salience_profile_type):
-            raise ValueError(salience_profile_type)
-        salience_profile = time_signature.get_salience_profile(unit, salience_profile_type, 0)
+    if show_weights:
+        salience_profile = time_signature.get_salience_profile(unit, "hierarchical", metrical_root_level)
     else:
         salience_profile = None
 
-    salience_text_y_pos = tree_height + salience_text_margin
+    weight_labels_y_pos = tree_height + weight_labels_margin
 
     # Keep track of already drawn ancestor nodes
     drawn_ancestor_nodes = set()
@@ -1578,13 +1597,15 @@ def plot_meter_tree(
                 tie_width, tie_height, 0.0, 0 + 1.3, 180 - 1.3
             ))
 
-        # Add salience profile value
-        if salience_profile is not None:
-            salience = salience_profile[e_pos]
-            salience_str = str(salience) if e_type == NoteVector.NOTE else "(%s)" % salience
+        # Add event weight label
+        if show_weights:
+            assert salience_profile is not None
+            weight = salience_profile[e_pos]
+            salience_str = str(weight) if e_type == NoteVector.NOTE else "(%s)" % weight
             axes.text(
-                *Point2D(x=e_node.xy[0], y=salience_text_y_pos), salience_str, size="smaller",
-                verticalalignment="top", horizontalalignment="center"
+                *Point2D(x=e_node.xy[0], y=weight_labels_y_pos), salience_str, {
+                    **text_kwargs, 'bbox': None, 'verticalalignment': "top"
+                }
             )
 
         # Complete the hierarchy up to the root
