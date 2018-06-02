@@ -1240,36 +1240,64 @@ def get_rhythm_loop_plotter_classes():
     return find_all_concrete_subclasses(RhythmLoopPlotter)
 
 
+@parse_unit_argument
 def plot_salience_profile(
-        salience_profile: tp.Sequence[int],
-        bottom: tp.Optional[int] = None,
+        time_signature: TimeSignature,
+        unit: UnitType = Unit.EIGHTH,
+        salience_profile_type: str = "hierarchical",
+        root_weight: int = 0,
+        padding_x: int = 1,
+        padding_y: int = 1,
+        bottom_margin: int = 1,
+        show_grid: bool = False,
         axes: tp.Optional[plt.Axes] = None,
-        show: bool = False,
-        **kwargs: tp.Dict[str, tp.Any]
+        show: bool = False
 ) -> plt.Axes:
-    """Utility function to plot a metrical salience profile
+    """
+    This function computes and plots a salience profile, given a time signature.
 
-    This function plots the given salience profile and returns the matplotlib axes object on which the salience profile
-    was drawn.
+    :param time_signature:          the time signature of which to retrieve the salience profile
+    :param unit:                    the fastest time unit
+    :param salience_profile_type:   the salience profile type, one of ['hierarchical', 'equal_upbeats', 'equal_beats'].
+    :param root_weight:             the maximum metrical salience
+    :param padding_x:               vertical padding
+    :param padding_y:               horizontal padding
+    :param bottom_margin:           space between the bottom line and the smallest metrical salience value
+    :param show_grid:               set to True to show horizontal grid lines
+    :param axes:                    matplotlib axes, when given, the salience profile will be drawn on these axes
+    :param show:                    when set to True, this function will call :meth:`matplotlib.pyplot.show`
 
-    :param salience_profile: salience profile returned by :meth:`beatsearch.rhythm.TimeSignature.get_salience_profile`
-    :param bottom: the metrical salience value from which to draw the lines (defaults to min(salience_profile) - 1)
-    :param axes: matplotlib axes object, when given, the salience profile will be drawn on these axes
-    :param show: when set to True, :meth:`matplotlib.pyplot.show` will be called at the end of this function's execution
-    :param: kwargs: keyword arguments passed to :meth:`matplotlib.pyplot.Axes.stem`
     :return: the matplotlib axes object on which the salience profile was drawn
     """
 
     if not axes:
-        figure = plt.figure("Salience Profile")
+        figure = plt.figure("Metrical salience profile (%s, unit=%s)" % (
+            str(time_signature).replace("/", "-"), unit.name
+        ))
         axes = figure.add_subplot(111)
 
-    if bottom is None:
-        bottom = min(salience_profile) - 1
+    if not TimeSignature.check_salience_profile_type(salience_profile_type):
+        raise ValueError(salience_profile_type)
 
-    axes.stem(salience_profile, bottom=bottom, **kwargs)
+    salience_profile = time_signature.get_salience_profile(unit, salience_profile_type, root_weight)
+    min_salience, max_salience = min(salience_profile), max(salience_profile)
+    n_steps = len(salience_profile)
+
+    axes.set_ylabel("metrical salience")
+    axes.set_xlabel("%s step (= %s)" % (unit.get_note_names()[0], unit.get_note_value()))
+    axes.set_xticks([*range(n_steps)])
+    axes.set_xticklabels([*range(1, n_steps + 1)])
+    axes.set_yticks([*range(min_salience, max_salience + 1)])
+    axes.set_xlim(0 - padding_x, (n_steps - 1) + padding_x)
+    axes.set_ylim(min_salience - bottom_margin - padding_y, max_salience + padding_y)
+    axes.stem(salience_profile, bottom=min_salience - bottom_margin, linefmt="k--", markerfmt="ko", basefmt="k:")
+
+    if show_grid:
+        axes.grid(axis="y")
+
     if show:
         plt.show()
+
     return axes
 
 
