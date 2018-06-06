@@ -9,6 +9,7 @@ import logging
 import inspect
 import textwrap
 import itertools
+import functools
 import collections
 import numpy as np
 import typing as tp
@@ -1379,6 +1380,40 @@ class MonophonicRhythm(Rhythm, metaclass=ABCMeta):
             return MonophonicRhythmImpl(
                 onsets=combined_onsets_tuple, duration_in_ticks=duration_in_ticks,
                 resolution=res, time_signature=time_sig
+            )
+
+        @classmethod
+        def from_interval_vector(
+                cls,
+                interval_vector: tp.Iterable[tp.Union[int, str]],
+                unit: UnitType = Unit.EIGHTH,
+                time_signature: tp.Optional[tp.Union[tp.Tuple[int, int], TimeSignature]] = None,
+                velocity: int = 100,
+                offset: int = 0
+        ):  # type: () -> MonophonicRhythmImpl
+            """
+            Creates a new monophonic rhythm from the given interval vector.
+
+            :param interval_vector:  inter-onset interval sequence (post-note) (may also be a string like "34324")
+            :param unit:             musical unit in which the intervals are expressed (e.g., if unit is set to
+                                     Unit.EIGHTH (or 1/8 or "eighth"), an interval of 1 will represent one eighth note)
+            :param time_signature:   time signature of the rhythm as a (numerator, denominator) tuple or TimeSignature
+                                     object
+            :param velocity:         the velocity of the onsets as an integer, which will be the same for all onsets
+            :param offset:           the offset of the first note (e.g., if the rhythm has to start with a rest)
+
+            :return: monophonic rhythm object
+            """
+
+            binary_vector = functools.reduce(
+                lambda bin_vec, ioi: bin_vec + [1, *itertools.repeat(0, int(ioi) - 1)],
+                interval_vector, [0] * offset
+            )
+
+            return cls.from_binary_vector(
+                binary_vector=binary_vector, unit=unit,
+                time_signature=time_signature,
+                velocity=velocity
             )
 
 

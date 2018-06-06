@@ -1374,6 +1374,20 @@ class TestMonophonicRhythmFactory(TestCase):
             resolution=mock_rhythm_a.resolution, duration_in_ticks=16
         )
 
+    @patch.object(MonophonicRhythm.create, "from_binary_vector")
+    def test_from_interval_vector_str(self, mock_from_binary_vec):
+        MonophonicRhythm.create.from_interval_vector(
+            "24332",  # <- [10100010010010] without offset, [0010100010010010] with offset of 2
+            "fake-unit", (7, 8), velocity=123, offset=2
+        )
+
+        mock_from_binary_vec.assert_called_once_with(
+            binary_vector=[0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0],
+            time_signature=(7, 8),
+            velocity=123,
+            unit="fake-unit"
+        )
+
 
 class TestPolyphonicRhythmFactory(TestCase):
     def setUp(self):
