@@ -442,6 +442,9 @@ class TestChronotonicDistanceMeasure(TestCase, TestMonophonicRhythmDistanceMeasu
         self.assertEqual(result, "fake-onset-position-vector")
 
 
+# TODO Add tests for EuclideanMonophonicMTVDistance
+
+
 class TestPolyphonicRhythmDistanceMeasureBase(TestCase):
     def test_not_instantiable(self):
         self.assertRaises(Exception, PolyphonicRhythmDistanceMeasure)

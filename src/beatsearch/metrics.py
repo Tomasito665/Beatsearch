@@ -5,7 +5,7 @@ from collections import OrderedDict
 from abc import abstractmethod, ABCMeta
 from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, Unit, UnitType, parse_unit_argument
 from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, \
-    IOIDifferenceVector, OnsetPositionVector, ChronotonicChain
+    IOIDifferenceVector, OnsetPositionVector, ChronotonicChain, MonophonicMetricalTensionVector
 from beatsearch.utils import friendly_named_class, QuantizableMixin
 
 
@@ -447,6 +447,50 @@ class ChronotonicDistanceMeasure(MonophonicRhythmDistanceMeasure):
         return chronotonic_distance
 
 
+@friendly_named_class("Euclidean monophonic MTV distance")
+class EuclideanMonophonicMTVDistance(MonophonicRhythmDistanceMeasure):
+    """Computes the euclidean distance between two rhythms in metrical tension vector space in range [0, 1]"""
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, length_policy="multiple",
+                 salience_profile_type: str = "equal_upbeats", cyclic: bool = True):
+        self._mtv_extractor = MonophonicMetricalTensionVector(unit, salience_profile_type, True, cyclic)
+        super().__init__(unit, length_policy)
+
+    def set_unit(self, unit: tp.Optional[UnitType]) -> None:
+        super().set_unit(unit)
+        self._mtv_extractor.set_unit(unit)
+
+    def __get_iterable__(self, rhythm: MonophonicRhythm):
+        assert self._mtv_extractor.unit == self.unit
+        return self._mtv_extractor.process(rhythm)
+
+    @staticmethod
+    def __compute_distance__(n: int, mtv_a: tp.Tuple[float, ...], mtv_b: tp.Tuple[float, ...], *args):
+        delta = (mtv_a[i % n] - mtv_b[i % n] for i in range(n))
+        distance = math.sqrt(sum(d * d for d in delta))
+        return distance / math.sqrt(n)  # <- math.sqt(n) is max distance in normalized mtv space
+
+    #########################################
+    # Forwarded properties to MTV extractor #
+    #########################################
+
+    @property
+    def salience_profile_type(self):
+        return self._mtv_extractor.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._mtv_extractor.salience_profile_type = salience_profile_type
+
+    @property
+    def cyclic(self):
+        return self._mtv_extractor.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic):
+        self._mtv_extractor.cyclic = cyclic
+
+
 TRACK_WILDCARDS = ["*", "a*", "b*"]  # NOTE: Don't change the wildcard order or the code will break
 
 
@@ -622,6 +666,7 @@ __all__ = [
     # Monophonic rhythm distance measure implementations
     'HammingDistanceMeasure', 'EuclideanIntervalVectorDistanceMeasure',
     'IntervalDifferenceVectorDistanceMeasure', 'SwapDistanceMeasure', 'ChronotonicDistanceMeasure',
+    'EuclideanMonophonicMTVDistance',
 
     # Polyphonic rhythm distance measure implementations
     'SummedMonophonicRhythmDistance'
