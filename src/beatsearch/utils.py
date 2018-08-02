@@ -376,11 +376,12 @@ def normalize_directory(directory):
     return directory
 
 
+# noinspection SpellCheckingInspection
 def generate_unique_abbreviation(
         label: str,
         max_len: int = 3,
         taken_abbreviations: tp.Optional[tp.Iterable[str]] = None,
-        dictionary: tp.Union[tp.Tuple[str], str] = "cdfghjklmnpqrstvxz"
+        dictionary: tp.Union[tp.Tuple[str], str] = "cdfghjklmnpqrstvxz",
 ):
     """
     Returns a unique abbreviation of the given label.
@@ -395,7 +396,6 @@ def generate_unique_abbreviation(
     if not label:
         raise ValueError
 
-    label = label.lower()
     taken_abbreviations = taken_abbreviations or set()
 
     if len(label) <= max_len and label not in taken_abbreviations:
@@ -403,6 +403,7 @@ def generate_unique_abbreviation(
 
     # filter out the characters which are not in the given dictionary (or keep the name if
     # it doesn't contain any characters of the given dictionary)
+    label = label.lower()
     essence = "".join(filter(lambda c: c in dictionary, label)) or label
 
     if len(essence) < max_len and essence not in taken_abbreviations:
@@ -425,6 +426,7 @@ def generate_unique_abbreviation(
     return abbreviation
 
 
+# noinspection SpellCheckingInspection
 def generate_abbreviations(
         labels: tp.Iterable[str],
         max_abbreviation_len: int = 3,
