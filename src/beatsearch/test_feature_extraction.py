@@ -886,6 +886,10 @@ class TestPolyphonicMetricalTensionVector(TestPolyphonicRhythmFeatureExtractorIm
         actual_tension_vec = self._call_process(extractor)
         npt.assert_almost_equal(actual_tension_vec, expected_tension_vec)
 
+    # NOTE Normalized polyphonic MTV elements range out of [0, 1]. This is because we
+    # use hardcoded monophonic MTVs which are not normalized. This test is about the
+    # polyphonic part, so it's ok for the values to be greater than 1.0 (in the real
+    # world, however, they shouldn't).
     def test_process_normalized_without_combination_tracks(self):
         weights = {self.KCK: 2, self.SNR: 1, self.HHT: 0.5}
         weight_normalizer = sum(weights.values())
