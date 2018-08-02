@@ -5,8 +5,9 @@ from collections import OrderedDict
 from abc import abstractmethod, ABCMeta
 from beatsearch.rhythm import MonophonicRhythm, PolyphonicRhythm, Unit, UnitType, parse_unit_argument
 from beatsearch.feature_extraction import BinaryOnsetVector, IOIVector, \
-    IOIDifferenceVector, OnsetPositionVector, ChronotonicChain, MonophonicMetricalTensionVector
-from beatsearch.utils import friendly_named_class, QuantizableMixin
+    IOIDifferenceVector, OnsetPositionVector, ChronotonicChain, MonophonicMetricalTensionVector, \
+    PolyphonicMetricalTensionVector
+from beatsearch.utils import friendly_named_class, QuantizableMixin, InstrumentWeightedMixin
 
 
 class DistanceMeasure(object):
@@ -659,6 +660,74 @@ class SummedMonophonicRhythmDistance(PolyphonicRhythmDistanceMeasure):
         return average_distance / duration if self.normalize else average_distance
 
 
+class EuclideanPolyphonicMTVDistance(PolyphonicRhythmDistanceMeasure, InstrumentWeightedMixin):
+    """Computes the euclidean distance between two rhythms in polyphonic metrical
+    tension vector space in range [0, 1]"""
+
+    def __init__(self, unit: UnitType = Unit.EIGHTH, salience_profile_type: str = "equal_upbeats",
+                 cyclic: bool = True, instrument_weights: tp.Optional[tp.Dict[str, float]] = None,
+                 include_combination_tracks: bool = False):
+        self._mtv_extractor = PolyphonicMetricalTensionVector(
+            unit, salience_profile_type=salience_profile_type,
+            normalize=True, cyclic=cyclic, instrument_weights=instrument_weights,
+            include_combination_tracks=include_combination_tracks
+        )
+
+    def get_distance(self, rhythm_a: PolyphonicRhythm, rhythm_b: PolyphonicRhythm) -> tp.Union[float, int]:
+        mtv_a = self._mtv_extractor.process(rhythm_a)
+        mtv_b = self._mtv_extractor.process(rhythm_b)
+        n = max(len(mtv_a), len(mtv_b))
+        delta = (mtv_a[i % n] - mtv_b[i % n] for i in range(n))
+        distance = math.sqrt(sum(d * d for d in delta))
+        return distance / math.sqrt(n)  # <- math.sqt(n) is max distance in normalized mtv space
+
+    #########################################
+    # Forwarded properties to MTV extractor #
+    #########################################
+
+    @property
+    def salience_profile_type(self):
+        return self._mtv_extractor.salience_profile_type
+
+    @salience_profile_type.setter
+    def salience_profile_type(self, salience_profile_type: str):
+        self._mtv_extractor.salience_profile_type = salience_profile_type
+
+    @property
+    def cyclic(self):
+        return self._mtv_extractor.cyclic
+
+    @cyclic.setter
+    def cyclic(self, cyclic):
+        self._mtv_extractor.cyclic = cyclic
+
+    @property
+    def include_combination_tracks(self):
+        return self._mtv_extractor.include_combination_tracks
+
+    @include_combination_tracks.setter
+    def include_combination_tracks(self, include_combination_tracks):
+        self._mtv_extractor.include_combination_tracks = include_combination_tracks
+
+    @property
+    def unit(self) -> Unit:
+        return self._mtv_extractor.unit
+
+    @unit.setter
+    def unit(self, unit: UnitType):
+        self._mtv_extractor.unit = unit
+
+    ######################################
+    # Forwarded methods to MTV extractor #
+    ######################################
+
+    def set_instrument_weights(self, instrument_weights: tp.Optional[tp.Mapping[str, float]]) -> None:
+        self._mtv_extractor.set_instrument_weights(instrument_weights)
+
+    def get_instrument_weights(self) -> tp.Mapping[str, float]:
+        return self._mtv_extractor.get_instrument_weights()
+
+
 __all__ = [
     # Distance measure abstract base classes
     'DistanceMeasure', 'MonophonicRhythmDistanceMeasure', 'PolyphonicRhythmDistanceMeasure',
@@ -669,5 +738,5 @@ __all__ = [
     'EuclideanMonophonicMTVDistance',
 
     # Polyphonic rhythm distance measure implementations
-    'SummedMonophonicRhythmDistance'
+    'SummedMonophonicRhythmDistance', 'EuclideanPolyphonicMTVDistance'
 ]

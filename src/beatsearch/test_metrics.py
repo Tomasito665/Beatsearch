@@ -443,6 +443,7 @@ class TestChronotonicDistanceMeasure(TestCase, TestMonophonicRhythmDistanceMeasu
 
 
 # TODO Add tests for EuclideanMonophonicMTVDistance
+# TODO Add tests for EuclideanPolyphonicMTVDistance
 
 
 class TestPolyphonicRhythmDistanceMeasureBase(TestCase):
